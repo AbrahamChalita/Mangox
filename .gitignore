@@ -1,0 +1,13 @@
+.deps/
+
+# Xcode / Swift
+.DS_Store
+DerivedData/
+.build/
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+
+# Local build output (custom paths)
+.derivedData/
+.derivedDataBuild/

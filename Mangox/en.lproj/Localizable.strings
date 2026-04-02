@@ -1,0 +1,20 @@
+/* Indoor dashboard — session mode */
+"indoor.mode.free_ride" = "Free ride";
+"indoor.mode.route" = "Route";
+"indoor.mode.gpx_hint" = "Add a GPX when connecting for grade simulation.";
+
+/* Live performance */
+"indoor.live_performance.title" = "LIVE PERFORMANCE";
+"indoor.session_stats.title" = "Session stats";
+"indoor.session_stats.expand_hint" = "Shows NP, IF, TSS, and related metrics.";
+"indoor.session_stats.a11y_expanded" = "Expanded";
+"indoor.session_stats.a11y_collapsed" = "Collapsed";
+"indoor.ftp.estimated_hint" = "Set FTP in Settings for IF and TSS.";
+
+/* Power graph */
+"indoor.power_graph.title" = "POWER";
+"indoor.power_graph.empty" = "Pedal to see your power curve";
+"indoor.power_graph.empty_accessibility" = "Power chart, empty until you start pedaling";
+
+/* Trainer */
+"indoor.trainer.route_sim_footer" = "Route simulation appears when a GPX route is loaded.";

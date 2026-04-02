@@ -1,0 +1,51 @@
+{
+  "originHash" : "f3ad12aea86c4e3c4fcfd76160279248f57e947093a50e91d20f089c8e214052",
+  "pins" : [
+    {
+      "identity" : "antmessageprotocol",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/FitnessKit/AntMessageProtocol",
+      "state" : {
+        "revision" : "f0350ce0eea3057af8a34b85c0fda25c2052b094",
+        "version" : "1.1.1"
+      }
+    },
+    {
+      "identity" : "datadecoder",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/FitnessKit/DataDecoder",
+      "state" : {
+        "revision" : "8ca8aefc505833d3ca67e6070169472a7103594e",
+        "version" : "5.0.0"
+      }
+    },
+    {
+      "identity" : "fitdataprotocol",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/FitnessKit/FitDataProtocol",
+      "state" : {
+        "revision" : "b93ef5ea736d32ec0ab16d4eea5b09972887cd8e",
+        "version" : "2.1.6"
+      }
+    },
+    {
+      "identity" : "fitnessunits",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/FitnessKit/FitnessUnits",
+      "state" : {
+        "revision" : "12af59a7025decf46b7e0a4bb7b1eb480b1c9e5c",
+        "version" : "3.1.0"
+      }
+    },
+    {
+      "identity" : "purchases-ios-spm",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/RevenueCat/purchases-ios-spm.git",
+      "state" : {
+        "revision" : "a1bf83fc76099c3d801aa7fc2543c3b9e488cd00",
+        "version" : "5.67.0"
+      }
+    }
+  ],
+  "version" : 3
+}

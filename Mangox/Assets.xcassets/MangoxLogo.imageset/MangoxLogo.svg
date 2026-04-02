@@ -1,0 +1,178 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0F1318"/>
+      <stop offset="50%" stop-color="#0A0E14"/>
+      <stop offset="100%" stop-color="#060810"/>
+    </linearGradient>
+
+    <!-- Liquid Glass gradient — translucent, refractive feel -->
+    <linearGradient id="glassGrad" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="30%" stop-color="#C8E6DC" stop-opacity="0.12"/>
+      <stop offset="60%" stop-color="#88CCBB" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.02"/>
+    </linearGradient>
+
+    <!-- Glass highlight shimmer -->
+    <linearGradient id="glassHighlight" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="40%" stop-color="#FFFFFF" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <!-- Main teal arc gradient -->
+    <linearGradient id="arcGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3AD9A0"/>
+      <stop offset="50%" stop-color="#4FC3A1"/>
+      <stop offset="100%" stop-color="#35C98E"/>
+    </linearGradient>
+
+    <!-- M letterform gradient — crisp white to soft grey -->
+    <linearGradient id="mGrad" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="60%" stop-color="#E8EDF2"/>
+      <stop offset="100%" stop-color="#C0CAD6"/>
+    </linearGradient>
+
+    <!-- Accent warm gradient for speed lines -->
+    <linearGradient id="accentGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#F0C34E" stop-opacity="0.0"/>
+      <stop offset="40%" stop-color="#F0C34E"/>
+      <stop offset="100%" stop-color="#F07A3A"/>
+    </linearGradient>
+
+    <!-- Soft glow filters -->
+    <filter id="glowTeal" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <filter id="glowSoft" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="24"/>
+    </filter>
+    <filter id="glassBlur" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6" result="blur"/>
+      <feOffset dx="0" dy="3" result="offset"/>
+      <feComposite in="SourceGraphic" in2="offset" operator="over"/>
+    </filter>
+    <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+
+    <clipPath id="roundedClip">
+      <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224"/>
+    </clipPath>
+
+    <!-- Glass pill shape for the M container -->
+    <clipPath id="glassPillClip">
+      <rect x="195" y="285" width="634" height="500" rx="56" ry="56"/>
+    </clipPath>
+  </defs>
+
+  <!-- Clipped rounded icon shape -->
+  <g clip-path="url(#roundedClip)">
+
+    <!-- Background -->
+    <rect width="1024" height="1024" fill="url(#bgGrad)"/>
+
+    <!-- Subtle radial ambient glow behind center -->
+    <ellipse cx="512" cy="440" rx="420" ry="320" fill="#4FC3A1" opacity="0.035"/>
+    <ellipse cx="512" cy="480" rx="280" ry="200" fill="#3AD9A0" opacity="0.025"/>
+
+    <!-- === LIQUID GLASS PANEL behind M === -->
+    <g filter="url(#dropShadow)">
+      <rect x="195" y="285" width="634" height="500" rx="56" ry="56"
+        fill="url(#glassGrad)" opacity="0.9"/>
+    </g>
+
+    <!-- Glass panel inner border (top highlight) -->
+    <rect x="195" y="285" width="634" height="500" rx="56" ry="56"
+      fill="none" stroke="url(#glassHighlight)" stroke-width="1.5" opacity="0.7"/>
+
+    <!-- Refraction / specular highlight streak across glass -->
+    <g clip-path="url(#glassPillClip)" opacity="0.12">
+      <ellipse cx="380" cy="340" rx="300" ry="60" fill="#FFFFFF" transform="rotate(-12, 380, 340)"/>
+    </g>
+
+    <!-- === POWER ARC (top) === -->
+
+    <!-- Outer glow on the arc -->
+    <g filter="url(#glowSoft)" opacity="0.25">
+      <path d="M272 400 A270 270 0 0 1 512 138 A270 270 0 0 1 752 400"
+        fill="none" stroke="#4FC3A1" stroke-width="8" stroke-linecap="round"/>
+    </g>
+
+    <!-- Track arc — faint background ring -->
+    <g opacity="0.08">
+      <path d="M282 410 A260 260 0 0 1 512 150 A260 260 0 0 1 742 410"
+        fill="none" stroke="#4FC3A1" stroke-width="26" stroke-linecap="round"/>
+    </g>
+
+    <!-- Active power arc sweep — teal with glow -->
+    <g filter="url(#glowTeal)">
+      <path d="M282 420 A265 265 0 0 1 512 148 A265 265 0 0 1 742 420"
+        fill="none" stroke="url(#arcGrad)" stroke-width="22" stroke-linecap="round"
+        opacity="0.92"/>
+    </g>
+
+    <!-- Tick marks on the arc -->
+    <g stroke="#4FC3A1" stroke-width="2.5" opacity="0.35" stroke-linecap="round">
+      <line x1="318" y1="228" x2="332" y2="242"/>
+      <line x1="512" y1="136" x2="512" y2="156"/>
+      <line x1="706" y1="228" x2="692" y2="242"/>
+    </g>
+
+    <!-- === THE "M" LETTERFORM — clean, modern, geometric === -->
+    <g filter="url(#glassBlur)">
+      <path d="
+        M 275 720
+        L 275 400
+        Q 280 388 292 400
+        L 474 610
+        Q 494 636 512 650
+        Q 530 636 550 610
+        L 732 400
+        Q 744 388 749 400
+        L 749 720
+        L 668 720
+        L 668 530
+        L 545 688
+        Q 530 708 512 708
+        Q 494 708 479 688
+        L 356 530
+        L 356 720
+        Z
+      " fill="url(#mGrad)" opacity="0.96"/>
+    </g>
+
+    <!-- Speed lines — motion streaks on left side -->
+    <g stroke="url(#accentGrad)" stroke-linecap="round" opacity="0.45">
+      <line x1="115" y1="430" x2="210" y2="430" stroke-width="3.5"/>
+      <line x1="130" y1="468" x2="215" y2="468" stroke-width="2.8"/>
+      <line x1="120" y1="506" x2="208" y2="506" stroke-width="3"/>
+    </g>
+
+    <!-- Power dot at the arc tip — zone indicator -->
+    <circle cx="742" cy="420" r="11" fill="#4FC3A1" opacity="0.9"/>
+    <circle cx="742" cy="420" r="5.5" fill="#FFFFFF" opacity="0.95"/>
+
+    <!-- === WORDMARK === -->
+
+    <!-- Thin separator line above wordmark -->
+    <line x1="390" y1="770" x2="634" y2="770" stroke="#4FC3A1" stroke-width="1.5" opacity="0.18" stroke-linecap="round"/>
+
+    <!-- "MANGOX" text -->
+    <g opacity="0.38">
+      <text x="512" y="828" font-family="system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif"
+        font-size="58" font-weight="600" fill="#FFFFFF" text-anchor="middle" letter-spacing="16">
+        MANGOX
+      </text>
+    </g>
+
+    <!-- Subtle glass reflection overlay at top of icon -->
+    <g opacity="0.06">
+      <rect x="0" y="0" width="1024" height="380" fill="url(#glassHighlight)"/>
+    </g>
+
+  </g>
+</svg>
