@@ -114,14 +114,22 @@ struct GoalProgressPill: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white.opacity(0.38))
                         .tracking(1.1)
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text(currentValue)
                             .font(.system(size: 26, weight: .heavy, design: .monospaced))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(isComplete ? AppColor.success : .white)
                             .contentTransition(.numericText())
-                        Text("/ \(targetValue) km")
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.38))
+                            .minimumScaleFactor(0.72)
+                            .lineLimit(1)
+                        Text("km")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(isComplete ? AppColor.success.opacity(0.7) : .white.opacity(0.55))
+                        if !isComplete {
+                            Text("/ \(targetValue)")
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.38))
+                                .lineLimit(1)
+                        }
                     }
                 }
 

@@ -19,6 +19,8 @@ struct PowerGraphView: View {
     var chartHeightCompact: CGFloat? = nil
     /// Line-only strip with no area fill — same data, less vertical weight than the default chart.
     var flatStrip: Bool = false
+    /// Canvas-based zone bar strip — colored columns (height ∝ power, color = zone). Much flatter than a chart.
+    var zoneBar: Bool = false
 
     /// Downsample to a fixed cap before passing to Chart — avoids rendering 7200+ marks
     /// during long rides. LTTB-like: keep first/last, evenly subsample the middle.
@@ -37,16 +39,18 @@ struct PowerGraphView: View {
         } else {
             source = powerHistory
         }
-        return source.map {
+        // Use sequential index (not elapsed seconds) as x so pause/resume gaps don't compress old samples.
+        return source.enumerated().map { (i, s) in
             PoweredSample(
-                elapsed: $0.elapsed,
-                power: $0.power,
-                zoneKey: "Z\(PowerZone.zone(for: $0.power).id)"
+                elapsed: i,
+                power: s.power,
+                zoneKey: "Z\(PowerZone.zone(for: s.power).id)"
             )
         }
     }
 
     private var chartHeight: CGFloat {
+        if zoneBar { return compact ? 20 : 26 }
         if flatStrip {
             if compact, let h = chartHeightCompact { return h }
             return compact ? 38 : 48
@@ -56,7 +60,7 @@ struct PowerGraphView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: flatStrip ? 4 : 6) {
+        VStack(alignment: .leading, spacing: zoneBar ? 6 : (flatStrip ? 4 : 6)) {
             Text(IndoorDashboardL10n.powerGraphTitle)
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(.white.opacity(0.3))
@@ -65,6 +69,9 @@ struct PowerGraphView: View {
             let samples = annotatedSamples
             if samples.isEmpty {
                 powerGraphEmptyPlaceholder
+                    .frame(height: chartHeight)
+            } else if zoneBar {
+                zoneBarCanvas(samples: samples)
                     .frame(height: chartHeight)
             } else {
                 Chart(samples) { sample in
@@ -93,13 +100,34 @@ struct PowerGraphView: View {
                 .frame(height: chartHeight)
             }
         }
-        .padding(flatStrip ? 10 : 12)
+        .padding(zoneBar ? 10 : (flatStrip ? 10 : 12))
         .background(Color.white.opacity(0.02))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
         )
+    }
+
+    private func zoneBarCanvas(samples: [PoweredSample]) -> some View {
+        Canvas { context, size in
+            let n = CGFloat(samples.count)
+            guard n > 0 else { return }
+            let maxP = max(CGFloat(powerHistoryMax), 1)
+            let sliceW = size.width / n
+            for (i, sample) in samples.enumerated() {
+                let zone = PowerZone.zone(for: sample.power)
+                let fillH = max(2, size.height * CGFloat(sample.power) / maxP)
+                let rect = CGRect(
+                    x: CGFloat(i) * sliceW,
+                    y: size.height - fillH,
+                    width: max(1, sliceW - 0.5),
+                    height: fillH
+                )
+                context.fill(Path(rect), with: .color(zone.color.opacity(0.72)))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
     private var styleScale: KeyValuePairs<String, Color> {

@@ -189,7 +189,8 @@ final class AIService {
     }
 
     func hasReachedFreeLimit(isPro: Bool) -> Bool {
-        return false // paywall disabled for testing
+        if isPro { return false }
+        return todayMessageCount >= Self.freeDailyLimit
     }
 
     private func incrementDailyCount() {
@@ -244,6 +245,7 @@ final class AIService {
     func sendMessage(_ text: String, isPro: Bool, modelContext: ModelContext) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        guard !hasReachedFreeLimit(isPro: isPro) else { return }
 
         incrementDailyCount()
 

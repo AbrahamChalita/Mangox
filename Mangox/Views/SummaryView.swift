@@ -262,6 +262,22 @@ struct SummaryView: View {
 
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
+                    shareToInstagramStories()
+                } label: {
+                    Image(systemName: "camera.fill")
+                }
+                .tint(
+                    Color(
+                        red: 0.88,
+                        green: 0.19,
+                        blue: 0.42
+                    )
+                )
+                .accessibilityLabel("Share to Instagram Stories")
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
                     showExportModal = true
                 } label: {
                     Image(systemName: "square.and.arrow.up")
@@ -655,6 +671,38 @@ struct SummaryView: View {
             } catch {
                 actionError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
+        }
+    }
+
+    /// Renders the Strava-style summary card into a 9:16 story image and opens Instagram’s composer (no login).
+    /// Falls back to the system share sheet if Instagram isn’t installed.
+    private func shareToInstagramStories() {
+        Task { @MainActor in
+            guard let workout else { return }
+            guard dataReady else { return }
+            let dominantZone = PowerZone.zone(for: Int(workout.avgPower.rounded()))
+            let buckets = zoneBuckets.map { (zone: $0.zone, percent: $0.percent) }
+            let samples = sortedSamples
+            let mmp = PersonalRecords.computeMMP(for: samples)
+            let prFlags: [NewPRFlag] = mmp.map { PersonalRecords.shared.newPRs(for: $0) } ?? []
+            guard let storyImage = InstagramStoryShare.renderWorkoutStory(
+                workout: workout,
+                dominantZone: dominantZone,
+                sortedSamples: samples,
+                mmp: mmp,
+                newPRFlags: prFlags,
+                routeName: workout.savedRouteName ?? routeManager.routeName,
+                totalElevationGain: workout.elevationGain > 0 ? workout.elevationGain : routeManager.totalElevationGain,
+                zoneBuckets: buckets
+            ) else {
+                actionError = "Couldn’t create a story image for this ride."
+                return
+            }
+            if InstagramStoryShare.presentStories(with: storyImage) {
+                return
+            }
+            shareItems = [storyImage]
+            showShareSheet = true
         }
     }
 

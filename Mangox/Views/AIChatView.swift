@@ -18,6 +18,7 @@ struct AIChatView: View {
     @State private var showGeneratePlan = false
     @State private var showHistory = false
     @FocusState private var inputFocused: Bool
+    @State private var scrollBottomDebounceTask: Task<Void, Never>?
 
     /// Cached once — greeting depends only on launch hour, not every render.
     private let greetingText: String = {
@@ -36,16 +37,34 @@ struct AIChatView: View {
         "Generate a training plan"
     ]
 
-    var body: some View {
-        ZStack {
-            AppColor.bg.ignoresSafeArea()
+    /// Horizontal padding on the message stack is 16 + 16; cap keeps bubbles readable on iPad.
+    private static func chatBubbleMaxWidth(containerWidth: CGFloat) -> CGFloat {
+        let horizontalPadding: CGFloat = 32
+        return min(560, max(0, containerWidth - horizontalPadding))
+    }
 
-            VStack(spacing: 0) {
-                contextHeader
-                messagesArea
+    /// Computed once per layout pass — avoids O(n²) `lastIndex` work inside every row.
+    private var latestAssistantIndex: Int? {
+        aiService.messages.lastIndex { $0.role == .assistant }
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let bubbleMaxWidth = Self.chatBubbleMaxWidth(containerWidth: geo.size.width)
+            ZStack {
+                AppColor.bg.ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    contextHeader
+                    messagesArea(bubbleMaxWidth: bubbleMaxWidth)
+                }
+                .safeAreaInset(edge: .bottom) {
+                    inputBar.padding(.bottom, 4)
+                }
             }
-            .safeAreaInset(edge: .bottom) {
-                inputBar.padding(.bottom, 4)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onDisappear {
+                scrollBottomDebounceTask?.cancel()
             }
         }
         .navigationTitle("Coach")
@@ -54,15 +73,19 @@ struct AIChatView: View {
             ToolbarItem(placement: .topBarLeading) {
                 Button("Close") { dismiss() }
                     .foregroundStyle(.white.opacity(0.6))
-                    .font(.system(size: 16))
+                    .font(.body)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 14) {
+                HStack(spacing: 6) {
                     Button {
                         showHistory = true
                     } label: {
                         Image(systemName: "clock.fill")
-                            .font(.system(size: 16))
+                            .font(.body)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .foregroundStyle(.white.opacity(0.5))
                     .accessibilityLabel("Chat history")
@@ -72,6 +95,10 @@ struct AIChatView: View {
                     } label: {
                         Label("Generate Plan", systemImage: "calendar.badge.plus")
                             .font(.system(size: 14, weight: .medium))
+                            .labelStyle(.titleAndIcon)
+                            .frame(minHeight: 44)
+                            .padding(.horizontal, 4)
+                            .contentShape(Rectangle())
                     }
                     .foregroundStyle(AppColor.mango)
 
@@ -79,7 +106,9 @@ struct AIChatView: View {
                         aiService.createNewSession(modelContext: modelContext)
                     } label: {
                         Image(systemName: "square.and.pencil")
-                            .font(.system(size: 16))
+                            .font(.body)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .foregroundStyle(.white.opacity(0.5))
                     .accessibilityLabel("New conversation")
@@ -138,7 +167,7 @@ struct AIChatView: View {
 
     // MARK: - Messages Area
 
-    private var messagesArea: some View {
+    private func messagesArea(bubbleMaxWidth: CGFloat) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 if aiService.messages.isEmpty && !aiService.isLoading {
@@ -149,10 +178,11 @@ struct AIChatView: View {
                         ForEach(Array(aiService.messages.enumerated()), id: \.element.id) { index, message in
                             ChatMessageRow(
                                 message: message,
-                                isLatestAssistant: message.role == .assistant && index == aiService.messages.lastIndex(where: { $0.role == .assistant }),
+                                isLatestAssistant: message.role == .assistant
+                                    && (latestAssistantIndex.map { $0 == index } ?? false),
+                                bubbleMaxWidth: bubbleMaxWidth,
                                 onActionTap: { label in sendMessage(label) }
                             )
-                            .id(message.id)
                             .transition(.asymmetric(
                                 insertion: .move(edge: .bottom).combined(with: .opacity),
                                 removal: .opacity
@@ -160,7 +190,7 @@ struct AIChatView: View {
                         }
 
                         if aiService.isLoading {
-                            TypingIndicatorRow()
+                            TypingIndicatorRow(bubbleMaxWidth: bubbleMaxWidth)
                                 .id("typing")
                                 .transition(.asymmetric(
                                     insertion: .move(edge: .bottom).combined(with: .opacity),
@@ -181,9 +211,21 @@ struct AIChatView: View {
                     proxy.scrollTo("CHAT_BOTTOM", anchor: .bottom)
                 }
             }
+            .onChange(of: aiService.isLoading) { _, loading in
+                if loading {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo("CHAT_BOTTOM", anchor: .bottom)
+                    }
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .scrollToBottom)) { _ in
-                withAnimation(.easeOut(duration: 0.15)) {
-                    proxy.scrollTo("CHAT_BOTTOM", anchor: .bottom)
+                scrollBottomDebounceTask?.cancel()
+                scrollBottomDebounceTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(45))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        proxy.scrollTo("CHAT_BOTTOM", anchor: .bottom)
+                    }
                 }
             }
         }
@@ -239,9 +281,10 @@ struct AIChatView: View {
                 prompt: Text("Ask your coach...").foregroundColor(.white.opacity(0.35)),
                 axis: .vertical
             )
-            .font(.system(size: 16))
+            .font(.body)
             .foregroundStyle(.white)
             .tint(AppColor.mango)
+            .textInputAutocapitalization(.sentences)
             .lineLimit(1...5)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -275,7 +318,7 @@ struct AIChatView: View {
             ZStack {
                 Circle()
                     .fill(canSend ? AppColor.mango : Color.white.opacity(0.12))
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
                 Image(systemName: "arrow.up")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(canSend ? .black : .white.opacity(0.3))
@@ -284,7 +327,11 @@ struct AIChatView: View {
         .buttonStyle(MangoxPressStyle())
         .disabled(!canSend)
         .animation(.spring(response: 0.25, dampingFraction: 0.75), value: canSend)
-        .accessibilityLabel("Send message")
+        .accessibilityLabel(aiService.isLoading ? "Sending message" : "Send message")
+        .accessibilityHintIf(
+            !canSend && aiService.hasReachedFreeLimit(isPro: purchases.isPro),
+            "Daily message limit reached. Upgrade to Pro to continue."
+        )
     }
 
     // MARK: - Actions
@@ -308,22 +355,26 @@ struct ChatMessageRow: View {
     let message: ChatMessage
     /// Only the newest assistant message shows chips & follow-up — avoids cluttering history.
     let isLatestAssistant: Bool
+    let bubbleMaxWidth: CGFloat
     let onActionTap: (String) -> Void
 
     var body: some View {
         VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
             if message.role == .user {
-                UserBubble(text: message.content)
+                UserBubble(text: message.content, bubbleMaxWidth: bubbleMaxWidth)
             } else {
                 if message.category == "error" {
-                    ErrorBubble(text: message.content, onRetry: { onActionTap("Try again") })
+                    ErrorBubble(text: message.content, onRetry: { onActionTap("Try again") }, bubbleMaxWidth: bubbleMaxWidth)
                 } else {
-                    AIBubble(message: message)
+                    if isLatestAssistant && !message.thinkingSteps.isEmpty {
+                        ThinkingStepsCard(steps: message.thinkingSteps, autoExpand: true, maxWidth: bubbleMaxWidth)
+                    }
+                    AIBubble(message: message, bubbleMaxWidth: bubbleMaxWidth)
                 }
 
                 if isLatestAssistant {
                     if let followUp = message.followUpQuestion, !followUp.isEmpty {
-                        AIQuestionLabel(text: followUp)
+                        AIQuestionLabel(text: followUp, bubbleMaxWidth: bubbleMaxWidth)
                     }
                     if !message.suggestedActions.isEmpty {
                         ActionChipsRow(actions: message.suggestedActions, onTap: onActionTap)
@@ -340,10 +391,11 @@ struct ChatMessageRow: View {
 
 struct UserBubble: View {
     let text: String
+    let bubbleMaxWidth: CGFloat
 
     var body: some View {
         Text(text)
-            .font(.system(size: 16))
+            .font(.body)
             .foregroundStyle(.white.opacity(0.92))
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -353,7 +405,10 @@ struct UserBubble: View {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .strokeBorder(AppColor.mango.opacity(0.22), lineWidth: 1)
             )
-            .frame(maxWidth: 280, alignment: .trailing)
+            .frame(maxWidth: bubbleMaxWidth, alignment: .trailing)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Your message")
+            .accessibilityValue(text)
             .contextMenu {
                 Button {
                     UIPasteboard.general.string = text
@@ -371,7 +426,9 @@ struct UserBubble: View {
 
 struct AIBubble: View {
     @Environment(AIService.self) private var aiService
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     let message: ChatMessage
+    let bubbleMaxWidth: CGFloat
 
     @State private var visibleLength: Int = 0
     @State private var animationDone: Bool = false
@@ -381,12 +438,14 @@ struct AIBubble: View {
         message.shouldAnimate && aiService.shouldAnimateMessage(message.id)
     }
 
+    /// Plain text while typewriting avoids expensive markdown parsing on every character.
     private var displayText: AttributedString {
         if animationDone || !shouldRunAnimation {
             if let cached = parsedMarkdown { return cached }
             return parseMarkdown(message.content)
         }
-        return AttributedString(String(message.content.prefix(visibleLength)))
+        let prefix = String(message.content.prefix(visibleLength))
+        return AttributedString(prefix)
     }
 
     private var categoryIcon: String {
@@ -431,7 +490,7 @@ struct AIBubble: View {
 
             // Content
             Text(displayText)
-                .font(.system(size: 16))
+                .font(.body)
                 .foregroundStyle(.white.opacity(0.88))
                 .lineSpacing(3)
                 .padding(.horizontal, 16)
@@ -472,10 +531,14 @@ struct AIBubble: View {
                         .padding(.top, 8)
 
                     ForEach(Array(message.references.enumerated()), id: \.offset) { _, ref in
-                        if let url = ref.url, !url.isEmpty {
-                            Link(destination: URL(string: url)!) {
+                        if let urlStr = ref.url, !urlStr.isEmpty,
+                           let url = URL(string: urlStr),
+                           let scheme = url.scheme?.lowercased(),
+                           scheme == "http" || scheme == "https" {
+                            Link(destination: url) {
                                 referenceRow(title: ref.title, snippet: ref.snippet)
                             }
+                            .accessibilityHint("Opens in Safari")
                         } else {
                             referenceRow(title: ref.title, snippet: ref.snippet)
                         }
@@ -490,7 +553,10 @@ struct AIBubble: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
         )
-        .frame(maxWidth: 320, alignment: .leading)
+        .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Coach")
+        .accessibilityValue(message.content)
         .contextMenu {
             Button {
                 UIPasteboard.general.string = message.content
@@ -506,6 +572,10 @@ struct AIBubble: View {
                 finishAnimation()
                 return
             }
+            if accessibilityReduceMotion {
+                finishAnimation()
+                return
+            }
             let count = message.content.count
             let msPerChar = max(3.0, min(18.0, 1800.0 / Double(count)))
             let nsPer = UInt64(msPerChar * 1_000_000)
@@ -513,7 +583,7 @@ struct AIBubble: View {
             do {
                 for i in 0..<count {
                     visibleLength = i + 1
-                    if i % 10 == 0 {
+                    if i % 28 == 0 || i == count - 1 {
                         NotificationCenter.default.post(name: .scrollToBottom, object: nil)
                     }
                     try await Task.sleep(nanoseconds: nsPer)
@@ -565,6 +635,7 @@ struct AIBubble: View {
 struct ErrorBubble: View {
     let text: String
     let onRetry: () -> Void
+    let bubbleMaxWidth: CGFloat
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -587,15 +658,17 @@ struct ErrorBubble: View {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11, weight: .semibold))
                     Text("Try again")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.vertical, 10)
+                .frame(minHeight: 44)
                 .background(AppColor.red.opacity(0.7))
                 .clipShape(Capsule())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Try again")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -611,29 +684,36 @@ struct ErrorBubble: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(AppColor.red.opacity(0.25), lineWidth: 1)
         )
-        .frame(maxWidth: 300, alignment: .leading)
+        .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
     }
 }
 
 // MARK: - Thinking Steps Card
 
 struct ThinkingStepsCard: View {
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     let steps: [String]
     /// Auto-expands for the newest message; collapses for history.
     let autoExpand: Bool
+    let maxWidth: CGFloat
     @State private var expanded: Bool
 
-    init(steps: [String], autoExpand: Bool = false) {
+    init(steps: [String], autoExpand: Bool = false, maxWidth: CGFloat = 320) {
         self.steps = steps
         self.autoExpand = autoExpand
+        self.maxWidth = maxWidth
         _expanded = State(initialValue: autoExpand)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                if accessibilityReduceMotion {
                     expanded.toggle()
+                } else {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                        expanded.toggle()
+                    }
                 }
             } label: {
                 HStack(spacing: 8) {
@@ -655,6 +735,8 @@ struct ThinkingStepsCard: View {
                 .padding(.vertical, 9)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Thinking steps, \(expanded ? "expanded" : "collapsed")")
+            .accessibilityHint("Shows how the coach reasoned through your question")
 
             if expanded {
                 Divider()
@@ -688,7 +770,7 @@ struct ThinkingStepsCard: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(AppColor.mango.opacity(0.12), lineWidth: 1)
         )
-        .frame(maxWidth: 300)
+        .frame(maxWidth: maxWidth)
     }
 }
 
@@ -704,10 +786,11 @@ struct ActionChipsRow: View {
                 ForEach(actions) { action in
                     Button { onTap(action.label) } label: {
                         Text(action.label)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.subheadline.weight(.medium))
                             .foregroundStyle(.white.opacity(0.82))
                             .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
+                            .padding(.vertical, 10)
+                            .frame(minHeight: 44)
                             .background(Color.white.opacity(0.08))
                             .clipShape(Capsule())
                             .overlay(
@@ -716,6 +799,8 @@ struct ActionChipsRow: View {
                             )
                     }
                     .buttonStyle(MangoxPressStyle())
+                    .accessibilityLabel(action.label)
+                    .accessibilityHint("Sends this as your next message")
                 }
             }
             .padding(.horizontal, 1) // prevent clip on press scale
@@ -729,6 +814,7 @@ struct ActionChipsRow: View {
 
 struct AIQuestionLabel: View {
     let text: String
+    let bubbleMaxWidth: CGFloat
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -743,7 +829,7 @@ struct AIQuestionLabel: View {
             .padding(.top, 1)
 
             Text(text)
-                .font(.system(size: 13))
+                .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.52))
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -755,28 +841,39 @@ struct AIQuestionLabel: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(AppColor.mango.opacity(0.13), lineWidth: 1)
         )
-        .frame(maxWidth: 300, alignment: .leading)
+        .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Follow-up question")
+        .accessibilityValue(text)
     }
 }
 
 // MARK: - Typing Indicator
 
 struct TypingIndicatorRow: View {
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    let bubbleMaxWidth: CGFloat
     @State private var phase: Int = 0
 
     var body: some View {
         HStack(spacing: 5) {
             ForEach(0..<3, id: \.self) { i in
-                Circle()
-                    .fill(Color.white.opacity(0.45))
-                    .frame(width: 7, height: 7)
-                    .scaleEffect(dotScale(for: i))
-                    .animation(
-                        .easeInOut(duration: 0.4)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(i) * 0.15),
-                        value: phase
-                    )
+                if accessibilityReduceMotion {
+                    Circle()
+                        .fill(Color.white.opacity(0.45))
+                        .frame(width: 7, height: 7)
+                } else {
+                    Circle()
+                        .fill(Color.white.opacity(0.45))
+                        .frame(width: 7, height: 7)
+                        .scaleEffect(dotScale(for: i))
+                        .animation(
+                            .easeInOut(duration: 0.4)
+                                .repeatForever(autoreverses: true)
+                                .delay(Double(i) * 0.15),
+                            value: phase
+                        )
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -787,10 +884,13 @@ struct TypingIndicatorRow: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
         )
-        .onAppear { phase = 1 }
+        .onAppear {
+            if !accessibilityReduceMotion { phase = 1 }
+        }
         .onDisappear { phase = 0 }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
         .padding(.vertical, 6)
+        .accessibilityLabel("Coach is typing")
     }
 
     private func dotScale(for index: Int) -> Double {
@@ -807,12 +907,12 @@ struct QuickPromptCard: View {
     var body: some View {
         Button(action: onTap) {
             Text(text)
-                .font(.system(size: 13, weight: .medium))
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(.white.opacity(0.78))
                 .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.horizontal, 14)
-                .padding(.vertical, 14)
+                .padding(.vertical, 12)
                 .background(Color.white.opacity(0.06))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
@@ -821,6 +921,8 @@ struct QuickPromptCard: View {
                 )
         }
         .buttonStyle(MangoxPressStyle())
+        .accessibilityLabel(text)
+        .accessibilityHint("Sends this question to your coach")
     }
 }
 
@@ -864,5 +966,18 @@ struct FreeMessageLimitCard: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(AppColor.mango.opacity(0.18), lineWidth: 1)
         )
+    }
+}
+
+// MARK: - View helpers
+
+private extension View {
+    @ViewBuilder
+    func accessibilityHintIf(_ condition: Bool, _ hint: String) -> some View {
+        if condition {
+            self.accessibilityHint(hint)
+        } else {
+            self
+        }
     }
 }
