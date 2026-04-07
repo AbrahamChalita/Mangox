@@ -96,6 +96,38 @@ enum ZWOImportService {
                 order += 1
             }
 
+            if lower == "warmup" || lower == "cooldown" {
+                let dur = Int(attributeDict["Duration"] ?? "") ?? 600
+                let start = Double(attributeDict["PowerLow"] ?? "0.50") ?? 0.50
+                let end = Double(attributeDict["PowerHigh"] ?? "0.75") ?? 0.75
+                let z = zoneFromFTPFraction((start + end) / 2)
+                let title = lower == "warmup" ? "Warm up" : "Cool down"
+                intervals.append(IntervalSegment(
+                    order: order,
+                    name: title,
+                    durationSeconds: dur,
+                    zone: z,
+                    repeats: 1,
+                    notes: String(format: "~%.0f–%.0f%% FTP", start * 100, end * 100),
+                    suggestedTrainerMode: .erg
+                ))
+                order += 1
+            }
+
+            if lower == "maxeffort" {
+                let dur = Int(attributeDict["Duration"] ?? "") ?? 15
+                intervals.append(IntervalSegment(
+                    order: order,
+                    name: "Max effort",
+                    durationSeconds: dur,
+                    zone: .z5,
+                    repeats: 1,
+                    notes: "All-out",
+                    suggestedTrainerMode: .erg
+                ))
+                order += 1
+            }
+
             if lower == "freeride" {
                 let dur = Int(attributeDict["Duration"] ?? "") ?? 600
                 intervals.append(IntervalSegment(

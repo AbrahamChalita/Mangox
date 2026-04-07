@@ -42,8 +42,9 @@ struct MMPResult: Identifiable {
     var id: Int { duration.rawValue }
 
     var wattsPerKg: Double? {
-        // Weight not tracked yet — placeholder for future body-weight integration
-        nil
+        let weight = RidePreferences.shared.riderWeightKg
+        guard weight > 0 else { return nil }
+        return Double(watts) / weight
     }
 }
 
@@ -129,9 +130,9 @@ final class PersonalRecords {
 
     /// Compute the MMP curve for a single workout's samples.
     /// This is the per-workout curve displayed in SummaryView.
-    nonisolated static func computeMMP(for samples: [WorkoutSample]) -> WorkoutMMP? {
+    nonisolated static func computeMMP(for samples: [WorkoutSampleData], workoutID: UUID) -> WorkoutMMP? {
         guard !samples.isEmpty, let first = samples.first else { return nil }
-        let workoutID = first.workout?.id ?? UUID()
+        // workoutID is passed
 
         let sorted = samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds }
         let powers = sorted.map { $0.power }

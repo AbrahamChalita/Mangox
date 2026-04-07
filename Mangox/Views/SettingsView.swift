@@ -1,595 +1,457 @@
 import SwiftUI
 
-/// Account, health, training zones, and app preferences in one place.
+// MARK: - Settings-internal navigation
+
+private enum SettingsRoute: Hashable {
+    case riderProfile
+    case powerZones
+    case heartRate
+    case strava
+    case integrations
+    case indoorTrainer
+    case outdoorRide
+    case audioHaptics
+    case aiCoach
+    case mangoxPro
+    case goalEvent
+    case gear
+    case dataPrivacyHub
+}
+
+// MARK: - SettingsView
+
 struct SettingsView: View {
+    @Binding var navigationPath: NavigationPath
     @Environment(PurchasesManager.self) private var purchases
     @Environment(StravaService.self) private var stravaService
+    @Environment(FTPRefreshTrigger.self) private var ftpRefresh
 
-    @State private var settingsPath = NavigationPath()
     @State private var showPaywall = false
-
-    @Bindable private var prefs = RidePreferences.shared
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
 
     var body: some View {
-        NavigationStack(path: $settingsPath) {
-            ZStack {
-                AppColor.bg.ignoresSafeArea()
+        let ftp = PowerZone.ftp
+        let maxHR = HeartRateZone.maxHR
+        let stravaConnected = stravaService.isConnected
+        let isPro = purchases.isPro
 
-                ScrollView {
-                    VStack(spacing: 16) {
-                        Color.clear
-                            .frame(height: 4)
+        ZStack {
+            AppColor.bg.ignoresSafeArea()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
+                        Color.clear.frame(height: 8)
 
-                        settingsIdentityHeader
+                        identityHeader(ftp: ftp, stravaConnected: stravaConnected, isPro: isPro)
+                            .padding(.bottom, 24)
 
-                        profileSectionHeader(
-                            title: "Fitness & zones",
-                            subtitle: "Heart rate limits, FTP, and Apple Health — your baselines for training zones."
-                        )
-                        FitnessZonesProfileCard()
-                            .padding(.horizontal, 20)
+                        // MARK: Training
+                        sectionLabel("Training")
+                        settingsGroup {
+                            let prefs = RidePreferences.shared
+                            let riderProfileValue: String = {
+                                var parts: [String] = []
+                                parts.append(prefs.isImperial
+                                    ? String(format: "%.0f lb", prefs.riderWeightKg * 2.20462)
+                                    : String(format: "%.0f kg", prefs.riderWeightKg))
+                                if let age = prefs.riderAge { parts.append("\(age) yrs") }
+                                return parts.joined(separator: " · ")
+                            }()
+                            navRow(
+                                icon: "figure.outdoor.cycle", iconColor: AppColor.blue,
+                                title: "Rider Profile",
+                                value: riderProfileValue,
+                                route: .riderProfile
+                            )
+                            rowDivider
+                            navRow(
+                                icon: "bolt.fill", iconColor: AppColor.mango,
+                                title: "Power & Zones",
+                                value: "\(ftp) W FTP",
+                                route: .powerZones
+                            )
+                            rowDivider
+                            navRow(
+                                icon: "heart.fill", iconColor: AppColor.heartRate,
+                                title: "Heart Rate",
+                                value: "Max \(maxHR) bpm",
+                                route: .heartRate
+                            )
+                            rowDivider
+                            navRow(
+                                icon: "flag.checkered",
+                                iconColor: AppColor.yellow,
+                                title: "Goal & season",
+                                value: MangoxTrainingGoals.eventName.isEmpty
+                                    ? "Optional" : MangoxTrainingGoals.eventName,
+                                route: .goalEvent
+                            )
+                        }
 
-                        profileSectionHeader(
-                            title: "Connections",
-                            subtitle: "Cloud accounts for ride uploads and sync — separate from your zone settings."
-                        )
-                        StravaConnectionCard()
-                            .padding(.horizontal, 20)
-
-                        profileSectionHeader(
-                            title: "Ride preferences",
-                            subtitle: "How Mangox displays metrics, speed, outdoor sensors, and feedback during rides."
-                        )
-
-                        preferenceGroupHeader("General")
-                        settingsCardPlain {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Unit system")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.45))
-                                Picker("Unit System", selection: $prefs.unitSystem) {
-                                    ForEach(UnitSystem.allCases, id: \.self) { system in
-                                        Text(system.label).tag(system)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-
-                                Divider().background(Color.white.opacity(0.06))
-
-                                settingsToggle(
-                                    title: "Show Laps",
-                                    subtitle: "Display lap counter during rides",
-                                    isOn: $prefs.showLaps
+                        // MARK: Connections
+                        sectionLabel("Connections")
+                            .padding(.top, 24)
+                        settingsGroup {
+                            navRow(
+                                icon: "arrow.triangle.2.circlepath.circle.fill",
+                                iconColor: AppColor.strava,
+                                title: "Strava",
+                                value: stravaConnected ? "Connected" : "Not connected",
+                                valueColor: stravaConnected
+                                    ? AppColor.success : .white.opacity(0.3),
+                                route: .strava
+                            )
+                            rowDivider
+                            navRow(
+                                icon: "calendar.badge.clock",
+                                iconColor: AppColor.blue,
+                                title: "Calendar & file sharing",
+                                value: ".ics export · guides",
+                                route: .integrations
+                            )
+                            rowDivider
+                            Button {
+                                navigationPath.append(AppRoute.outdoorSensorsSetup)
+                            } label: {
+                                rowContent(
+                                    icon: "antenna.radiowaves.left.and.right",
+                                    iconColor: AppColor.blue,
+                                    title: "Bluetooth Sensors",
+                                    value: ""
                                 )
-
-                                Divider().background(Color.white.opacity(0.06))
-
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Indoor main power")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.9))
-                                    Text("Large power number and zones during indoor rides and the FTP test. Saved workouts, energy, and normalized power always use per-second averages of raw trainer data.")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.white.opacity(0.38))
-                                    Picker("Indoor main power", selection: $prefs.indoorPowerHeroMode) {
-                                        ForEach(IndoorPowerHeroMode.allCases, id: \.self) { mode in
-                                            Text(mode.label).tag(mode)
-                                        }
-                                    }
-                                    .pickerStyle(.menu)
-                                    .tint(AppColor.mango)
-                                }
                             }
+                            .buttonStyle(.plain)
                         }
 
-                        preferenceGroupHeader("Indoor trainer")
-                        settingsCardPlain {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Speed source")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.9))
-                                Text("Trainer-reported uses your trainer's internal model. Computed derives speed from power using physics.")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.white.opacity(0.38))
-                                Picker("Speed source", selection: $prefs.indoorSpeedSource) {
-                                    ForEach(IndoorSpeedSource.allCases, id: \.self) { source in
-                                        Text(source.label).tag(source)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-                            }
-
-                            if prefs.indoorSpeedSource == .computed {
-                                Divider().background(Color.white.opacity(0.06))
-
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Rider weight")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.9))
-                                    Slider(
-                                        value: $prefs.riderWeightKg,
-                                        in: RidePreferences.riderWeightRange,
-                                        step: 1
-                                    )
-                                    .tint(AppColor.mango)
-                                    HStack {
-                                        Text("Body weight")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(.white.opacity(0.45))
-                                        Spacer()
-                                        Text("\(Int(prefs.riderWeightKg)) kg")
-                                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                            .foregroundStyle(AppColor.mango)
-                                    }
-                                }
-
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Bike weight")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.9))
-                                    Slider(
-                                        value: $prefs.bikeWeightKg,
-                                        in: RidePreferences.bikeWeightRange,
-                                        step: 0.5
-                                    )
-                                    .tint(AppColor.mango)
-                                    HStack {
-                                        Text("Bike weight")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(.white.opacity(0.45))
-                                        Spacer()
-                                        Text("\(String(format: "%.1f", prefs.bikeWeightKg)) kg")
-                                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                            .foregroundStyle(AppColor.mango)
-                                    }
-                                }
-
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Aerodynamic drag (CdA)")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.9))
-                                    Text("Lower = more aerodynamic. Drops ≈ 0.28, hoods ≈ 0.32, upright ≈ 0.35")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.white.opacity(0.38))
-                                    Slider(
-                                        value: $prefs.riderCda,
-                                        in: RidePreferences.cdaRange,
-                                        step: 0.01
-                                    )
-                                    .tint(AppColor.mango)
-                                    HStack {
-                                        Text("CdA")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(.white.opacity(0.45))
-                                        Spacer()
-                                        Text(String(format: "%.2f m²", prefs.riderCda))
-                                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                            .foregroundStyle(AppColor.mango)
-                                    }
-                                }
-                            }
+                        // MARK: Ride Settings
+                        sectionLabel("Ride Settings")
+                            .padding(.top, 24)
+                        settingsGroup {
+                            navRow(
+                                icon: "figure.indoor.cycle", iconColor: .white.opacity(0.6),
+                                title: "Indoor Trainer",
+                                value: "",
+                                route: .indoorTrainer
+                            )
+                            rowDivider
+                            navRow(
+                                icon: "map.fill", iconColor: AppColor.success,
+                                title: "Outdoor Ride",
+                                value: "",
+                                route: .outdoorRide
+                            )
+                            rowDivider
+                            navRow(
+                                icon: "bicycle",
+                                iconColor: .white.opacity(0.55),
+                                title: "Gear labels",
+                                value: "",
+                                route: .gear
+                            )
+                            rowDivider
+                            navRow(
+                                icon: "speaker.wave.2.fill", iconColor: AppColor.yellow,
+                                title: "Audio & Haptics",
+                                value: "",
+                                route: .audioHaptics
+                            )
                         }
 
-                        preferenceGroupHeader("Outdoor & sensors")
-                        settingsCardPlain {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("GPS auto-lap")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.9))
-                                Text("Outdoor rides split by distance along your path. Off disables GPS auto-laps.")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.white.opacity(0.38))
-                                Picker("Interval", selection: $prefs.outdoorAutoLapIntervalMeters) {
-                                    Text("Off").tag(0.0)
-                                    Text("500 m").tag(500.0)
-                                    Text("1 km").tag(1000.0)
-                                    Text("2 km").tag(2000.0)
-                                    Text("5 km").tag(5000.0)
-                                    Text("10 km").tag(10_000.0)
-                                }
-                                .pickerStyle(.menu)
-                                .tint(AppColor.mango)
-                            }
+                        // MARK: App
+                        sectionLabel("App")
+                            .padding(.top, 24)
+                        settingsGroup {
+                            navRow(
+                                icon: "brain.head.profile",
+                                iconColor: AppColor.blue,
+                                title: "AI Coach",
+                                value: "Provider & model",
+                                route: .aiCoach
+                            )
+                            rowDivider
+                            navRow(
+                                icon: "bell.badge.fill",
+                                iconColor: AppColor.blue,
+                                title: "Data, privacy & alerts",
+                                value: "Export · notifications",
+                                route: .dataPrivacyHub
+                            )
+                            rowDivider
+                            mangoxProSettingsRow(isPro: isPro)
 
-                            settingsToggle(
-                                title: "Prioritize navigation (mapless)",
-                                subtitle: "Keeps next turn and route context near the top when the map is hidden on iPhone",
-                                isOn: $prefs.prioritizeNavigationInMaplessBikeComputer
-                            )
-                            settingsToggle(
-                                title: "Lock Screen ride status",
-                                subtitle: "Lock screen and Dynamic Island ride status while recording. Requires Live Activities enabled in Settings › Mangox.",
-                                isOn: $prefs.outdoorLiveActivityEnabled
-                            )
-                            settingsToggle(
-                                title: "Indoor ride status",
-                                subtitle: "Lock screen and Dynamic Island status during indoor rides. Shows power, cadence, and heart rate.",
-                                isOn: $prefs.indoorLiveActivityEnabled
-                            )
-
-                            Divider().background(Color.white.opacity(0.06))
+                            rowDivider
 
                             Button {
-                                settingsPath.append(AppRoute.outdoorSensorsSetup)
+                                hasCompletedOnboarding = false
                             } label: {
-                                HStack(spacing: 12) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Bluetooth sensors")
-                                            .font(.system(size: 14, weight: .semibold))
-                                            .foregroundStyle(.white.opacity(0.9))
-                                        Text("Pair a heart rate monitor and speed/cadence sensor for outdoor rides.")
-                                            .font(.system(size: 11))
-                                            .foregroundStyle(.white.opacity(0.38))
-                                            .multilineTextAlignment(.leading)
-                                    }
-                                    Spacer(minLength: 8)
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.28))
+                                HStack(spacing: 14) {
+                                    settingsIconBadge("arrow.clockwise", color: .white.opacity(0.5))
+                                    Text("Show Onboarding")
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.85))
+                                    Spacer()
                                 }
                                 .contentShape(Rectangle())
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
                             }
                             .buttonStyle(.plain)
 
-                            Divider().background(Color.white.opacity(0.06))
+                            rowDivider
 
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Speed sensor wheel size")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.9))
-                                Text("Rolling circumference for Bluetooth speed/cadence sensors. Match your tire (printed on the sidewall) for accurate speed.")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.white.opacity(0.38))
-                                Slider(
-                                    value: $prefs.cscWheelCircumferenceMeters,
-                                    in: RidePreferences.cscWheelCircumferenceRange,
-                                    step: 0.001
-                                )
-                                .tint(AppColor.mango)
-                                HStack {
-                                    Text("Circumference")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(.white.opacity(0.45))
-                                    Spacer()
-                                    Text("\(Int(prefs.cscWheelCircumferenceMeters * 1000)) mm")
-                                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                        .foregroundStyle(AppColor.mango)
-                                }
-                            }
-                        }
-
-                        preferenceGroupHeader("Audio & haptics")
-                        settingsCardPlain {
-                            settingsToggle(
-                                title: "Audio Cues",
-                                subtitle: "Spoken zone changes and milestones",
-                                isOn: $prefs.stepAudioCueEnabled
-                            )
-                            settingsToggle(
-                                title: "Outdoor Turn Cues",
-                                subtitle: "Spoken and haptic prompts for navigation and GPX bends",
-                                isOn: $prefs.navigationTurnCuesEnabled
-                            )
-                        }
-
-                        preferenceGroupHeader("Cadence")
-                        settingsCardPlain {
-                            settingsToggle(
-                                title: "Low Cadence Warning",
-                                subtitle: "Nudge when cadence drops below threshold",
-                                isOn: $prefs.lowCadenceWarningEnabled
-                            )
-                            if prefs.lowCadenceWarningEnabled {
-                                HStack {
-                                    Text("Threshold")
-                                        .font(.system(size: 14))
-                                        .foregroundStyle(.white.opacity(0.6))
-                                    Spacer()
-                                    Stepper("\(prefs.lowCadenceThreshold) rpm", value: Binding(
-                                        get: { prefs.lowCadenceThreshold },
-                                        set: { prefs.lowCadenceThreshold = max(30, min(120, $0)) }
-                                    ), in: 30...120, step: 5)
-                                    .frame(width: 160)
-                                }
-                                .padding(.top, 4)
-                            }
-                        }
-
-                        profileSectionHeader(
-                            title: "App data",
-                            subtitle: "Onboarding and local data — not your training zones or connections."
-                        )
-                        settingsCardPlain {
-                            Button {
-                                resetOnboarding()
-                            } label: {
-                                HStack {
-                                    Text("Show Onboarding Again")
-                                        .font(.system(size: 14))
-                                        .foregroundStyle(.white.opacity(0.6))
-                                    Spacer()
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(.white.opacity(0.3))
-                                }
-                            }
-                        }
-
-                        profileSectionHeader(
-                            title: "Subscription",
-                            subtitle: "Mangox Pro features and billing."
-                        )
-                        subscriptionSection
-
-                        profileSectionHeader(
-                            title: "About",
-                            subtitle: "App version and build information."
-                        )
-                        settingsCardPlain {
-                            HStack {
+                            HStack(spacing: 14) {
+                                settingsIconBadge("info.circle.fill", color: .white.opacity(0.4))
                                 Text("Version")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(.white.opacity(0.6))
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.85))
                                 Spacer()
-                                Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
-                                    .font(.system(size: 14, design: .monospaced))
-                                    .foregroundStyle(.white.opacity(0.35))
+                                Text(
+                                    Bundle.main.infoDictionary?["CFBundleShortVersionString"]
+                                        as? String ?? "1.0"
+                                )
+                                .font(.system(size: 14, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.32))
                             }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
                         }
 
-                        Spacer().frame(height: 40)
+                        Spacer().frame(height: 48)
                     }
                 }
                 .scrollIndicators(.hidden)
                 .navigationTitle("Settings")
                 .navigationBarTitleDisplayMode(.inline)
                 .keyboardDismissToolbar()
-                .navigationDestination(for: AppRoute.self) { route in
-                    if case .outdoorSensorsSetup = route {
-                        ConnectionView(navigationPath: $settingsPath, outdoorSensorsOnly: true)
-                            .toolbar(.hidden, for: .tabBar)
+                .navigationDestination(for: SettingsRoute.self) { route in
+                    switch route {
+                    case .riderProfile: RiderProfileSettingsView()
+                    case .powerZones: PowerZonesSettingsView()
+                    case .heartRate: HeartRateSettingsView()
+                    case .strava: StravaSettingsView()
+                    case .integrations: IntegrationsSettingsView()
+                    case .indoorTrainer: IndoorTrainerSettingsView()
+                    case .outdoorRide: OutdoorRideSettingsView()
+                    case .audioHaptics: AudioHapticsSettingsView()
+                    case .aiCoach: AICoachSettingsView()
+                    case .mangoxPro: MangoxProSettingsView()
+                    case .goalEvent: GoalEventSettingsView()
+                    case .gear: GearSettingsView()
+                    case .dataPrivacyHub: DataPrivacyNotificationsHubView()
                     }
                 }
-            }
         }
-        .keyboardDismissToolbar()
         .sheet(isPresented: $showPaywall) {
             PaywallView()
         }
     }
 
-    // MARK: - Identity header
+    // MARK: - Mangox Pro (root row)
 
-    private var settingsIdentityHeader: some View {
-        HStack(alignment: .center, spacing: 14) {
-            settingsIdentityAvatar
-            VStack(alignment: .leading, spacing: 4) {
-                Text(settingsIdentityPrimaryTitle)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.95))
-                Text(settingsIdentitySubtitle)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.38))
+    @ViewBuilder
+    private func mangoxProSettingsRow(isPro: Bool) -> some View {
+        if isPro {
+            Button {
+                navigationPath.append(SettingsRoute.mangoxPro)
+            } label: {
+                mangoxProActiveRowLabel()
             }
-            Spacer(minLength: 0)
+            .buttonStyle(.plain)
+        } else {
+            Button {
+                showPaywall = true
+            } label: {
+                rowContent(
+                    icon: "crown.fill",
+                    iconColor: AppColor.mango,
+                    title: "Mangox Pro",
+                    value: "Upgrade",
+                    valueColor: AppColor.mango
+                )
+            }
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 8)
-        .accessibilityElement(children: .combine)
     }
 
-    private var settingsIdentityPrimaryTitle: String {
-        if stravaService.isConnected {
-            let trimmed = stravaService.athleteDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return trimmed.isEmpty ? "Strava" : trimmed
+    private func mangoxProActiveRowLabel() -> some View {
+        let p = purchases
+        let plan = p.storeProPlanKind
+        let renewal = p.storeProRenewalDescription
+        return HStack(alignment: .center, spacing: 14) {
+            settingsIconBadge("crown.fill", color: AppColor.mango)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Mangox Pro")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.9))
+                if p.isProDevUnlockOnly {
+                    Text("Developer unlock")
+                        .font(.system(size: 11))
+                        .foregroundStyle(AppColor.mango.opacity(0.75))
+                        .lineLimit(1)
+                } else if let renewal {
+                    Text(renewal)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.38))
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 8)
+            HStack(spacing: 6) {
+                if p.revenueCatPro {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(AppColor.success)
+                }
+                Text(p.isProDevUnlockOnly ? "Active" : (plan ?? "Active"))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppColor.success)
+                    .lineLimit(1)
+            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.2))
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+    }
+
+    // MARK: - Identity header
+
+    private func identityHeader(ftp: Int, stravaConnected: Bool, isPro: Bool) -> some View {
+        let _ = ftpRefresh.generation
+        return
+            (HStack(alignment: .center, spacing: 14) {
+                avatarView
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(identityTitle)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.95))
+                    HStack(spacing: 10) {
+                        if stravaConnected {
+                            Label("Strava", systemImage: "checkmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(AppColor.success)
+                        }
+                        if isPro {
+                            Label("Pro", systemImage: "crown.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(AppColor.mango)
+                        }
+                        Text("\(ftp) W FTP")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.35))
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 20))
+    }
+
+    private var identityTitle: String {
+        if stravaService.isConnected,
+            let name = stravaService.athleteDisplayName?.trimmingCharacters(
+                in: .whitespacesAndNewlines),
+            !name.isEmpty
+        {
+            return name
         }
         return "Mangox"
     }
 
-    private var settingsIdentitySubtitle: String {
-        stravaService.isConnected ? "Strava connected" : "Settings, zones, and connections"
-    }
-
     @ViewBuilder
-    private var settingsIdentityAvatar: some View {
+    private var avatarView: some View {
         if let url = stravaService.athleteProfileImageURL {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                case .failure:
-                    settingsIdentityPlaceholder
-                case .empty:
-                    ProgressView()
-                        .tint(AppColor.mango)
-                @unknown default:
-                    settingsIdentityPlaceholder
+                    image.resizable().scaledToFill()
+                default:
+                    avatarPlaceholder
                 }
             }
             .frame(width: 56, height: 56)
             .clipShape(Circle())
             .overlay(Circle().strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
         } else {
-            settingsIdentityPlaceholder
+            avatarPlaceholder
         }
     }
 
-    private var settingsIdentityPlaceholder: some View {
-        Image(systemName: "gearshape.fill")
-            .font(.system(size: 26))
-            .foregroundStyle(AppColor.mango.opacity(0.95))
+    private var avatarPlaceholder: some View {
+        Image(systemName: "person.crop.circle.fill")
+            .font(.system(size: 28))
+            .foregroundStyle(.white.opacity(0.35))
             .frame(width: 56, height: 56)
             .background(Color.white.opacity(0.06))
             .clipShape(Circle())
     }
 
-    // MARK: - Section headers
+    // MARK: - Row builders
 
-    /// Major profile sections (fitness vs connections vs preferences).
-    private func profileSectionHeader(title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.92))
-                .accessibilityAddTraits(.isHeader)
-            Text(subtitle)
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.38))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
-        .padding(.top, 4)
+    private func sectionLabel(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.32))
+            .tracking(1.0)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 6)
     }
 
-    /// Subgroups inside the Ride preferences block (General, Indoor, Outdoor, …).
-    private func preferenceGroupHeader(_ name: String) -> some View {
-        HStack {
-            Text(name.uppercased())
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.white.opacity(0.32))
-                .tracking(1.2)
-                .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 4)
-    }
-
-    // MARK: - Card Builder
-
-    /// Grouped card without a redundant uppercase title row (section headers provide context).
-    private func settingsCardPlain<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private func settingsGroup<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             content()
         }
-        .padding(16)
         .cardStyle(cornerRadius: 16)
         .padding(.horizontal, 20)
     }
 
-    private func settingsToggle(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
-        Toggle(isOn: isOn) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-                Text(subtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.35))
+    private func navRow(
+        icon: String, iconColor: Color,
+        title: String,
+        value: String,
+        valueColor: Color = .white.opacity(0.35),
+        route: SettingsRoute
+    ) -> some View {
+        Button {
+            navigationPath.append(route)
+        } label: {
+            rowContent(
+                icon: icon, iconColor: iconColor, title: title, value: value, valueColor: valueColor
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func rowContent(
+        icon: String, iconColor: Color,
+        title: String,
+        value: String,
+        valueColor: Color = .white.opacity(0.35)
+    ) -> some View {
+        HStack(spacing: 14) {
+            settingsIconBadge(icon, color: iconColor)
+            Text(title)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.9))
+            Spacer(minLength: 8)
+            if !value.isEmpty {
+                Text(value)
+                    .font(.system(size: 13))
+                    .foregroundStyle(valueColor)
+                    .lineLimit(1)
             }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.2))
         }
-        .tint(AppColor.mango)
+        .contentShape(Rectangle())
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
     }
 
-    // MARK: - Actions
-
-    private func resetOnboarding() {
-        hasCompletedOnboarding = false
+    private var rowDivider: some View {
+        Divider()
+            .background(Color.white.opacity(0.06))
+            .padding(.leading, 60)
     }
-
-    // MARK: - Subscription Section
-
-    @ViewBuilder
-    private var subscriptionSection: some View {
-        if purchases.isPro {
-            mangoxProActiveCard
-        } else {
-            mangoxProUpgradeCard
-        }
-    }
-
-    private var mangoxProActiveCard: some View {
-        settingsCardPlain {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: "crown.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(AppColor.mango)
-                    Text("Mangox Pro")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
-                    Spacer()
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(AppColor.success)
-                    Text("Active")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(AppColor.success)
-                }
-
-                if let url = purchases.subscriptionManagementURL {
-                    Link(destination: url) {
-                        Text("Manage Subscription")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(AppColor.mango)
-                    }
-                }
-            }
-        }
-    }
-
-    private var mangoxProUpgradeCard: some View {
-        settingsCardPlain {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: "crown.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(AppColor.mango)
-                    Text("Mangox Pro")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.28))
-                }
-                .contentShape(Rectangle())
-                .onTapGesture { showPaywall = true }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Unlock Mangox Pro")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
-                    Text("Advanced analytics, full training features, and priority updates")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.4))
-                }
-
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("$4.99/mo")
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(AppColor.mango)
-                        Text("Monthly")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.35))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
-                    .background(Color.white.opacity(0.04))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("$29.99/yr")
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(AppColor.mango)
-                        Text("Save 50%")
-                            .font(.system(size: 10))
-                            .foregroundStyle(AppColor.success)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
-                    .background(Color.white.opacity(0.04))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .onTapGesture { showPaywall = true }
-            }
-        }
-    }
-
 }

@@ -5,15 +5,15 @@ import Testing
 struct TrainerPowerMetricsTests {
 
     @Test func meanInt_matchesArithmeticMean() {
-        #expect(TrainerPowerMetrics.meanInt([100, 200, 300]) == 200)
-        #expect(TrainerPowerMetrics.meanInt([400]) == 400)
-        #expect(TrainerPowerMetrics.meanInt([]) == 0)
+        #expect(TrainerPowerMetrics.meanInt(samples: [100, 200, 300]) == 200)
+        #expect(TrainerPowerMetrics.meanInt(samples: [400]) == 400)
+        #expect(TrainerPowerMetrics.meanInt(samples: []) == 0)
     }
 
     @Test func peakInt_isMaximumSample() {
-        #expect(TrainerPowerMetrics.peakInt([100, 400, 300]) == 400)
-        #expect(TrainerPowerMetrics.peakInt([50]) == 50)
-        #expect(TrainerPowerMetrics.peakInt([]) == 0)
+        #expect(TrainerPowerMetrics.peakInt(samples: [100, 400, 300]) == 400)
+        #expect(TrainerPowerMetrics.peakInt(samples: [50]) == 50)
+        #expect(TrainerPowerMetrics.peakInt(samples: []) == 0)
     }
 
     @Test func indoorPowerHeroPreference_roundTripThroughUserDefaults() {

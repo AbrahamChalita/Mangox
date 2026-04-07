@@ -1,120 +1,93 @@
 import Foundation
 import UIKit
+import os.log
+
+private let instagramStoryLogger = Logger(subsystem: "com.abchalita.Mangox", category: "InstagramStoryShare")
 
 // MARK: - Instagram Stories (no login)
 
-/// Shares a full-screen story image to Instagram via the official URL scheme + pasteboard.
-/// See Meta’s “Sharing to Stories” docs: background PNG is passed through `UIPasteboard` keys,
-/// then `instagram-stories://share` opens the Instagram app — no OAuth or Instagram login in Mangox.
+/// Shares a full-screen story image to Instagram using Meta’s **Sharing to Stories** flow (no Instagram login in Mangox).
+///
+/// **Documentation:** [Sharing to Stories](https://developers.facebook.com/docs/instagram-platform/sharing-to-stories/)
+///
+/// iOS flow (matches Meta’s sample):
+/// 1. Declare `instagram-stories` in `LSApplicationQueriesSchemes` (required before `canOpenURL` works).
+/// 2. Put image bytes on the pasteboard as `com.instagram.sharedSticker.backgroundImage` (JPEG or PNG per Meta).
+/// 3. Open `instagram-stories://share?source_application=<Facebook App ID>`.
+///
+/// **App ID (required since Jan 2023):** `source_application` must be your Facebook App ID or users see
+/// *“The app you shared from doesn't currently support sharing to Stories.”*
+///
+/// **Size:** Meta asks for at least **720×1280** and recommends **9:16** or **9:18**; Mangox uses **1080×1920** (9:16).
+///
+/// Meta describes separate **background** and **sticker** layers; Mangox sends one full-bleed **background** image.
+/// Optional `backgroundTopColor` / `backgroundBottomColor` on the pasteboard are mainly for sticker-only shares; when a
+/// background image is present, Meta’s docs state gradient colors are not used for the image case on some platforms.
 enum InstagramStoryShare {
 
-    /// Instagram Stories canvas (9:16, full HD width).
+    /// Exported story bitmap (9:16 @1080pt — meets minimum size and recommended aspect from Meta’s doc).
     static let storySize = CGSize(width: 1080, height: 1920)
 
-    private static let storiesShareURL = URL(string: "instagram-stories://share")!
+    /// Numeric Facebook / Meta App ID from `FacebookAppID` in Info.plist (build setting `FACEBOOK_APP_ID`).
+    static var facebookAppID: String? {
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: "FacebookAppID") as? String else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 
-    /// Whether the Instagram app can handle the Stories share URL (requires `LSApplicationQueriesSchemes`).
+    /// `instagram-stories://share?source_application=<Facebook App ID>` — required for Instagram to accept the share.
+    static func instagramStoriesShareURL() -> URL? {
+        guard let appID = facebookAppID else { return nil }
+        var components = URLComponents()
+        components.scheme = "instagram-stories"
+        components.host = "share"
+        components.queryItems = [
+            URLQueryItem(name: "source_application", value: appID)
+        ]
+        return components.url
+    }
+
+    /// Whether the Instagram app can handle the Stories share URL (requires `LSApplicationQueriesSchemes` + valid `FACEBOOK_APP_ID`).
     static func canOpenInstagramStories() -> Bool {
-        UIApplication.shared.canOpenURL(storiesShareURL)
+        guard let url = instagramStoriesShareURL() else { return false }
+        return UIApplication.shared.canOpenURL(url)
     }
 
     // MARK: - Render
 
-    /// Renders the same rich summary card used for Strava, then letterboxes it into a 9:16 story
-    /// with a Strava-style gradient frame and optional Mangox mark in the bottom margin.
+    /// Renders a **full-bleed** 1080×1920 story bitmap (same as ``/storySize``) — no letterboxing, no corner logo.
     @MainActor
     static func renderWorkoutStory(
         workout: Workout,
         dominantZone: PowerZone,
-        sortedSamples: [WorkoutSample],
-        mmp: WorkoutMMP?,
-        newPRFlags: [NewPRFlag],
         routeName: String?,
-        totalElevationGain: Double,
-        zoneBuckets: [(zone: PowerZone, percent: Double)]
-    ) -> UIImage? {
-        guard let card = StravaPostBuilder.renderSummaryCard(
+        totalElevationGain: Double
+    ) -> UIImage {
+        InstagramStoryCardRenderer.render(
             workout: workout,
             dominantZone: dominantZone,
-            sortedSamples: sortedSamples,
-            mmp: mmp,
-            newPRFlags: newPRFlags,
             routeName: routeName,
-            totalElevationGain: totalElevationGain,
-            zoneBuckets: zoneBuckets
-        ) else {
-            return nil
-        }
-        return composeStoryImage(from: card)
-    }
-
-    /// Places the summary card on a 9:16 canvas with a gradient frame and a small Mangox mark (Instagram-safe zone).
-    static func composeStoryImage(from card: UIImage) -> UIImage? {
-        let renderer = UIGraphicsImageRenderer(size: storySize)
-        return renderer.image { ctx in
-            let cg = ctx.cgContext
-            drawStoryGradient(in: cg, size: storySize)
-
-            let w = card.size.width
-            let h = card.size.height
-            let scale = min(storySize.width / w, storySize.height / h)
-            let dw = w * scale
-            let dh = h * scale
-            let x = (storySize.width - dw) / 2
-            let y = (storySize.height - dh) / 2
-            card.draw(in: CGRect(x: x, y: y, width: dw, height: dh))
-
-            if let logo = UIImage(named: "MangoxLogo") {
-                let logoW: CGFloat = 100
-                let aspect = logo.size.height / max(logo.size.width, 1)
-                let logoH = logoW * aspect
-                let margin: CGFloat = 40
-                let logoRect = CGRect(
-                    x: storySize.width - logoW - margin,
-                    y: storySize.height - logoH - margin,
-                    width: logoW,
-                    height: logoH
-                )
-                logo.draw(in: logoRect, blendMode: .normal, alpha: 0.92)
-            }
-        }
-    }
-
-    private static func drawStoryGradient(in context: CGContext, size: CGSize) {
-        context.saveGState()
-        let colors: [CGColor] = [
-            UIColor(red: 0.02, green: 0.03, blue: 0.08, alpha: 1).cgColor,
-            UIColor(red: 0.18, green: 0.07, blue: 0.18, alpha: 1).cgColor,
-            UIColor(red: 0.04, green: 0.06, blue: 0.04, alpha: 1).cgColor,
-            UIColor(red: 0.02, green: 0.03, blue: 0.06, alpha: 1).cgColor
-        ]
-        let locations: [CGFloat] = [0, 0.35, 0.65, 1]
-        let space = CGColorSpaceCreateDeviceRGB()
-        guard let gradient = CGGradient(colorsSpace: space, colors: colors as CFArray, locations: locations) else {
-            context.restoreGState()
-            return
-        }
-        context.drawLinearGradient(
-            gradient,
-            start: CGPoint(x: size.width * 0.5, y: 0),
-            end: CGPoint(x: size.width * 0.5, y: size.height),
-            options: []
+            totalElevationGain: totalElevationGain
         )
-        context.restoreGState()
     }
 
     // MARK: - Open Instagram
 
-    /// Copies the image to the pasteboard using Instagram’s keys and opens the Stories composer.
-    /// Returns `true` if Instagram was opened; `false` if the app isn’t installed or image data failed.
+    /// Copies **PNG or JPEG** bytes to `UIPasteboard` using Meta’s key `com.instagram.sharedSticker.backgroundImage`, then opens
+    /// `instagram-stories://share?source_application=…`. Prefer this overload when encoding was done off the main thread.
+    ///
+    /// Returns `true` if the Instagram URL was opened; `false` if App ID is missing or the URL cannot be opened.
     @discardableResult
-    static func presentStories(with image: UIImage) -> Bool {
-        guard let pngData = image.pngData() else { return false }
+    static func presentStories(withPNGData imageData: Data) -> Bool {
+        guard let storiesURL = instagramStoriesShareURL() else {
+            instagramStoryLogger.error("Instagram Stories: set FACEBOOK_APP_ID in Xcode build settings (FacebookAppID in Info.plist). See https://developers.facebook.com/docs/instagram-platform/sharing-to-stories/")
+            return false
+        }
 
         var item: [String: Any] = [
-            "com.instagram.sharedSticker.backgroundImage": pngData
+            "com.instagram.sharedSticker.backgroundImage": imageData
         ]
-        // Optional gradient hints when Instagram generates a fallback (we already bake a full-bleed image).
+        // Per Meta: if a background *image* is supplied, gradient colors are typically ignored; kept as fallback only.
         item["com.instagram.sharedSticker.backgroundTopColor"] = "050510"
         item["com.instagram.sharedSticker.backgroundBottomColor"] = "100818"
 
@@ -123,8 +96,16 @@ enum InstagramStoryShare {
             options: [.expirationDate: Date().addingTimeInterval(300)]
         )
 
-        guard UIApplication.shared.canOpenURL(storiesShareURL) else { return false }
-        UIApplication.shared.open(storiesShareURL, options: [:], completionHandler: nil)
+        guard UIApplication.shared.canOpenURL(storiesURL) else { return false }
+        UIApplication.shared.open(storiesURL, options: [:], completionHandler: nil)
         return true
+    }
+
+    /// Encodes on the caller’s thread, then presents. For large story assets, prefer encoding with ``presentStories(withPNGData:)`` on a background executor.
+    @discardableResult
+    static func presentStories(with image: UIImage) -> Bool {
+        // Meta accepts JPG or PNG for the background asset; PNG keeps gradients and text sharp on the generated card.
+        guard let imageData = image.pngData() else { return false }
+        return presentStories(withPNGData: imageData)
     }
 }

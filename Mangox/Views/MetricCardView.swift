@@ -22,6 +22,7 @@ struct MetricCardView: View {
                     .font(.system(size: isPhone ? 24 : 28, weight: .bold, design: .monospaced))
                     .foregroundStyle(valueColor)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.5)
 
                 Text(unit)
                     .font(.system(size: 11))

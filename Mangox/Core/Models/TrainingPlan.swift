@@ -119,6 +119,10 @@ enum PlanDayType: String, Codable, Sendable {
     case race
     case event       // kit pickup, celebration, etc.
     case ftpTest
+    /// Planned session is optional — not treated as a mandatory key workout for compliance nudges.
+    case optionalWorkout
+    /// Easy spin / transit — counts toward planned volume, lower intensity default.
+    case commute
 
     /// Resilient decoding — LLMs may produce "ftp_test", "Workout", etc.
     init(from decoder: Decoder) throws {
@@ -133,6 +137,8 @@ enum PlanDayType: String, Codable, Sendable {
         case "race": self = .race
         case "event": self = .event
         case "ftptest", "ftp_test", "ftp test": self = .ftpTest
+        case "optional", "optional_workout", "optionalworkout": self = .optionalWorkout
+        case "commute", "commuter": self = .commute
         default: self = .workout
         }
     }
@@ -193,6 +199,43 @@ struct IntervalSegment: Codable, Identifiable, Sendable, Hashable {
         self.simulationGrade = simulationGrade
     }
 
+    enum CodingKeys: String, CodingKey {
+        case order, name, durationSeconds, zone, repeats, cadenceLow, cadenceHigh
+        case recoverySeconds, recoveryZone, notes, suggestedTrainerMode, simulationGrade
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        order = try c.decodeIfPresent(Int.self, forKey: .order) ?? 1
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Interval"
+        durationSeconds = try c.decodeIfPresent(Int.self, forKey: .durationSeconds) ?? 0
+        zone = try c.decodeIfPresent(TrainingZoneTarget.self, forKey: .zone) ?? .z2
+        repeats = try c.decodeIfPresent(Int.self, forKey: .repeats) ?? 1
+        cadenceLow = try c.decodeIfPresent(Int.self, forKey: .cadenceLow)
+        cadenceHigh = try c.decodeIfPresent(Int.self, forKey: .cadenceHigh)
+        recoverySeconds = try c.decodeIfPresent(Int.self, forKey: .recoverySeconds) ?? 0
+        recoveryZone = try c.decodeIfPresent(TrainingZoneTarget.self, forKey: .recoveryZone) ?? .z1
+        notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        suggestedTrainerMode = try c.decodeIfPresent(SuggestedTrainerMode.self, forKey: .suggestedTrainerMode) ?? .erg
+        simulationGrade = try c.decodeIfPresent(Double.self, forKey: .simulationGrade)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(order, forKey: .order)
+        try c.encode(name, forKey: .name)
+        try c.encode(durationSeconds, forKey: .durationSeconds)
+        try c.encode(zone, forKey: .zone)
+        try c.encode(repeats, forKey: .repeats)
+        try c.encodeIfPresent(cadenceLow, forKey: .cadenceLow)
+        try c.encodeIfPresent(cadenceHigh, forKey: .cadenceHigh)
+        try c.encode(recoverySeconds, forKey: .recoverySeconds)
+        try c.encode(recoveryZone, forKey: .recoveryZone)
+        try c.encode(notes, forKey: .notes)
+        try c.encode(suggestedTrainerMode, forKey: .suggestedTrainerMode)
+        try c.encodeIfPresent(simulationGrade, forKey: .simulationGrade)
+    }
+
     /// Total time including all repeats and recovery between them
     var totalSeconds: Int {
         let workTime = durationSeconds * repeats
@@ -243,6 +286,32 @@ struct PlanDay: Codable, Identifiable, Sendable, Hashable {
     let isKeyWorkout: Bool          // highlight in UI
     let requiresFTPTest: Bool
 
+    init(
+        id: String,
+        weekNumber: Int,
+        dayOfWeek: Int,
+        dayType: PlanDayType,
+        title: String,
+        durationMinutes: Int,
+        zone: TrainingZoneTarget,
+        notes: String,
+        intervals: [IntervalSegment],
+        isKeyWorkout: Bool,
+        requiresFTPTest: Bool
+    ) {
+        self.id = id
+        self.weekNumber = weekNumber
+        self.dayOfWeek = dayOfWeek
+        self.dayType = dayType
+        self.title = title
+        self.durationMinutes = durationMinutes
+        self.zone = zone
+        self.notes = notes
+        self.intervals = intervals
+        self.isKeyWorkout = isKeyWorkout
+        self.requiresFTPTest = requiresFTPTest
+    }
+
     var dayLabel: String {
         switch dayOfWeek {
         case 1: return "Mon"
@@ -272,6 +341,41 @@ struct PlanDay: Codable, Identifiable, Sendable, Hashable {
     /// Whether this day has a structured interval workout (vs. just steady-state)
     var hasStructuredIntervals: Bool {
         !intervals.isEmpty
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, weekNumber, dayOfWeek, dayType, title, durationMinutes, zone, notes, intervals
+        case isKeyWorkout, requiresFTPTest
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        weekNumber = try c.decodeIfPresent(Int.self, forKey: .weekNumber) ?? 1
+        dayOfWeek = try c.decodeIfPresent(Int.self, forKey: .dayOfWeek) ?? 1
+        dayType = try c.decodeIfPresent(PlanDayType.self, forKey: .dayType) ?? .rest
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        durationMinutes = try c.decodeIfPresent(Int.self, forKey: .durationMinutes) ?? 0
+        zone = try c.decodeIfPresent(TrainingZoneTarget.self, forKey: .zone) ?? .none
+        notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        intervals = try c.decodeIfPresent([IntervalSegment].self, forKey: .intervals) ?? []
+        isKeyWorkout = try c.decodeIfPresent(Bool.self, forKey: .isKeyWorkout) ?? false
+        requiresFTPTest = try c.decodeIfPresent(Bool.self, forKey: .requiresFTPTest) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(weekNumber, forKey: .weekNumber)
+        try c.encode(dayOfWeek, forKey: .dayOfWeek)
+        try c.encode(dayType, forKey: .dayType)
+        try c.encode(title, forKey: .title)
+        try c.encode(durationMinutes, forKey: .durationMinutes)
+        try c.encode(zone, forKey: .zone)
+        try c.encode(notes, forKey: .notes)
+        try c.encode(intervals, forKey: .intervals)
+        try c.encode(isKeyWorkout, forKey: .isKeyWorkout)
+        try c.encode(requiresFTPTest, forKey: .requiresFTPTest)
     }
 }
 
@@ -315,13 +419,13 @@ struct PlanWeek: Codable, Identifiable, Sendable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        weekNumber = try c.decode(Int.self, forKey: .weekNumber)
-        phase = try c.decode(String.self, forKey: .phase)
-        title = try c.decode(String.self, forKey: .title)
-        totalHoursLow = try c.decode(Double.self, forKey: .totalHoursLow)
-        totalHoursHigh = try c.decode(Double.self, forKey: .totalHoursHigh)
-        focus = try c.decode(String.self, forKey: .focus)
-        days = try c.decode([PlanDay].self, forKey: .days)
+        weekNumber = try c.decodeIfPresent(Int.self, forKey: .weekNumber) ?? 1
+        phase = try c.decodeIfPresent(String.self, forKey: .phase) ?? ""
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        totalHoursLow = try c.decodeIfPresent(Double.self, forKey: .totalHoursLow) ?? 0
+        totalHoursHigh = try c.decodeIfPresent(Double.self, forKey: .totalHoursHigh) ?? 0
+        focus = try c.decodeIfPresent(String.self, forKey: .focus) ?? ""
+        days = try c.decodeIfPresent([PlanDay].self, forKey: .days) ?? []
 
         // Try standard ClosedRange encoding first (lowerBound/upperBound)
         if let range = try? c.decode(ClosedRange<Int>.self, forKey: .tssTarget) {
@@ -362,6 +466,59 @@ struct TrainingPlan: Codable, Identifiable, Sendable {
     let description: String
     let weeks: [PlanWeek]
 
+    enum CodingKeys: String, CodingKey {
+        case id, name, eventName, eventDate, distance, elevation, location, description, weeks
+    }
+
+    init(
+        id: String,
+        name: String,
+        eventName: String,
+        eventDate: String,
+        distance: String,
+        elevation: String,
+        location: String,
+        description: String,
+        weeks: [PlanWeek]
+    ) {
+        self.id = id
+        self.name = name
+        self.eventName = eventName
+        self.eventDate = eventDate
+        self.distance = distance
+        self.elevation = elevation
+        self.location = location
+        self.description = description
+        self.weeks = weeks
+    }
+
+    /// Explicit `nonisolated` Codable implementation so decoding works from `nonisolated` contexts (Swift 6; avoids main-actor–isolated synthesized `Decodable`).
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Plan"
+        eventName = try c.decodeIfPresent(String.self, forKey: .eventName) ?? ""
+        eventDate = try c.decodeIfPresent(String.self, forKey: .eventDate) ?? ""
+        distance = try c.decodeIfPresent(String.self, forKey: .distance) ?? ""
+        elevation = try c.decodeIfPresent(String.self, forKey: .elevation) ?? ""
+        location = try c.decodeIfPresent(String.self, forKey: .location) ?? ""
+        description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        weeks = try c.decodeIfPresent([PlanWeek].self, forKey: .weeks) ?? []
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(eventName, forKey: .eventName)
+        try c.encode(eventDate, forKey: .eventDate)
+        try c.encode(distance, forKey: .distance)
+        try c.encode(elevation, forKey: .elevation)
+        try c.encode(location, forKey: .location)
+        try c.encode(description, forKey: .description)
+        try c.encode(weeks, forKey: .weeks)
+    }
+
     var totalWeeks: Int { weeks.count }
 
     var allDays: [PlanDay] {
@@ -375,6 +532,34 @@ struct TrainingPlan: Codable, Identifiable, Sendable {
     /// Decode JSON stored in SwiftData (`AIGeneratedPlan.planJSON`). Explicitly `nonisolated` for Swift 6 when called from model accessors.
     nonisolated static func decodeFromStoredJSON(_ data: Data) -> TrainingPlan? {
         try? JSONDecoder().decode(TrainingPlan.self, from: data)
+    }
+
+    /// Returns a copy with `days` replaced for the given `weekNumber` (e.g. after `/api/regenerate-plan-week`).
+    func replacingDays(forWeekNumber weekNumber: Int, days: [PlanDay]) -> TrainingPlan {
+        let newWeeks = weeks.map { week in
+            guard week.weekNumber == weekNumber else { return week }
+            return PlanWeek(
+                weekNumber: week.weekNumber,
+                phase: week.phase,
+                title: week.title,
+                totalHoursLow: week.totalHoursLow,
+                totalHoursHigh: week.totalHoursHigh,
+                tssTarget: week.tssTarget,
+                focus: week.focus,
+                days: days
+            )
+        }
+        return TrainingPlan(
+            id: id,
+            name: name,
+            eventName: eventName,
+            eventDate: eventDate,
+            distance: distance,
+            elevation: elevation,
+            location: location,
+            description: description,
+            weeks: newWeeks
+        )
     }
 }
 
@@ -391,6 +576,8 @@ final class TrainingPlanProgress {
     var notes: [String: String] = [:]            // dayID → user note
     /// Optional display title for progress rows (Classicissima uses `CachedPlan` event name when empty).
     var aiPlanTitle: String = ""
+    /// Scales guided ERG targets (1.0 = plan as written). Updated when plan-linked rides complete.
+    var adaptiveLoadMultiplier: Double = 1.0
 
     init(planID: String, startDate: Date, ftp: Int, aiPlanTitle: String = "") {
         self.planID = planID
@@ -1364,5 +1551,33 @@ enum PlanLibrary {
     static func resolveDay(planID: String?, dayID: String?, modelContext: ModelContext? = nil) -> PlanDay? {
         guard let dayID, let plan = resolvePlan(planID: planID, modelContext: modelContext) else { return nil }
         return plan.day(id: dayID)
+    }
+
+    /// Next incomplete workout or FTP test day, preferring the most recently started plan.
+    /// Chooses by **mapped calendar date** so a missed day in week 1 does not block “next” once the user is in a later week.
+    static func nextScheduledWorkout(
+        allProgress: [TrainingPlanProgress],
+        modelContext: ModelContext
+    ) -> (planID: String, plan: TrainingPlan, day: PlanDay, progress: TrainingPlanProgress)? {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let sorted = allProgress.sorted { $0.startDate > $1.startDate }
+        for p in sorted {
+            guard let plan = resolvePlan(planID: p.planID, modelContext: modelContext) else { continue }
+            let candidates = plan.allDays.filter { d in
+                !p.isCompleted(d.id) && !p.isSkipped(d.id)
+                    && (d.dayType == .workout || d.dayType == .ftpTest)
+            }
+            let futureOrToday = candidates.filter {
+                calendar.startOfDay(for: p.calendarDate(for: $0)) >= today
+            }
+            if let day = futureOrToday.min(by: { p.calendarDate(for: $0) < p.calendarDate(for: $1) }) {
+                return (p.planID, plan, day, p)
+            }
+            if let day = candidates.min(by: { p.calendarDate(for: $0) < p.calendarDate(for: $1) }) {
+                return (p.planID, plan, day, p)
+            }
+        }
+        return nil
     }
 }

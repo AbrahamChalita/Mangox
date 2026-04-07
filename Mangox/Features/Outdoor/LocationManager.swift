@@ -1,11 +1,12 @@
-import Foundation
-import Observation
-import _MapKit_SwiftUI
 import CoreLocation
 import CoreMotion
+import Foundation
 import MapKit
-import os.log
+import Observation
+import SwiftUI
+import Synchronization
 import UIKit
+import os.log
 
 private let logger = Logger(subsystem: "com.abchalita.Mangox", category: "LocationManager")
 
@@ -24,47 +25,60 @@ private struct UncheckedOptional<T>: @unchecked Sendable {
 
 private struct FixedBuffer<T> {
     private var storage: [T] = []
+    private var writeIndex = 0
     let capacity: Int
 
     init(capacity: Int) {
         self.capacity = max(1, capacity)
+        storage.reserveCapacity(capacity)
     }
 
     mutating func append(_ value: T) {
-        if storage.count == capacity {
-            storage.removeFirst()
+        if storage.count < capacity {
+            storage.append(value)
+            writeIndex = storage.count % capacity
+        } else {
+            storage[writeIndex] = value
+            writeIndex = (writeIndex + 1) % capacity
         }
-        storage.append(value)
     }
 
     mutating func reset() {
         storage.removeAll(keepingCapacity: true)
+        writeIndex = 0
     }
 
-    var values: [T] { storage }
+    var values: [T] {
+        if storage.count < capacity {
+            return storage
+        }
+        return Array(storage[writeIndex...]) + Array(storage[..<writeIndex])
+    }
 }
 
-/// Lock-backed; must stay off default `MainActor` isolation (see `SWIFT_DEFAULT_ACTOR_ISOLATION`).
-private final class PendingHeadingStore: @unchecked Sendable {
-    nonisolated private let lock = NSLock()
-    nonisolated(unsafe) private var latestHeading: Double?
-    nonisolated(unsafe) private var hasPendingValue = false
+/// Mutex-backed; naturally `Sendable` without `@unchecked`.
+private final class PendingHeadingStore: Sendable {
+    private struct State {
+        var latestHeading: Double?
+        var hasPendingValue = false
+    }
+    private let state = Mutex(State())
 
     nonisolated init() {}
 
     nonisolated func store(_ heading: Double) {
-        lock.lock()
-        latestHeading = heading
-        hasPendingValue = true
-        lock.unlock()
+        state.withLock {
+            $0.latestHeading = heading
+            $0.hasPendingValue = true
+        }
     }
 
     nonisolated func take() -> Double? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard hasPendingValue else { return nil }
-        hasPendingValue = false
-        return latestHeading
+        state.withLock { s in
+            guard s.hasPendingValue else { return nil }
+            s.hasPendingValue = false
+            return s.latestHeading
+        }
     }
 }
 
@@ -131,7 +145,7 @@ enum OutdoorSignalConfidence {
 ///
 /// Provides live location, speed, altitude, heading, and distance tracking.
 /// Records a breadcrumb trail and exports GPX.
-/// Uses Kalman-style smoothing to reduce GPS jitter.
+/// Uses a lightweight 2×1D Kalman filter plus speed-adaptive heading smoothing for live map follow.
 ///
 /// **How Core Location relates to Wi‑Fi / cellular:** The system may fuse GPS with Wi‑Fi and
 /// cell towers for *fixes* and for **A‑GPS** (faster time‑to‑first‑fix). **Speed** comes from
@@ -231,7 +245,8 @@ final class LocationManager: NSObject {
 
     /// Neutral center when no location has ever been received (wide span applied in search, not here).
     /// Uses San Francisco as a reasonable English-app default rather than lat:0/lon:0 (mid-Atlantic).
-    private static let fallbackSearchBiasCoordinate = CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194)
+    private static let fallbackSearchBiasCoordinate = CLLocationCoordinate2D(
+        latitude: 37.7749, longitude: -122.4194)
 
     // MARK: - Chunked Breadcrumbs (Performance)
 
@@ -283,6 +298,7 @@ final class LocationManager: NSObject {
     /// `nonisolated let` + `@unchecked Sendable` bag: readable from `nonisolated` Core Location delegate methods.
     @ObservationIgnored
     nonisolated private let concurrencyHandles = LocationManagerConcurrencyHandles()
+    /// Matches map camera publish cadence; also drives Kalman extrapolation between GPS fixes.
     private let headingFlushInterval: TimeInterval = 1.0 / 8.0
     private var pendingRecordedTrackPointsURL: URL?
     private let gpxDateFormatter = ISO8601DateFormatter()
@@ -316,30 +332,101 @@ final class LocationManager: NSObject {
     /// If `speedAccuracy` is missing, use a slightly higher floor than 0.5 m/s (~1.8 km/h) to reduce phantom motion.
     private let defaultSpeedNoiseFloorMps: Double = 0.65
 
-    /// Low-pass smoothing for map rotation (0–1); higher = snappier.
-    private let mapHeadingSmoothingAlpha: Double = 0.22
     /// GPS speed (m/s) above this prefers **course** over compass for heading-up (Apple Maps–style).
     private let mapHeadingCourseSpeedThresholdMps: Double = 2.0
     private var smoothedMapHeadingDegrees: Double = 0
     private var hasSeededMapHeading = false
+    /// Previous **raw** map heading target (before hysteresis) — detects bogus 0/360 flips when nearly stopped.
+    private var previousRawMapHeadingDegrees: Double?
 
-    /// EMA smoothing for map camera center position (0–1); prevents GPS jitter from shaking the map.
-    /// Alpha 0.45 ≈ ~2 sample window (~2–4 m lag at cycling speed — invisible, but eliminates shake).
-    private let mapPositionSmoothingAlpha: Double = 0.45
-    private var smoothedMapLat: Double = 0
-    private var smoothedMapLon: Double = 0
+    // MARK: - Kalman filter (lat / lon)
 
-    /// Caps map camera publish rate: compass + GPS can otherwise exceed 30 Hz and thrash SwiftUI + MapKit.
+    /// Independent 1D Kalman along each axis — constant-velocity prior, position measurements only.
+    /// `r` is measurement **variance** in the same units as `x` (degrees² for geo coordinates).
+    private struct Kalman1D {
+        var x: Double
+        var v: Double
+        var p: Double
+        let q: Double
+
+        init(state: Double, initialVariance: Double, processNoise: Double) {
+            x = state
+            v = 0
+            p = max(initialVariance, 1e-12)
+            q = processNoise
+        }
+
+        mutating func update(measurement: Double, dt rawDt: Double, measurementVariance r: Double) {
+            let dt = min(max(rawDt, 0.05), 4.0)
+            let xPred = x + v * dt
+            let pPred = p + q * dt
+            let rUse = max(r, 1e-12)
+            let k = pPred / (pPred + rUse)
+            let innovation = measurement - xPred
+            x = xPred + k * innovation
+            v += k * (innovation / dt)
+            p = (1 - k) * pPred
+        }
+
+        /// Display extrapolation between GPS measurements (`x` + `v`·Δt), capped to limit runaway drift.
+        func extrapolatedPosition(deltaTime rawDt: Double, maxDelta: TimeInterval) -> Double {
+            let dt = min(max(rawDt, 0), maxDelta)
+            return x + v * dt
+        }
+    }
+
+    private var kalmanLat: Kalman1D?
+    private var kalmanLon: Kalman1D?
+    private var lastKalmanUpdateTime: Date?
+
+    /// Smoothed rider position — matches map camera center whenever follow mode is active.
+    var smoothedRiderCoordinate: CLLocationCoordinate2D = CLLocationCoordinate2D(latitude: 0, longitude: 0)
+
+    /// Speed-adaptive heading smoothing.
+    private func adaptiveHeadingAlpha() -> Double {
+        let speedKmh = speed
+        switch speedKmh {
+        case ..<2.0: return 0.06     // Very smooth when stopped
+        case 2.0..<8.0: return 0.12  // Moderate when starting
+        case 8.0..<20.0: return 0.18 // Normal cruising
+        default: return 0.25         // Snappy at high speed
+        }
+    }
+
+    /// Process-noise scale for Kalman — higher when moving so the filter can track turns.
+    private func adaptiveProcessNoise() -> Double {
+        let speedKmh = speed
+        switch speedKmh {
+        case ..<2.0: return 0.07
+        case 2.0..<10.0: return 0.16
+        case 10.0..<25.0: return 0.32
+        default: return 0.5
+        }
+    }
+
+    /// Caps map camera publish rate to ~8 Hz — enough for smooth animation without thrashing SwiftUI.
     private var lastMapCameraUpdateTime: Date = .distantPast
-    private let mapCameraUpdateMinInterval: TimeInterval = 1.0 / 30.0
-    /// Skips redundant `MapCameraPosition` writes when the camera barely moved (reduces view invalidation).
+    private let mapCameraUpdateMinInterval: TimeInterval = 1.0 / 8.0
+
+    /// Skips redundant `MapCameraPosition` writes when the camera barely moved (~3m position deadband).
     private var lastPublishedMapCamera: (lat: Double, lon: Double, heading: Double)?
+    private let mapPositionDeadbandDegrees: Double = 0.000035  // ≈ 3–4 meters at mid-latitudes
+    private let mapHeadingDeadbandDegrees: Double = 0.5
+    /// Max time to coast the display state ahead of the last GPS fix (avoids large drift if fixes stall).
+    private let mapExtrapolationMaxAdvanceSeconds: TimeInterval = 1.35
+
+    /// Below this speed (km/h), reject “teleport” heading readings near the smoothed value (0°/360° flicker).
+    private let slowHeadingHysteresisSpeedKmh: Double = 4.0
+    private let headingOutlierJumpVersusPreviousDegrees: Double = 110
+    private let headingOutlierNearSmoothedDegrees: Double = 18
+    /// When slow, ignore sub‑2.5° target wiggles so the map doesn’t hunt.
+    private let slowHeadingMicroDeadbandDegrees: Double = 2.5
 
     /// Consecutive GPS readings below/above autoPauseThreshold before triggering pause/resume.
     /// Prevents false triggers from GPS jitter, weak signal, or momentary traffic-light stops.
     private var pauseDebounceCount: Int = 0
     private var resumeDebounceCount: Int = 0
-    private let pauseDebounceRequired: Int = 4   // ~4–8 s depending on GPS rate
+    private let pauseDebounceRequired: Int = 4  // ~4–8 s depending on GPS rate
     private let resumeDebounceRequired: Int = 2  // resume faster than pause
 
     /// Minimum GPS accuracy (meters) to accept a location update.
@@ -392,7 +479,8 @@ final class LocationManager: NSObject {
         let rideBox = UncheckedOptional<Timer>(concurrencyHandles.rideTimer)
         let gpsBox = UncheckedOptional<Timer>(concurrencyHandles.gpsStaleMonitorTimer)
         let headingBox = UncheckedOptional<Timer>(concurrencyHandles.headingFlushTimer)
-        let fileBox = UncheckedOptional<FileHandle>(concurrencyHandles.pendingRecordedTrackFileHandle)
+        let fileBox = UncheckedOptional<FileHandle>(
+            concurrencyHandles.pendingRecordedTrackFileHandle)
         DispatchQueue.main.async {
             rideBox.value?.invalidate()
             gpsBox.value?.invalidate()
@@ -412,7 +500,7 @@ final class LocationManager: NSObject {
         guard clManager == nil else { return }
         let manager = CLLocationManager()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyBest
+        manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         manager.distanceFilter = recordingDistanceFilter
         manager.activityType = .fitness
         // Background updates require "Always"; with When-In-Use only, this must stay false.
@@ -425,15 +513,15 @@ final class LocationManager: NSObject {
     }
 
     private func applyBackgroundLocationPolicy(to manager: CLLocationManager) {
-        manager.allowsBackgroundLocationUpdates =
-            (manager.authorizationStatus == .authorizedAlways) && (isRecording || outdoorLocationPreviewActive)
+        manager.allowsBackgroundLocationUpdates = isRecording || outdoorLocationPreviewActive
     }
 
     private func loadPersistedSearchBiasFromStorage() {
         let d = UserDefaults.standard
         guard d.object(forKey: Self.persistedSearchBiasLatKey) != nil,
-              let lat = d.object(forKey: Self.persistedSearchBiasLatKey) as? Double,
-              let lon = d.object(forKey: Self.persistedSearchBiasLonKey) as? Double else { return }
+            let lat = d.object(forKey: Self.persistedSearchBiasLatKey) as? Double,
+            let lon = d.object(forKey: Self.persistedSearchBiasLonKey) as? Double
+        else { return }
         let c = CLLocationCoordinate2D(latitude: lat, longitude: lon)
         guard CLLocationCoordinate2DIsValid(c) else { return }
         lastSearchBiasCoordinate = c
@@ -443,7 +531,8 @@ final class LocationManager: NSObject {
     private func persistSearchBiasIfNeeded(_ coord: CLLocationCoordinate2D) {
         let now = Date()
         if now.timeIntervalSince(lastPersistedSearchBiasAt) < 60,
-           let last = lastPersistedSearchBiasCoord {
+            let last = lastPersistedSearchBiasCoord
+        {
             let a = CLLocation(latitude: last.latitude, longitude: last.longitude)
             let b = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
             if a.distance(from: b) < 200 { return }
@@ -467,7 +556,8 @@ final class LocationManager: NSObject {
     private func startGpsStaleMonitoringIfNeeded() {
         guard isRecording || outdoorLocationPreviewActive else { return }
         guard concurrencyHandles.gpsStaleMonitorTimer == nil else { return }
-        let timer = Timer(timeInterval: gpsStaleCheckIntervalSeconds, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: gpsStaleCheckIntervalSeconds, repeats: true) {
+            [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
                 self.checkGpsSignalStale()
@@ -540,7 +630,8 @@ final class LocationManager: NSObject {
         let accel = motion.userAcceleration
         let accelMagnitude = sqrt((accel.x * accel.x) + (accel.y * accel.y) + (accel.z * accel.z))
         let rotation = motion.rotationRate
-        let rotationMagnitude = sqrt((rotation.x * rotation.x) + (rotation.y * rotation.y) + (rotation.z * rotation.z))
+        let rotationMagnitude = sqrt(
+            (rotation.x * rotation.x) + (rotation.y * rotation.y) + (rotation.z * rotation.z))
 
         let normalizedAcceleration = accelMagnitude / motionResumeAccelerationThresholdG
         let normalizedRotation = rotationMagnitude / motionResumeRotationThresholdRad
@@ -549,7 +640,8 @@ final class LocationManager: NSObject {
 
         let hasStrongInstantaneousMotion =
             accelMagnitude >= motionResumeAccelerationThresholdG
-            || (accelMagnitude >= motionResumeAccelerationThresholdG * 0.72 && rotationMagnitude >= motionResumeRotationThresholdRad)
+            || (accelMagnitude >= motionResumeAccelerationThresholdG * 0.72
+                && rotationMagnitude >= motionResumeRotationThresholdRad)
         let hasSustainedMotion = motionMovementEMA >= 1.0
 
         if hasStrongInstantaneousMotion || hasSustainedMotion {
@@ -557,7 +649,8 @@ final class LocationManager: NSObject {
         }
 
         let shouldAssistResume = shouldAllowMotionAssistedResume()
-        isMotionFallbackActive = shouldAssistResume && (hasStrongInstantaneousMotion || hasSustainedMotion)
+        isMotionFallbackActive =
+            shouldAssistResume && (hasStrongInstantaneousMotion || hasSustainedMotion)
         refreshSignalConfidence()
 
         guard shouldAssistResume else {
@@ -583,7 +676,9 @@ final class LocationManager: NSObject {
     }
 
     private func shouldSuppressGpsAutoPause() -> Bool {
-        let gpsLooksWeak = isGpsSignalStale || horizontalAccuracy < 0 || horizontalAccuracy > weakGpsHorizontalAccuracyThreshold
+        let gpsLooksWeak =
+            isGpsSignalStale || horizontalAccuracy < 0
+            || horizontalAccuracy > weakGpsHorizontalAccuracyThreshold
         return gpsLooksWeak && hasRecentStrongMotion()
     }
 
@@ -623,13 +718,18 @@ final class LocationManager: NSObject {
     private func shouldAllowMotionAssistedResume() -> Bool {
         guard isRecording, isAutoPaused else { return false }
         guard let pauseStart = lastPauseStart else { return false }
-        guard Date().timeIntervalSince(pauseStart) >= motionResumeMinimumPauseSeconds else { return false }
+        guard Date().timeIntervalSince(pauseStart) >= motionResumeMinimumPauseSeconds else {
+            return false
+        }
 
-        let gpsLooksWeak = isGpsSignalStale || horizontalAccuracy < 0 || horizontalAccuracy > weakGpsHorizontalAccuracyThreshold
+        let gpsLooksWeak =
+            isGpsSignalStale || horizontalAccuracy < 0
+            || horizontalAccuracy > weakGpsHorizontalAccuracyThreshold
         guard gpsLooksWeak else { return false }
 
         if let lastStrongMotionAt,
-           Date().timeIntervalSince(lastStrongMotionAt) > 4 {
+            Date().timeIntervalSince(lastStrongMotionAt) > 4
+        {
             motionResumeDebounceCount = 0
         }
 
@@ -692,10 +792,6 @@ final class LocationManager: NSObject {
         lastStrongMotionAt = nil
         signalConfidence = .searching
         isMotionFallbackActive = false
-        smoothedMapLat = 0
-        smoothedMapLon = 0
-        lastPublishedMapCamera = nil
-        lastMapCameraUpdateTime = .distantPast
         resetRecordedTrackStorage()
         prepareRecordedTrackStorage()
 
@@ -731,12 +827,7 @@ final class LocationManager: NSObject {
     /// Re-enables auto-follow and snaps the camera back to the rider.
     func centerMapOnUser() {
         isFollowingUser = true
-        // Reset position smoothing so the camera snaps immediately to current location
-        // instead of easing from wherever it was.
-        smoothedMapLat = 0
-        smoothedMapLon = 0
-        lastPublishedMapCamera = nil
-        lastMapCameraUpdateTime = .distantPast
+        resetMapSmoothingForFollow()
         if let loc = currentLocation {
             let target = targetHeadingDegrees(for: loc)
             smoothedMapHeadingDegrees = target
@@ -745,7 +836,7 @@ final class LocationManager: NSObject {
         } else {
             hasSeededMapHeading = false
         }
-        updateMapCamera(force: true)
+        refreshFollowModeMapPresentation(newGPSLocation: currentLocation, forcePublish: true)
     }
 
     /// Start live location + heading updates while on the outdoor screen (before or during a ride).
@@ -847,7 +938,9 @@ final class LocationManager: NSObject {
         }
         updateDuration()
 
-        logger.info("Outdoor ride stopped. Distance: \(self.totalDistance)m, Duration: \(self.rideDuration)s")
+        logger.info(
+            "Outdoor ride stopped. Distance: \(self.totalDistance)m, Duration: \(self.rideDuration)s"
+        )
     }
 
     // MARK: - GPX Export
@@ -856,27 +949,28 @@ final class LocationManager: NSObject {
     func exportGPX() -> String {
         let trackPointsBody: String
         if let pendingRecordedTrackPointsURL,
-           let data = try? Data(contentsOf: pendingRecordedTrackPointsURL),
-           let contents = String(data: data, encoding: .utf8) {
+            let data = try? Data(contentsOf: pendingRecordedTrackPointsURL),
+            let contents = String(data: data, encoding: .utf8)
+        {
             trackPointsBody = contents
         } else {
             trackPointsBody = ""
         }
         var gpx = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <gpx version="1.1" creator="Mangox" xmlns="http://www.topografix.com/GPX/1/1">
-          <trk>
-            <name>Outdoor Ride</name>
-            <trkseg>
+            <?xml version="1.0" encoding="UTF-8"?>
+            <gpx version="1.1" creator="Mangox" xmlns="http://www.topografix.com/GPX/1/1">
+              <trk>
+                <name>Outdoor Ride</name>
+                <trkseg>
 
-        """
+            """
         gpx += trackPointsBody
 
         gpx += """
-            </trkseg>
-          </trk>
-        </gpx>
-        """
+                </trkseg>
+              </trk>
+            </gpx>
+            """
 
         return gpx
     }
@@ -953,7 +1047,8 @@ final class LocationManager: NSObject {
         let lon = String(format: "%.7f", point.coordinate.longitude)
         let ele = String(format: "%.1f", point.altitude)
         let time = gpxDateFormatter.string(from: point.timestamp)
-        let line = "      <trkpt lat=\"\(lat)\" lon=\"\(lon)\"><ele>\(ele)</ele><time>\(time)</time></trkpt>\n"
+        let line =
+            "      <trkpt lat=\"\(lat)\" lon=\"\(lon)\"><ele>\(ele)</ele><time>\(time)</time></trkpt>\n"
         guard let data = line.data(using: .utf8) else { return }
         do {
             try handle.write(contentsOf: data)
@@ -963,10 +1058,12 @@ final class LocationManager: NSObject {
     }
 
     private func flushPendingHeadingIfNeeded() {
-        guard let latestHeading = concurrencyHandles.pendingHeadingStore.take() else { return }
-        heading = latestHeading
+        if let latestHeading = concurrencyHandles.pendingHeadingStore.take() {
+            heading = latestHeading
+        }
+        // 8 Hz heartbeat: extrapolate map position between GPS fixes and pick up compass updates.
         if isFollowingUser && (isRecording || outdoorLocationPreviewActive) {
-            updateMapCamera(force: false)
+            refreshFollowModeMapPresentation(newGPSLocation: nil, forcePublish: false)
         }
     }
 
@@ -982,7 +1079,7 @@ final class LocationManager: NSObject {
         rideDuration = max(0, elapsed - pauseTime)
 
         if rideDuration > 0 {
-            averageSpeed = (totalDistance / rideDuration) * 3.6 // m/s to km/h
+            averageSpeed = (totalDistance / rideDuration) * 3.6  // m/s to km/h
         }
     }
 
@@ -991,9 +1088,12 @@ final class LocationManager: NSObject {
             lastSearchBiasCoordinate = location.coordinate
         }
 
-        // Filter out inaccurate readings
-        guard location.horizontalAccuracy >= 0,
-              location.horizontalAccuracy <= acceptableAccuracy else {
+        // Filter out inaccurate readings and old cached locations
+        let locationAge = -location.timestamp.timeIntervalSinceNow
+        guard locationAge < 10.0,
+            location.horizontalAccuracy >= 0,
+            location.horizontalAccuracy <= acceptableAccuracy
+        else {
             return
         }
 
@@ -1010,7 +1110,8 @@ final class LocationManager: NSObject {
         // appearing as phantom motion while stationary.
         let rawSpeedKmh: Double
         if location.speed >= 0 {
-            let noiseFloorMs = location.speedAccuracy >= 0 ? location.speedAccuracy : defaultSpeedNoiseFloorMps
+            let noiseFloorMs =
+                location.speedAccuracy >= 0 ? location.speedAccuracy : defaultSpeedNoiseFloorMps
             var denoised = location.speed > noiseFloorMs ? location.speed : 0.0
             // Weak horizontal fixes: Doppler speed is less trustworthy; suppress very low “creep”.
             if location.horizontalAccuracy > 22 {
@@ -1067,7 +1168,7 @@ final class LocationManager: NSObject {
 
         // Keep the map centered on the rider when auto-follow is active.
         if isFollowingUser && (isRecording || outdoorLocationPreviewActive) {
-            updateMapCamera(force: false)
+            refreshFollowModeMapPresentation(newGPSLocation: location, forcePublish: false)
         }
 
         // Recording: accumulate distance + breadcrumb chunks
@@ -1077,15 +1178,20 @@ final class LocationManager: NSObject {
             let delta = location.distance(from: last)
 
             // Only accumulate if the movement is plausible (< 50 m/s ≈ 180 km/h)
-            if delta > minimumBreadcrumbDistance && delta / max(1, location.timestamp.timeIntervalSince(last.timestamp)) < 50 {
+            if delta > minimumBreadcrumbDistance
+                && delta / max(1, location.timestamp.timeIntervalSince(last.timestamp)) < 50
+            {
                 totalDistance += delta
                 // Chunked breadcrumbs — feed live tail
                 liveBreadcrumbTail.append(location.coordinate)
                 liveTailSpeedAccum += speed
                 liveTailSpeedCount += 1
                 if liveBreadcrumbTail.count >= breadcrumbChunkSize {
-                    let avg = liveTailSpeedCount > 0 ? liveTailSpeedAccum / Double(liveTailSpeedCount) : speed
-                    frozenBreadcrumbChunks.append(BreadcrumbChunk(coords: liveBreadcrumbTail, avgSpeed: avg))
+                    let avg =
+                        liveTailSpeedCount > 0
+                        ? liveTailSpeedAccum / Double(liveTailSpeedCount) : speed
+                    frozenBreadcrumbChunks.append(
+                        BreadcrumbChunk(coords: liveBreadcrumbTail, avgSpeed: avg))
                     liveBreadcrumbTail = [location.coordinate]
                     liveTailSpeedAccum = speed
                     liveTailSpeedCount = 1
@@ -1107,10 +1213,11 @@ final class LocationManager: NSObject {
 
                 // Elevation gain
                 if let lastAlt = lastAltitude,
-                   location.verticalAccuracy >= 0,
-                   location.verticalAccuracy < 20 {
+                    location.verticalAccuracy >= 0,
+                    location.verticalAccuracy < 20
+                {
                     let elevDiff = location.altitude - lastAlt
-                    if elevDiff > 0.5 { // filter noise: require >0.5m gain
+                    if elevDiff > 0.5 {  // filter noise: require >0.5m gain
                         totalElevationGain += elevDiff
                     }
                 }
@@ -1188,63 +1295,158 @@ final class LocationManager: NSObject {
         currentLapWallStart = endedAt
     }
 
-    private func updateMapCamera(force: Bool) {
-        guard let loc = currentLocation else { return }
-        let now = Date()
-        if !force, now.timeIntervalSince(lastMapCameraUpdateTime) < mapCameraUpdateMinInterval {
+    private func resetMapSmoothingForFollow() {
+        kalmanLat = nil
+        kalmanLon = nil
+        lastKalmanUpdateTime = nil
+        previousRawMapHeadingDegrees = nil
+        lastPublishedMapCamera = nil
+        lastMapCameraUpdateTime = .distantPast
+        if let loc = currentLocation {
+            smoothedRiderCoordinate = loc.coordinate
+        } else {
+            smoothedRiderCoordinate = CLLocationCoordinate2D(latitude: 0, longitude: 0)
+        }
+    }
+
+    /// Rider/camera center: Kalman state advanced to `now` so the UI keeps moving between 1 Hz GPS fixes.
+    private func mapDisplayCenterExtrapolated(
+        at now: Date,
+        fallbackCoordinate: CLLocationCoordinate2D
+    ) -> CLLocationCoordinate2D {
+        guard let kLat = kalmanLat, let kLon = kalmanLon, let tMeas = lastKalmanUpdateTime else {
+            return fallbackCoordinate
+        }
+        let rawDt = now.timeIntervalSince(tMeas)
+        let lat = kLat.extrapolatedPosition(
+            deltaTime: rawDt, maxDelta: mapExtrapolationMaxAdvanceSeconds)
+        let lon = kLon.extrapolatedPosition(
+            deltaTime: rawDt, maxDelta: mapExtrapolationMaxAdvanceSeconds)
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    private func applyKalmanMeasurement(_ loc: CLLocation, now: Date) {
+        let lat = loc.coordinate.latitude
+        let lon = loc.coordinate.longitude
+        let accM = max(loc.horizontalAccuracy, 5.0)
+        let sigmaLat = accM / 111_320.0
+        let cosLat = cos(lat * .pi / 180.0)
+        let sigmaLon = accM / (111_320.0 * max(abs(cosLat), 0.01))
+        let rLat = sigmaLat * sigmaLat
+        let rLon = sigmaLon * sigmaLon
+        let q = adaptiveProcessNoise()
+
+        if kalmanLat == nil {
+            kalmanLat = Kalman1D(state: lat, initialVariance: rLat, processNoise: q)
+            kalmanLon = Kalman1D(state: lon, initialVariance: rLon, processNoise: q)
+            lastKalmanUpdateTime = now
             return
         }
+        guard let lastT = lastKalmanUpdateTime else {
+            lastKalmanUpdateTime = now
+            return
+        }
+        let dt = now.timeIntervalSince(lastT)
+        var kLat = kalmanLat!
+        var kLon = kalmanLon!
+        kLat.update(measurement: lat, dt: dt, measurementVariance: rLat)
+        kLon.update(measurement: lon, dt: dt, measurementVariance: rLon)
+        kalmanLat = kLat
+        kalmanLon = kLon
+        lastKalmanUpdateTime = now
+    }
 
+    private func applyMapHeadingSmoothing(using loc: CLLocation) {
         let rawTarget = targetHeadingDegrees(for: loc)
+        let prevRaw = previousRawMapHeadingDegrees
+
+        var target = rawTarget
+        if speed < slowHeadingHysteresisSpeedKmh, let prev = prevRaw {
+            let jump = headingDifferenceDegrees(rawTarget, prev)
+            let nearSmoothed = headingDifferenceDegrees(rawTarget, smoothedMapHeadingDegrees)
+            if jump > headingOutlierJumpVersusPreviousDegrees,
+                nearSmoothed < headingOutlierNearSmoothedDegrees
+            {
+                target = prev
+            }
+        }
+        if speed < slowHeadingHysteresisSpeedKmh, hasSeededMapHeading,
+            headingDifferenceDegrees(target, smoothedMapHeadingDegrees) < slowHeadingMicroDeadbandDegrees
+        {
+            target = smoothedMapHeadingDegrees
+        }
+
         if !hasSeededMapHeading {
-            smoothedMapHeadingDegrees = rawTarget
+            smoothedMapHeadingDegrees = target
             hasSeededMapHeading = true
         } else {
             smoothedMapHeadingDegrees = smoothedMapHeading(
                 from: smoothedMapHeadingDegrees,
-                toward: rawTarget,
-                alpha: mapHeadingSmoothingAlpha
+                toward: target,
+                alpha: adaptiveHeadingAlpha()
             )
         }
         mapCameraHeadingDegrees = smoothedMapHeadingDegrees
+        previousRawMapHeadingDegrees = rawTarget
+    }
 
-        // EMA-smooth the camera center to eliminate GPS jitter from shaking the map.
-        if smoothedMapLat == 0 {
-            smoothedMapLat = loc.coordinate.latitude
-            smoothedMapLon = loc.coordinate.longitude
-        } else {
-            let α = mapPositionSmoothingAlpha
-            smoothedMapLat = α * loc.coordinate.latitude  + (1 - α) * smoothedMapLat
-            smoothedMapLon = α * loc.coordinate.longitude + (1 - α) * smoothedMapLon
+    /// Fuses GPS on every sample; publishes `mapCameraPosition` at ~8 Hz with animation unless `forcePublish`.
+    private func refreshFollowModeMapPresentation(
+        newGPSLocation: CLLocation? = nil,
+        forcePublish: Bool = false
+    ) {
+        guard isFollowingUser, isRecording || outdoorLocationPreviewActive else { return }
+        guard let loc = newGPSLocation ?? currentLocation else { return }
+        let now = Date()
+
+        if let gps = newGPSLocation {
+            applyKalmanMeasurement(gps, now: now)
         }
-        let center = CLLocationCoordinate2D(latitude: smoothedMapLat, longitude: smoothedMapLon)
 
-        if !force,
-           let last = lastPublishedMapCamera,
-           abs(last.lat - center.latitude) < 1e-7,
-           abs(last.lon - center.longitude) < 1e-7,
-           headingDifferenceDegrees(last.heading, smoothedMapHeadingDegrees) < 0.35 {
-            return
+        applyMapHeadingSmoothing(using: loc)
+
+        let center = mapDisplayCenterExtrapolated(at: now, fallbackCoordinate: loc.coordinate)
+        smoothedRiderCoordinate = center
+
+        if !forcePublish {
+            if now.timeIntervalSince(lastMapCameraUpdateTime) < mapCameraUpdateMinInterval {
+                return
+            }
+            if let last = lastPublishedMapCamera,
+                abs(last.lat - center.latitude) < mapPositionDeadbandDegrees,
+                abs(last.lon - center.longitude) < mapPositionDeadbandDegrees,
+                headingDifferenceDegrees(last.heading, smoothedMapHeadingDegrees) < mapHeadingDeadbandDegrees
+            {
+                return
+            }
         }
 
         lastMapCameraUpdateTime = now
         lastPublishedMapCamera = (center.latitude, center.longitude, smoothedMapHeadingDegrees)
 
-        mapCameraPosition = .camera(
-            MapCamera(
-                centerCoordinate: center,
-                distance: 800,
-                heading: smoothedMapHeadingDegrees,
-                pitch: 45
-            )
+        let camera = MapCamera(
+            centerCoordinate: center,
+            distance: 800,
+            heading: smoothedMapHeadingDegrees,
+            pitch: 45
         )
+        if forcePublish {
+            withAnimation(.easeOut(duration: 0.2)) {
+                mapCameraPosition = .camera(camera)
+            }
+        } else {
+            withAnimation(.interpolatingSpring(stiffness: 72, damping: 14)) {
+                mapCameraPosition = .camera(camera)
+            }
+        }
     }
 
     /// Prefer **course** (direction of travel) when moving; compass when slow/stopped; then course/last resort.
     private func targetHeadingDegrees(for location: CLLocation) -> Double {
         let speedMps: Double
         if location.speed >= 0 {
-            let noiseFloor = location.speedAccuracy >= 0 ? location.speedAccuracy : defaultSpeedNoiseFloorMps
+            let noiseFloor =
+                location.speedAccuracy >= 0 ? location.speedAccuracy : defaultSpeedNoiseFloorMps
             var s = location.speed > noiseFloor ? location.speed : 0
             if s * 3.6 < stationarySpeedDeadZoneKmh { s = 0 }
             speedMps = s
@@ -1273,7 +1475,9 @@ final class LocationManager: NSObject {
         return abs(d)
     }
 
-    private func smoothedMapHeading(from current: Double, toward target: Double, alpha: Double) -> Double {
+    private func smoothedMapHeading(from current: Double, toward target: Double, alpha: Double)
+        -> Double
+    {
         var delta = target - current
         while delta > 180 { delta -= 360 }
         while delta < -180 { delta += 360 }
@@ -1288,7 +1492,9 @@ final class LocationManager: NSObject {
 
 extension LocationManager: CLLocationManagerDelegate {
 
-    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+    nonisolated func locationManager(
+        _ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]
+    ) {
         guard let latest = locations.last else { return }
         Task { @MainActor in
             self.lastDelegateLocationAt = Date()
@@ -1297,7 +1503,9 @@ extension LocationManager: CLLocationManagerDelegate {
         }
     }
 
-    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+    nonisolated func locationManager(
+        _ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading
+    ) {
         guard newHeading.headingAccuracy >= 0 else { return }
         concurrencyHandles.pendingHeadingStore.store(newHeading.trueHeading)
     }
@@ -1309,7 +1517,8 @@ extension LocationManager: CLLocationManagerDelegate {
             if self.isRecording || self.outdoorLocationPreviewActive {
                 manager.startUpdatingLocation()
             }
-            logger.info("Location authorization changed to: \(manager.authorizationStatus.rawValue)")
+            logger.info(
+                "Location authorization changed to: \(manager.authorizationStatus.rawValue)")
         }
     }
 

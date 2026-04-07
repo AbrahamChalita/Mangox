@@ -14,9 +14,11 @@ struct FitnessZonesProfileCard: View {
 
     private var hasHRChanges: Bool {
         let currentMax = HeartRateZone.hasManualMaxHROverride ? "\(HeartRateZone.maxHR)" : ""
-        let currentResting = HeartRateZone.hasManualRestingHROverride ? "\(HeartRateZone.restingHR)" : ""
+        let currentResting =
+            HeartRateZone.hasManualRestingHROverride ? "\(HeartRateZone.restingHR)" : ""
         return manualMaxHRInput.trimmingCharacters(in: .whitespacesAndNewlines) != currentMax
-            || manualRestingHRInput.trimmingCharacters(in: .whitespacesAndNewlines) != currentResting
+            || manualRestingHRInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                != currentResting
     }
 
     private var hasFTPChanges: Bool { ftpDraft != PowerZone.ftp }
@@ -77,10 +79,12 @@ struct FitnessZonesProfileCard: View {
                         manualOverrideStatus = nil
                     }
                 } label: {
-                    Image(systemName: isEditingHealthData ? "checkmark.circle.fill" : "pencil.circle")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(isEditingHealthData ? AppColor.success : .white.opacity(0.55))
-                        .frame(width: 24, height: 24)
+                    Image(
+                        systemName: isEditingHealthData ? "checkmark.circle.fill" : "pencil.circle"
+                    )
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(isEditingHealthData ? AppColor.success : .white.opacity(0.55))
+                    .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
             }
@@ -139,11 +143,30 @@ struct FitnessZonesProfileCard: View {
                             .foregroundStyle(.black)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
-                            .background(hasFTPChanges ? AppColor.success : AppColor.success.opacity(0.3))
+                            .background(
+                                hasFTPChanges ? AppColor.success : AppColor.success.opacity(0.3)
+                            )
                             .clipShape(Capsule())
                     }
                     .disabled(!hasFTPChanges)
-                    Button { showFTPHistory = true } label: {
+
+                    NavigationLink(value: AppRoute.ftpSetup) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "bolt.heart.fill")
+                                .font(.system(size: 11))
+                            Text("Take Test")
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(AppColor.orange)
+                        .clipShape(Capsule())
+                    }
+
+                    Button {
+                        showFTPHistory = true
+                    } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "clock.arrow.circlepath")
                                 .font(.system(size: 11))
@@ -208,17 +231,23 @@ struct FitnessZonesProfileCard: View {
                     }
 
                     HStack(spacing: 8) {
-                        Button { applyManualOverrides() } label: {
+                        Button {
+                            applyManualOverrides()
+                        } label: {
                             Text("Apply")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(.black)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 7)
-                                .background(hasHRChanges ? AppColor.success : AppColor.success.opacity(0.3))
+                                .background(
+                                    hasHRChanges ? AppColor.success : AppColor.success.opacity(0.3)
+                                )
                                 .clipShape(Capsule())
                         }
                         .disabled(!hasHRChanges)
-                        Button { clearManualOverrides() } label: {
+                        Button {
+                            clearManualOverrides()
+                        } label: {
                             Text("Use HealthKit/Defaults")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.75))
@@ -245,9 +274,11 @@ struct FitnessZonesProfileCard: View {
                         Image(systemName: "info.circle")
                             .font(.system(size: 10))
                             .foregroundStyle(.white.opacity(0.3))
-                        Text("Enable HealthKit for accurate HR zones from Apple Watch or Health-synced devices.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.25))
+                        Text(
+                            "Enable HealthKit for accurate HR zones from Apple Watch or Health-synced devices."
+                        )
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.25))
                     }
                     Button {
                         Task { await healthKitManager.requestAuthorization() }
@@ -274,7 +305,9 @@ struct FitnessZonesProfileCard: View {
         )
     }
 
-    private func healthMetric(label: String, value: String, unit: String, source: String) -> some View {
+    private func healthMetric(label: String, value: String, unit: String, source: String)
+        -> some View
+    {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(.system(size: 9, weight: .regular))
@@ -302,19 +335,21 @@ struct FitnessZonesProfileCard: View {
             HeartRateZone.maxHR = effectiveMax
         }
         if let resting = healthKitManager.restingHeartRate,
-           resting > 0,
-           !HeartRateZone.hasManualRestingHROverride {
+            resting > 0,
+            !HeartRateZone.hasManualRestingHROverride
+        {
             HeartRateZone.restingHR = resting
         }
     }
 
     private func loadManualOverrideInputs() {
-        manualMaxHRInput     = HeartRateZone.hasManualMaxHROverride ? "\(HeartRateZone.maxHR)" : ""
-        manualRestingHRInput = HeartRateZone.hasManualRestingHROverride ? "\(HeartRateZone.restingHR)" : ""
+        manualMaxHRInput = HeartRateZone.hasManualMaxHROverride ? "\(HeartRateZone.maxHR)" : ""
+        manualRestingHRInput =
+            HeartRateZone.hasManualRestingHROverride ? "\(HeartRateZone.restingHR)" : ""
     }
 
     private func applyManualOverrides() {
-        let trimmedMax     = manualMaxHRInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedMax = manualMaxHRInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedResting = manualRestingHRInput.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if trimmedMax.isEmpty {
@@ -372,7 +407,8 @@ struct StravaConnectionCard: View {
                     .frame(width: 8, height: 8)
                 Text(stravaService.isConnected ? "Connected" : "Not connected")
                     .font(.system(size: 9))
-                    .foregroundStyle(stravaService.isConnected ? AppColor.success : AppColor.discord)
+                    .foregroundStyle(
+                        stravaService.isConnected ? AppColor.success : AppColor.discord)
             }
 
             if !stravaService.isConfigured {
@@ -384,8 +420,11 @@ struct StravaConnectionCard: View {
                     if stravaService.isConnected { disconnectStrava() } else { connectStrava() }
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: stravaService.isConnected ? "link.circle" : "link.badge.plus")
-                            .font(.system(size: 12, weight: .semibold))
+                        Image(
+                            systemName: stravaService.isConnected
+                                ? "link.circle" : "link.badge.plus"
+                        )
+                        .font(.system(size: 12, weight: .semibold))
                         Text(stravaService.isConnected ? "Disconnect Strava" : "Connect Strava")
                             .font(.system(size: 12, weight: .semibold))
                     }
@@ -428,9 +467,11 @@ struct StravaConnectionCard: View {
         Task {
             do {
                 try await stravaService.connect()
-                stravaStatus = "Connected as \(stravaService.athleteDisplayName ?? "Strava athlete")."
+                stravaStatus =
+                    "Connected as \(stravaService.athleteDisplayName ?? "Strava athlete")."
             } catch {
-                stravaStatus = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                stravaStatus =
+                    (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
     }

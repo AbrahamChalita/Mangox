@@ -30,11 +30,16 @@ enum FITWorkoutCodec {
 
         var messages: [FitMessage] = []
 
+        let increments = WorkoutExportService.scaledDistanceIncrements(
+            samples: samples,
+            targetMeters: workout.distance
+        )
         var cumulativeDistance: Double = 0
-        for s in samples {
+        for (idx, s) in samples.enumerated() {
             let t = FitTime(date: start.addingTimeInterval(TimeInterval(s.elapsedSeconds)))
-            cumulativeDistance += max(0, s.speed / 3.6)
-            let speedMps = max(0, s.speed / 3.6)
+            cumulativeDistance += increments[idx]
+            let dt = WorkoutExportService.elapsedDeltaSeconds(samples: samples, index: idx)
+            let speedMps = max(0, increments[idx] / dt)
             let dist = Measurement(value: cumulativeDistance, unit: UnitLength.meters)
             let spd = Measurement(value: speedMps, unit: UnitSpeed.metersPerSecond)
             let pwr = Measurement(value: Double(s.power), unit: UnitPower.watts)

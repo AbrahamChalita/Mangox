@@ -57,7 +57,12 @@ struct MangoxApp: App {
                         .environment(purchasesManager)
                         .environment(FitnessTracker.shared)
                         .environment(aiService)
+                        .environment(\.launchOverlayVisible, showLaunch)
                         .preferredColorScheme(.dark)
+                        .overlay {
+                            NotificationLifecycleHook()
+                                .allowsHitTesting(false)
+                        }
                 } else {
                     OnboardingView()
                         .environment(locationManager)
@@ -75,10 +80,42 @@ struct MangoxApp: App {
                 // Wait for SwiftData @Query population + BLE manager init.
                 // 900ms covers cold launch on older devices and gives the entry
                 // animation time to fully play before we trigger the exit.
+                // If Coach/Calendar/Stats still hitch on first open on a device, use Instruments
+                // (Time Profiler + SwiftUI) to confirm whether the bottleneck is fetch vs layout.
                 try? await Task.sleep(for: .milliseconds(900))
                 showLaunch = false
             }
         }
-        .modelContainer(for: [Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self, AIGeneratedPlan.self, ChatSession.self, CoachChatMessage.self])
+        .modelContainer(
+            for: [
+                Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self,
+                AIGeneratedPlan.self, ChatSession.self, CoachChatMessage.self,
+                CustomWorkoutTemplate.self, FitnessSettingsSnapshot.self,
+            ])
+    }
+}
+
+// MARK: - Local notification refresh (evening preview, missed key, FTP nudge)
+
+private struct NotificationLifecycleHook: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.modelContext) private var modelContext
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onChange(of: scenePhase) { _, phase in
+                switch phase {
+                case .active:
+                    FitnessSettingsSnapshotBackfill.runIfNeeded(modelContext: modelContext)
+                    TrainingNotificationsScheduler.evaluateMissedKeyIfNeeded(modelContext: modelContext)
+                    TrainingNotificationsScheduler.rescheduleFTPReminder()
+                case .background:
+                    TrainingNotificationsScheduler.rescheduleEveningPreview(modelContext: modelContext)
+                default:
+                    break
+                }
+            }
     }
 }

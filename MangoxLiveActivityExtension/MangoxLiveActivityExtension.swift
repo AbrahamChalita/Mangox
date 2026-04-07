@@ -86,7 +86,10 @@ private struct ZoneSegmentStrip: View {
         HStack(spacing: 3) {
             ForEach(1...maxZone, id: \.self) { z in
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(ZonePalette.accent(for: z).opacity(z <= activeZoneId && activeZoneId > 0 ? 1 : 0.2))
+                    .fill(
+                        ZonePalette.accent(for: z).opacity(
+                            z <= activeZoneId && activeZoneId > 0 ? 1 : 0.2)
+                    )
                     .frame(height: 4)
             }
         }
@@ -120,12 +123,13 @@ struct MangoxRideLiveActivityWidget: Widget {
             } compactLeading: {
                 Image(systemName: "figure.outdoor.cycle")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(ZonePalette.dominantAccent(
-                        hr: context.state.heartRateBpm,
-                        hrZ: context.state.hrZoneId,
-                        power: context.state.powerWatts,
-                        powerZ: context.state.powerZoneId
-                    ))
+                    .foregroundStyle(
+                        ZonePalette.dominantAccent(
+                            hr: context.state.heartRateBpm,
+                            hrZ: context.state.hrZoneId,
+                            power: context.state.powerWatts,
+                            powerZ: context.state.powerZoneId
+                        ))
             } compactTrailing: {
                 compactTrailingContent(context: context)
             } minimal: {
@@ -150,7 +154,8 @@ struct MangoxRideLiveActivityWidget: Widget {
 
 private func lockScreenView(context: ActivityViewContext<MangoxRideAttributes>) -> some View {
     let s = context.state
-    let accent = ZonePalette.dominantAccent(hr: s.heartRateBpm, hrZ: s.hrZoneId, power: s.powerWatts, powerZ: s.powerZoneId)
+    let accent = ZonePalette.dominantAccent(
+        hr: s.heartRateBpm, hrZ: s.hrZoneId, power: s.powerWatts, powerZ: s.powerZoneId)
     let activeZ = max(s.hrZoneId, s.powerZoneId)
 
     return VStack(alignment: .leading, spacing: 10) {
@@ -170,6 +175,7 @@ private func lockScreenView(context: ActivityViewContext<MangoxRideAttributes>) 
             Text("\(displaySpeedInt(s.speedKmh, imperial: s.useImperial))")
                 .font(.system(size: 34, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
+                .contentTransition(.numericText())
             Text(speedUnitLabel(s.useImperial))
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.secondary)
@@ -181,6 +187,7 @@ private func lockScreenView(context: ActivityViewContext<MangoxRideAttributes>) 
             Label {
                 Text(formatDistance(s.distanceM, imperial: s.useImperial))
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .contentTransition(.numericText())
             } icon: {
                 Image(systemName: "location.north.line.fill")
                     .font(.caption.weight(.semibold))
@@ -191,6 +198,7 @@ private func lockScreenView(context: ActivityViewContext<MangoxRideAttributes>) 
             Text(formatDuration(s.durationSeconds))
                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
+                .contentTransition(.numericText())
         }
 
         if let t = s.nextTurnShort, !t.isEmpty {
@@ -226,6 +234,7 @@ private func sensorChips(state: MangoxRideAttributes.ContentState) -> some View 
                     .foregroundStyle(ZonePalette.accent(for: max(1, state.hrZoneId)))
                 Text("\(state.heartRateBpm)")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .contentTransition(.numericText())
                 if state.hrZoneId > 0 {
                     Text("Z\(state.hrZoneId)")
                         .font(.system(size: 10, weight: .heavy))
@@ -243,6 +252,7 @@ private func sensorChips(state: MangoxRideAttributes.ContentState) -> some View 
                     .foregroundStyle(ZonePalette.accent(for: max(1, state.powerZoneId)))
                 Text("\(state.powerWatts)")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .contentTransition(.numericText())
                 Text("W")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -263,6 +273,7 @@ private func sensorChips(state: MangoxRideAttributes.ContentState) -> some View 
                     .foregroundStyle(.secondary)
                 Text("\(Int(state.cadenceRpm))")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .contentTransition(.numericText())
                 Text("rpm")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -278,6 +289,7 @@ private func expandedLeading(context: ActivityViewContext<MangoxRideAttributes>)
     return VStack(alignment: .leading, spacing: 2) {
         Text("\(displaySpeedInt(s.speedKmh, imperial: s.useImperial))")
             .font(.system(size: 28, weight: .bold, design: .rounded))
+            .contentTransition(.numericText())
         Text(speedUnitLabel(s.useImperial))
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
@@ -293,6 +305,7 @@ private func expandedTrailing(context: ActivityViewContext<MangoxRideAttributes>
                     .foregroundStyle(ZonePalette.accent(for: max(1, s.hrZoneId)))
                 Text("\(s.heartRateBpm) bpm")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .contentTransition(.numericText())
             }
             if s.hrZoneId > 0 {
                 ZoneSegmentStrip(activeZoneId: s.hrZoneId, maxZone: 5)
@@ -305,6 +318,7 @@ private func expandedTrailing(context: ActivityViewContext<MangoxRideAttributes>
                     .foregroundStyle(ZonePalette.accent(for: max(1, s.powerZoneId)))
                 Text("\(s.powerWatts) W")
                     .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .contentTransition(.numericText())
             }
             if s.powerZoneId > 0, s.heartRateBpm <= 0 {
                 ZoneSegmentStrip(activeZoneId: s.powerZoneId, maxZone: 5)
@@ -319,10 +333,12 @@ private func expandedBottom(context: ActivityViewContext<MangoxRideAttributes>) 
     return VStack(alignment: .leading, spacing: 4) {
         HStack {
             Text(formatDistance(s.distanceM, imperial: s.useImperial))
+                .contentTransition(.numericText())
             Text("·")
                 .foregroundStyle(.tertiary)
             Text(formatDuration(s.durationSeconds))
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .contentTransition(.numericText())
         }
         .font(.caption.weight(.medium))
         .foregroundStyle(.secondary)
@@ -336,18 +352,22 @@ private func expandedBottom(context: ActivityViewContext<MangoxRideAttributes>) 
 }
 
 @ViewBuilder
-private func compactTrailingContent(context: ActivityViewContext<MangoxRideAttributes>) -> some View {
+private func compactTrailingContent(context: ActivityViewContext<MangoxRideAttributes>) -> some View
+{
     let s = context.state
     if s.heartRateBpm > 0 {
         Text("\(s.heartRateBpm)")
             .font(.caption2.weight(.bold))
             .foregroundStyle(ZonePalette.accent(for: max(1, s.hrZoneId)))
+            .contentTransition(.numericText())
     } else if s.powerWatts > 0 {
         Text("\(s.powerWatts)")
             .font(.caption2.weight(.bold))
             .foregroundStyle(ZonePalette.accent(for: max(1, s.powerZoneId)))
+            .contentTransition(.numericText())
     } else {
         Text("\(displaySpeedInt(s.speedKmh, imperial: s.useImperial))")
             .font(.caption2.weight(.semibold))
+            .contentTransition(.numericText())
     }
 }

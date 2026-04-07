@@ -2,7 +2,8 @@ import ActivityKit
 import Foundation
 import os.log
 
-private let liveActivityLogger = Logger(subsystem: "com.abchalita.Mangox", category: "RideLiveActivity")
+private let liveActivityLogger = Logger(
+    subsystem: "com.abchalita.Mangox", category: "RideLiveActivity")
 
 /// Starts and updates a Live Activity while recording. Requires a Widget Extension target that declares
 /// `ActivityConfiguration(for: MangoxRideAttributes.self)` and embeds the `.appex` in the Mangox app.
@@ -36,7 +37,9 @@ final class RideLiveActivityManager {
         let nextTurn: String?
         if navigationService.mode == .turnByTurn, let turn = navigationService.nextTurn {
             nextTurn = turn.instruction
-        } else if navigationService.mode == .followRoute, let hint = navigationService.followRouteHint {
+        } else if navigationService.mode == .followRoute,
+            let hint = navigationService.followRouteHint
+        {
             nextTurn = hint.instruction
         } else {
             nextTurn = nil
@@ -71,7 +74,8 @@ final class RideLiveActivityManager {
         if let activity {
             let elapsed = Date().timeIntervalSince(lastUpdate)
             if elapsed >= minUpdateInterval {
-                await activity.update(ActivityContent(state: state, staleDate: nil))
+                await activity.update(
+                    ActivityContent(state: state, staleDate: Date().addingTimeInterval(15)))
                 lastUpdate = Date()
             }
         } else {
@@ -79,13 +83,15 @@ final class RideLiveActivityManager {
             do {
                 activity = try Activity.request(
                     attributes: attrs,
-                    content: ActivityContent(state: state, staleDate: nil),
+                    content: ActivityContent(
+                        state: state, staleDate: Date().addingTimeInterval(15)),
                     pushType: nil
                 )
                 lastUpdate = Date()
             } catch {
                 #if DEBUG
-                liveActivityLogger.debug("Activity.request failed: \(error.localizedDescription, privacy: .public)")
+                    liveActivityLogger.debug(
+                        "Activity.request failed: \(error.localizedDescription, privacy: .public)")
                 #endif
             }
         }
@@ -134,7 +140,8 @@ final class RideLiveActivityManager {
         if let activity {
             let elapsed = Date().timeIntervalSince(lastUpdate)
             if elapsed >= minUpdateInterval {
-                await activity.update(ActivityContent(state: state, staleDate: nil))
+                await activity.update(
+                    ActivityContent(state: state, staleDate: Date().addingTimeInterval(15)))
                 lastUpdate = Date()
             }
         } else {
@@ -142,13 +149,15 @@ final class RideLiveActivityManager {
             do {
                 activity = try Activity.request(
                     attributes: attrs,
-                    content: ActivityContent(state: state, staleDate: nil),
+                    content: ActivityContent(
+                        state: state, staleDate: Date().addingTimeInterval(15)),
                     pushType: nil
                 )
                 lastUpdate = Date()
             } catch {
                 #if DEBUG
-                liveActivityLogger.debug("Activity.request failed: \(error.localizedDescription, privacy: .public)")
+                    liveActivityLogger.debug(
+                        "Activity.request failed: \(error.localizedDescription, privacy: .public)")
                 #endif
             }
         }
@@ -159,5 +168,11 @@ final class RideLiveActivityManager {
         await activity.end(nil, dismissalPolicy: .immediate)
         self.activity = nil
         lastUpdate = .distantPast
+    }
+
+    /// Ends the Live Activity on the Lock Screen and Dynamic Island. Call when a ride stops (finished, discarded,
+    /// or prefs turn Live Activities off) — `sync*` only runs on timer ticks, so workout end must invoke this explicitly.
+    func endLiveActivity() async {
+        await endIfNeeded()
     }
 }

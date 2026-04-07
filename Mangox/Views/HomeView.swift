@@ -1,7 +1,7 @@
-import SwiftUI
-import SwiftData
 import CoreBluetooth
 import CoreLocation
+import SwiftData
+import SwiftUI
 
 // MARK: - Weekly TSS (home dashboard)
 
@@ -34,11 +34,15 @@ struct HomeView: View {
     @Environment(BLEManager.self) private var bleManager
     @Environment(DataSourceCoordinator.self) private var dataSource
     @Environment(LocationManager.self) private var locationManager
+    @Environment(\.modelContext) private var modelContext
     @Binding var navigationPath: NavigationPath
     @Binding var selectedTab: Int
 
-    @State private var pendingNavigateOutdoor = false
     @State private var trainingCache: HomeTrainingCache?
+    @State private var trainingCacheRecomputeTask: Task<Void, Never>?
+    @State private var trainingCacheGeneration: UInt64 = 0
+    /// After an empty-workout snapshot, the next non-empty fetch should not wait on debounce.
+    @State private var trainingCacheHasSeenWorkouts = false
 
     private static let recentWorkoutsDescriptor: FetchDescriptor<Workout> = {
         var d = FetchDescriptor<Workout>(sortBy: [SortDescriptor(\.startDate, order: .reverse)])
@@ -48,14 +52,14 @@ struct HomeView: View {
 
     @Query(HomeView.recentWorkoutsDescriptor) private var workouts: [Workout]
 
-    @Query private var allProgress: [TrainingPlanProgress]
+    private static let planProgressDescriptor: FetchDescriptor<TrainingPlanProgress> = {
+        var d = FetchDescriptor<TrainingPlanProgress>(
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)])
+        d.fetchLimit = 256
+        return d
+    }()
 
-    private var outdoorButtonDisabled: Bool {
-        switch locationManager.authorizationStatus {
-        case .denied, .restricted: return true
-        default: return false
-        }
-    }
+    @Query(HomeView.planProgressDescriptor) private var allProgress: [TrainingPlanProgress]
 
     // MARK: - Design System
 
@@ -65,9 +69,6 @@ struct HomeView: View {
     private var textPrimary: Color { .white.opacity(AppOpacity.textPrimary) }
     private var textSecondary: Color { .white.opacity(AppOpacity.textSecondary) }
     private var textTertiary: Color { .white.opacity(AppOpacity.textTertiary) }
-
-    /// Matches Outdoor / Indoor top-bar pills so both read as one control pair.
-    private static let topBarRideButtonWidth: CGFloat = 116
 
     // MARK: - Body
 
@@ -87,7 +88,8 @@ struct HomeView: View {
                         FTPRefreshScope {
                             VStack(spacing: 16) {
                                 trainingStatusCard
-                                if !PowerZone.hasSetFTP {
+                                nextWorkoutFromPlanCard
+                                if needsFTPTest {
                                     ftpPromptCard
                                 }
                             }
@@ -107,43 +109,118 @@ struct HomeView: View {
             // home screen appears, so the trainer is already connected (or
             // connecting) by the time the user taps "Ride".
             if bleManager.bluetoothState == .poweredOn,
-               !bleManager.trainerConnectionState.isConnected,
-               !dataSource.wifiConnectionState.isConnected {
+                !bleManager.trainerConnectionState.isConnected,
+                !dataSource.wifiConnectionState.isConnected
+            {
                 bleManager.reconnectOrScan()
             }
         }
-        .onChange(of: locationManager.authorizationStatus) { _, newStatus in
-            guard pendingNavigateOutdoor else { return }
-            if locationManager.isAuthorized {
-                pendingNavigateOutdoor = false
-                navigationPath.append(AppRoute.outdoorDashboard)
-            } else if newStatus == .denied || newStatus == .restricted {
-                pendingNavigateOutdoor = false
-            }
+        .onChange(of: workouts, initial: true) { _, _ in
+            scheduleTrainingCacheRecompute()
         }
-        .task(id: workouts.count) {
-            recomputeTrainingCache()
+        .onReceive(NotificationCenter.default.publisher(for: .mangoxWorkoutAggregatesMayHaveChanged)) {
+            _ in
+            scheduleTrainingCacheRecompute()
         }
     }
 
-    private func recomputeTrainingCache() {
-        // Single Calendar + date boundary computation shared across all helpers,
-        // avoiding 3 independent Calendar.current + startOfWeek calls.
-        let calendar = Calendar.current
-        let now = Date()
-        let startOfWeek = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
-        let fourWeeksAgo = calendar.date(byAdding: .day, value: -28, to: now) ?? now
+    /// Coalesces SwiftData churn; first populated snapshot runs immediately, then debounces.
+    private func scheduleTrainingCacheRecompute() {
+        if workouts.isEmpty {
+            trainingCacheRecomputeTask?.cancel()
+            trainingCacheGeneration += 1
+            trainingCacheHasSeenWorkouts = false
+            let dto = HomeTrainingAggregateMath.compute(
+                slices: [],
+                now: Date(),
+                timeZone: .current,
+                locale: .current
+            )
+            trainingCache = trainingCacheFromDTO(dto)
+            return
+        }
+        if !trainingCacheHasSeenWorkouts {
+            trainingCacheHasSeenWorkouts = true
+            trainingCacheRecomputeTask?.cancel()
+            Task { @MainActor in
+                await runTrainingCacheGeneration()
+            }
+            return
+        }
+        if trainingCache == nil {
+            trainingCacheRecomputeTask?.cancel()
+            Task { @MainActor in
+                await runTrainingCacheGeneration()
+            }
+        } else {
+            trainingCacheRecomputeTask?.cancel()
+            trainingCacheRecomputeTask = Task { @MainActor in
+                // 120ms debounce balances responsiveness with CPU efficiency
+                // Aggressive churn protection: coalesces rapid SwiftData notifications
+                try? await Task.sleep(for: .milliseconds(120))
+                guard !Task.isCancelled else { return }
+                await runTrainingCacheGeneration()
+            }
+        }
+    }
 
-        let weeklyTSS = computeWeeklyTSS(calendar: calendar, startOfWeek: startOfWeek)
-        let chronicLoad = computeChronicLoad(fourWeeksAgo: fourWeeksAgo)
-        let acwr = chronicLoad > 0 && !workouts.isEmpty ? weeklyTSS / chronicLoad : 0
-        trainingCache = HomeTrainingCache(
-            weeklyTSS: weeklyTSS,
-            chronicLoad: chronicLoad,
-            acwr: acwr,
-            weekRides: workouts.filter { $0.startDate >= startOfWeek }.count,
-            weekBars: weeklyBreakdownComputed(calendar: calendar, startOfWeek: startOfWeek)
+    @MainActor
+    private func runTrainingCacheGeneration() async {
+        await MangoxDebugPerformance.runInterval("Home.trainingCache") {
+            await runTrainingCacheGenerationBody()
+        }
+    }
+
+    @MainActor
+    private func runTrainingCacheGenerationBody() async {
+        trainingCacheGeneration += 1
+        let generation = trainingCacheGeneration
+        let slices = workouts.map { HomeWorkoutMetricSlice(startDate: $0.startDate, tss: $0.tss) }
+        let now = Date()
+        let timeZone = TimeZone.current
+        let locale = Locale.current
+        let dto = await Task.detached(priority: .utility) {
+            await HomeTrainingAggregateMath.compute(
+                slices: slices,
+                now: now,
+                timeZone: timeZone,
+                locale: locale
+            )
+        }.value
+        guard generation == trainingCacheGeneration else { return }
+        trainingCache = trainingCacheFromDTO(dto)
+    }
+
+    private func trainingCacheFromDTO(_ dto: HomeTrainingCacheDTO) -> HomeTrainingCache {
+        let weekBars = dto.weekBars.map { bar in
+            WeekDayTSS(
+                id: bar.id,
+                day: bar.day,
+                tss: bar.tss,
+                color: weekBarColor(tss: bar.tss)
+            )
+        }
+        return HomeTrainingCache(
+            weeklyTSS: dto.weeklyTSS,
+            chronicLoad: dto.chronicLoad,
+            acwr: dto.acwr,
+            weekRides: dto.weekRides,
+            weekBars: weekBars
         )
+    }
+
+    private func weekBarColor(tss: Double) -> Color {
+        if tss == 0 {
+            return .clear
+        } else if tss < 50 {
+            return success.opacity(0.6)
+        } else if tss < 100 {
+            return AppColor.yellow
+        } else if tss < 150 {
+            return mango
+        } else {
+            return AppColor.orange
+        }
     }
 
     // MARK: - Top Bar
@@ -157,64 +234,6 @@ struct HomeView: View {
                 .minimumScaleFactor(0.85)
 
             Spacer(minLength: 8)
-
-            HStack(spacing: 8) {
-                Button {
-                    switch locationManager.authorizationStatus {
-                    case .notDetermined:
-                        pendingNavigateOutdoor = true
-                        locationManager.requestPermission()
-                    case .authorizedWhenInUse, .authorizedAlways:
-                        navigationPath.append(AppRoute.outdoorDashboard)
-                    case .denied, .restricted:
-                        break
-                    @unknown default:
-                        break
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "location.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("Outdoor")
-                            .font(.system(size: 13, weight: .bold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .frame(width: Self.topBarRideButtonWidth)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(Capsule())
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(MangoxPressStyle())
-                .opacity(outdoorButtonDisabled ? 0.45 : 1)
-                .disabled(outdoorButtonDisabled)
-                .accessibilityLabel("Outdoor ride")
-                .accessibilityHint("Opens the outdoor ride screen. Location access is used when you allow it.")
-
-                Button {
-                    navigationPath.append(AppRoute.indoorRideSetup)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "bolt.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("Indoor")
-                            .font(.system(size: 13, weight: .bold))
-                    }
-                    .foregroundStyle(AppColor.bg)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .frame(width: Self.topBarRideButtonWidth)
-                    .background(mango)
-                    .clipShape(Capsule())
-                }
-                .buttonStyle(MangoxPressStyle())
-                .accessibilityLabel("Indoor ride")
-                .accessibilityHint("Connect a smart trainer and start an indoor session.")
-            }
         }
     }
 
@@ -287,9 +306,10 @@ struct HomeView: View {
                     VStack(spacing: 4) {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(dayData.tss == 0 ? Color.white.opacity(0.06) : dayData.color)
-                            .frame(height: maxTSS > 0 && dayData.tss > 0
-                                ? max(3, CGFloat(dayData.tss / maxTSS) * 24)
-                                : 3)
+                            .frame(
+                                height: maxTSS > 0 && dayData.tss > 0
+                                    ? max(3, CGFloat(dayData.tss / maxTSS) * 24)
+                                    : 3)
                         Text(String(dayData.day.prefix(1)))
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
@@ -301,6 +321,55 @@ struct HomeView: View {
         }
         .padding(16)
         .cardStyle(cornerRadius: 14)
+    }
+
+    private var nextWorkoutFromPlanCard: some View {
+        Group {
+            if let nw = PlanLibrary.nextScheduledWorkout(
+                allProgress: allProgress, modelContext: modelContext)
+            {
+                Button {
+                    navigationPath.append(
+                        AppRoute.connectionForPlan(planID: nw.planID, dayID: nw.day.id))
+                } label: {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            Circle()
+                                .fill(mango.opacity(0.15))
+                                .frame(width: 46, height: 46)
+                            Image(systemName: "calendar.badge.clock")
+                                .font(.title3)
+                                .foregroundStyle(mango)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("NEXT WORKOUT")
+                                .font(.system(size: 10, weight: .heavy))
+                                .foregroundStyle(textTertiary)
+                                .tracking(0.8)
+                            Text(nw.day.title)
+                                .font(.headline)
+                                .foregroundStyle(textPrimary)
+                                .multilineTextAlignment(.leading)
+                            Text(nw.plan.name)
+                                .font(.caption)
+                                .foregroundStyle(textSecondary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(textTertiary)
+                    }
+                    .padding(18)
+                    .cardStyle(cornerRadius: 14)
+                }
+                .buttonStyle(MangoxPressStyle())
+                .accessibilityLabel("Next workout: \(nw.day.title)")
+            }
+        }
     }
 
     private func trainingMetric(value: String, label: String, color: Color) -> some View {
@@ -340,6 +409,16 @@ struct HomeView: View {
 
     // MARK: - FTP Prompt
 
+    private var needsFTPTest: Bool {
+        if !PowerZone.hasSetFTP { return true }
+        if let lastUpdate = PowerZone.lastFTPUpdate,
+            Date().timeIntervalSince(lastUpdate) > 42 * 24 * 3600
+        {
+            return true
+        }
+        return false
+    }
+
     private var ftpPromptCard: some View {
         Button {
             navigationPath.append(AppRoute.ftpSetup)
@@ -356,13 +435,19 @@ struct HomeView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Set Your FTP")
+                    Text(PowerZone.hasSetFTP ? "Recalibrate FTP" : "Set Your FTP")
                         .font(.headline)
                         .foregroundStyle(textPrimary)
 
-                    Text("Required for accurate power zones")
-                        .font(.subheadline)
-                        .foregroundStyle(textSecondary)
+                    Text(
+                        PowerZone.hasSetFTP
+                            ? "It's been over 6 weeks since your last baseline."
+                            : "Required for accurate power zones"
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(textSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer()
@@ -396,7 +481,9 @@ struct HomeView: View {
 
                 Spacer()
 
-                Button { selectedTab = 1 } label: {
+                Button {
+                    selectedTab = 1
+                } label: {
                     Text("See all")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(mango)
@@ -413,9 +500,11 @@ struct HomeView: View {
                     Text("No rides yet")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(textTertiary)
-                    Text("Tap Indoor or Outdoor above to ride. Use the Coach tab for your training plan.")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
+                    Text(
+                        "Tap Indoor or Outdoor above to ride. Use the Coach tab for your training plan."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 30)
@@ -438,76 +527,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Training Data
-
-    private func computeWeeklyTSS(calendar: Calendar, startOfWeek: Date) -> Double {
-        workouts
-            .filter { $0.startDate >= startOfWeek }
-            .reduce(0) { $0 + $1.tss }
-    }
-
-    private func computeChronicLoad(fourWeeksAgo: Date) -> Double {
-        let recentWorkouts = workouts.filter { $0.startDate >= fourWeeksAgo }
-        guard !recentWorkouts.isEmpty else { return 300 }
-        return recentWorkouts.reduce(0) { $0 + $1.tss } / 4.0
-    }
-
-    private func weeklyBreakdownComputed(calendar: Calendar, startOfWeek: Date) -> [WeekDayTSS] {
-        (0..<7).map { dayOffset in
-            let dayDate = calendar.date(byAdding: .day, value: dayOffset, to: startOfWeek) ?? startOfWeek
-            let dayStart = calendar.startOfDay(for: dayDate)
-            let comps = calendar.dateComponents([.year, .month, .day], from: dayStart)
-            let rowId = "\(comps.year ?? 0)-\(comps.month ?? 0)-\(comps.day ?? 0)"
-            let dayLabel = dayStart.formatted(.dateTime.weekday(.narrow))
-
-            let tss = workouts
-                .filter { calendar.isDate($0.startDate, inSameDayAs: dayDate) }
-                .reduce(0.0) { $0 + $1.tss }
-
-            let color: Color
-            if tss == 0 {
-                color = .clear
-            } else if tss < 50 {
-                color = success.opacity(0.6)
-            } else if tss < 100 {
-                color = AppColor.yellow
-            } else if tss < 150 {
-                color = mango
-            } else {
-                color = AppColor.orange
-            }
-
-            return WeekDayTSS(id: rowId, day: dayLabel, tss: tss, color: color)
-        }
-    }
-}
-
-// MARK: - Color Extension
-
-extension Color {
-    init(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let a, r, g, b: UInt64
-        switch hex.count {
-        case 3:
-            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
-        case 6:
-            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
-        case 8:
-            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
-        default:
-            (a, r, g, b) = (255, 0, 0, 0)
-        }
-        self.init(
-            .sRGB,
-            red: Double(r) / 255,
-            green: Double(g) / 255,
-            blue: Double(b) / 255,
-            opacity: Double(a) / 255
-        )
-    }
 }
 
 // MARK: - Workout Extension

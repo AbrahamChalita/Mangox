@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct DashboardView: View {
     @Environment(BLEManager.self) private var bleManager
@@ -9,8 +9,20 @@ struct DashboardView: View {
     @Binding var navigationPath: NavigationPath
     var planID: String? = nil
     var planDayID: String? = nil
+    /// When set, guided ERG follows this saved template; plan completion and adaptive load are skipped.
+    var customWorkoutTemplateID: UUID? = nil
 
     @Environment(\.modelContext) private var modelContext
+
+    private static let planProgressDescriptor: FetchDescriptor<TrainingPlanProgress> = {
+        var d = FetchDescriptor<TrainingPlanProgress>(
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)])
+        d.fetchLimit = 256
+        return d
+    }()
+
+    @Query(Self.planProgressDescriptor) private var allProgress: [TrainingPlanProgress]
+
     @Environment(\.horizontalSizeClass) private var hSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
@@ -18,6 +30,8 @@ struct DashboardView: View {
     @State private var workoutManager = WorkoutManager()
     @State private var hapticManager = HapticManager()
     @State private var guidedSession = GuidedSessionManager()
+    /// Resolved from SwiftData when `customWorkoutTemplateID` is non-nil.
+    @State private var loadedCustomPlanDay: PlanDay?
     /// Full-screen end/discard sheet (matches outdoor dashboard chrome).
     @State private var showIndoorEndConfirmation = false
 
@@ -66,174 +80,196 @@ struct DashboardView: View {
 
     var body: some View {
         FTPRefreshScope {
-        ZStack {
-            Group {
-                if routeManager.hasRoute || accessibilityReduceTransparency {
-                    Color(red: 0.03, green: 0.04, blue: 0.06)
-                } else {
+            ZStack {
+                Group {
+                    if routeManager.hasRoute || accessibilityReduceTransparency {
+                        Color(red: 0.03, green: 0.04, blue: 0.06)
+                    } else {
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.035, green: 0.05, blue: 0.09),
+                                Color(red: 0.03, green: 0.04, blue: 0.06),
+                                Color(red: 0.045, green: 0.045, blue: 0.075),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    }
+                }
+                .ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    headerBar
+
+                    if hSizeClass == .compact {
+                        if isLandscapePhone {
+                            compactLandscapeLayout
+                        } else {
+                            compactLayout
+                                .frame(maxHeight: .infinity)
+                        }
+                    } else {
+                        wideLayout
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    }
+
+                    // Control bar
+                    WorkoutControlBar(
+                        state: workoutManager.state,
+                        onStart: { workoutManager.startWorkout() },
+                        onPause: { workoutManager.pause() },
+                        onResume: { workoutManager.resume() },
+                        onLap: { workoutManager.lap() },
+                        showEndConfirmation: $showIndoorEndConfirmation,
+                        showLap: prefs.showLaps
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                }
+
+                if showIndoorEndConfirmation {
+                    indoorEndWorkoutOverlay
+                        .zIndex(200)
+                }
+            }
+            .overlay {
+                // Edge glow — zone color washes in from both screen edges on zone change.
+                // Feels directional and immersive, like the room is lighting up.
+                HStack(spacing: 0) {
                     LinearGradient(
-                        colors: [
-                            Color(red: 0.035, green: 0.05, blue: 0.09),
-                            Color(red: 0.03, green: 0.04, blue: 0.06),
-                            Color(red: 0.045, green: 0.045, blue: 0.075)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                        colors: [zone.color.opacity(zonePulse ? 0.18 : 0.06), .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: 120)
+                    Spacer()
+                    LinearGradient(
+                        colors: [.clear, zone.color.opacity(zonePulse ? 0.18 : 0.06)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: 120)
+                }
+                .allowsHitTesting(false)
+                .ignoresSafeArea()
+                .animation(
+                    .easeOut(duration: accessibilityReduceMotion ? 0 : 0.25), value: zonePulse)
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .onAppear {
+                dataSource.updateActiveSource()
+                workoutManager.configure(
+                    bleManager: bleManager, modelContext: modelContext, dataSource: dataSource)
+                workoutManager.configureRoute(routeManager)
+
+                if let tid = customWorkoutTemplateID {
+                    let tidCapture = tid
+                    let pred = #Predicate<CustomWorkoutTemplate> { $0.id == tidCapture }
+                    var fd = FetchDescriptor(predicate: pred)
+                    fd.fetchLimit = 1
+                    loadedCustomPlanDay = try? modelContext.fetch(fd).first?.asPlanDay()
+                    workoutManager.activePlanDayID = nil
+                    workoutManager.activePlanID = nil
+                } else {
+                    loadedCustomPlanDay = nil
+                    workoutManager.activePlanDayID = planDayID
+                    workoutManager.activePlanID = planID
+                }
+
+                configureGuidedSession()
+
+                // Auto-start: the rider already committed by tapping "Ride" on
+                // the connection screen, so skip the redundant START tap.
+                // The 5-second trainer engage delay gives them time to clip in.
+                if workoutManager.state == .idle {
+                    workoutManager.startWorkout()
+                }
+            }
+            .onDisappear {
+                // Clean up BLE subscriptions and timer without relying on deinit
+                // actor isolation (which is inconsistent across Swift toolchain versions).
+                workoutManager.tearDown()
+            }
+            .onChange(of: zone.id) { _, newZone in
+                if workoutManager.state == .recording {
+                    hapticManager.zoneChanged(to: newZone)
+                    if accessibilityReduceMotion {
+                        zonePulse = false
+                    } else {
+                        zonePulse = true
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(250))
+                            zonePulse = false
+                        }
+                    }
+                }
+            }
+            .onChange(of: workoutManager.state) { oldState, newState in
+                switch (oldState, newState) {
+                case (.idle, .recording):
+                    hapticManager.workoutStarted()
+                case (.recording, .autoPaused):
+                    hapticManager.autoPaused()
+                case (.autoPaused, .recording):
+                    hapticManager.autoResumed()
+                case (_, .finished):
+                    hapticManager.workoutEnded()
+                default:
+                    break
+                }
+                // Elapsed time does not tick after `endWorkout()` stops the timer, so Live Activity would stay "live" forever.
+                Task {
+                    await RideLiveActivityManager.shared.syncIndoorRecording(
+                        isRecording: newState == .recording,
+                        prefs: prefs,
+                        workoutManager: workoutManager,
+                        bleManager: bleManager
                     )
                 }
             }
-            .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                headerBar
-
-                if hSizeClass == .compact {
-                    if isLandscapePhone {
-                        compactLandscapeLayout
-                    } else {
-                        compactLayout
-                            .frame(maxHeight: .infinity)
-                    }
-                } else {
-                    wideLayout
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                }
-
-                // Control bar
-                WorkoutControlBar(
-                    state: workoutManager.state,
-                    onStart: { workoutManager.startWorkout() },
-                    onPause: { workoutManager.pause() },
-                    onResume: { workoutManager.resume() },
-                    onLap: { workoutManager.lap() },
-                    showEndConfirmation: $showIndoorEndConfirmation,
-                    showLap: prefs.showLaps
-                )
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
+            .onChange(of: workoutManager.currentLapNumber) { old, new in
+                if new > old { hapticManager.lapCompleted() }
             }
-
-            if showIndoorEndConfirmation {
-                indoorEndWorkoutOverlay
-                    .zIndex(200)
+            .onChange(of: workoutManager.justCompletedGoals) { _, completed in
+                if !completed.isEmpty { hapticManager.goalCompleted() }
             }
-        }
-        .overlay {
-            // Edge glow — zone color washes in from both screen edges on zone change.
-            // Feels directional and immersive, like the room is lighting up.
-            HStack(spacing: 0) {
-                LinearGradient(
-                    colors: [zone.color.opacity(zonePulse ? 0.18 : 0.06), .clear],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .frame(width: 120)
-                Spacer()
-                LinearGradient(
-                    colors: [.clear, zone.color.opacity(zonePulse ? 0.18 : 0.06)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .frame(width: 120)
-            }
-            .allowsHitTesting(false)
-            .ignoresSafeArea()
-            .animation(.easeOut(duration: accessibilityReduceMotion ? 0 : 0.25), value: zonePulse)
-        }
-        .toolbar(.hidden, for: .navigationBar)
-        .onAppear {
-            dataSource.updateActiveSource()
-            workoutManager.configure(bleManager: bleManager, modelContext: modelContext, dataSource: dataSource)
-            workoutManager.configureRoute(routeManager)
-            configureGuidedSession()
-            // Tell WorkoutManager which plan day this session belongs to
-            // so the Workout model gets tagged for deletion-aware un-marking.
-            workoutManager.activePlanDayID = planDayID
-            workoutManager.activePlanID = planID
-
-            // Auto-start: the rider already committed by tapping "Ride" on
-            // the connection screen, so skip the redundant START tap.
-            // The 5-second trainer engage delay gives them time to clip in.
-            if workoutManager.state == .idle {
-                workoutManager.startWorkout()
-            }
-        }
-        .onDisappear {
-            // Clean up BLE subscriptions and timer without relying on deinit
-            // actor isolation (which is inconsistent across Swift toolchain versions).
-            workoutManager.tearDown()
-        }
-        .onChange(of: zone.id) { _, newZone in
-            if workoutManager.state == .recording {
-                hapticManager.zoneChanged(to: newZone)
-                if accessibilityReduceMotion {
-                    zonePulse = false
-                } else {
-                    zonePulse = true
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(250))
-                        zonePulse = false
-                    }
+            .onChange(of: workoutManager.activeDistance) { _, dist in
+                guard workoutManager.state == .recording else { return }
+                let km = Int(dist / 1000)
+                let milestone = (km / 10) * 10
+                if milestone >= 10 && milestone > lastMilestoneKm {
+                    lastMilestoneKm = milestone
+                    flashMilestone("\(milestone) km")
+                    hapticManager.milestone()
                 }
             }
-        }
-        .onChange(of: workoutManager.state) { oldState, newState in
-            switch (oldState, newState) {
-            case (.idle, .recording):
-                hapticManager.workoutStarted()
-            case (.recording, .autoPaused):
-                hapticManager.autoPaused()
-            case (.autoPaused, .recording):
-                hapticManager.autoResumed()
-            case (_, .finished):
-                hapticManager.workoutEnded()
-            default:
-                break
+            .onChange(of: workoutManager.displayPower) { _, newPower in
+                // Auto-resume when the last completed second shows power again (works for BLE + Wi‑Fi).
+                if workoutManager.state == .autoPaused && newPower > 0 {
+                    workoutManager.resume()
+                }
             }
-        }
-        .onChange(of: workoutManager.currentLapNumber) { old, new in
-            if new > old { hapticManager.lapCompleted() }
-        }
-        .onChange(of: workoutManager.justCompletedGoals) { _, completed in
-            if !completed.isEmpty { hapticManager.goalCompleted() }
-        }
-        .onChange(of: workoutManager.activeDistance) { _, dist in
-            guard workoutManager.state == .recording else { return }
-            let km = Int(dist / 1000)
-            let milestone = (km / 10) * 10
-            if milestone >= 10 && milestone > lastMilestoneKm {
-                lastMilestoneKm = milestone
-                flashMilestone("\(milestone) km")
-                hapticManager.milestone()
+            .onChange(of: workoutManager.elapsedSeconds) { _, _ in
+                Task {
+                    await RideLiveActivityManager.shared.syncIndoorRecording(
+                        isRecording: workoutManager.state == .recording,
+                        prefs: prefs,
+                        workoutManager: workoutManager,
+                        bleManager: bleManager
+                    )
+                }
             }
-        }
-        .onChange(of: workoutManager.displayPower) { _, newPower in
-            // Auto-resume when the last completed second shows power again (works for BLE + Wi‑Fi).
-            if workoutManager.state == .autoPaused && newPower > 0 {
-                workoutManager.resume()
+            .overlay(alignment: .top) {
+                if milestoneVisible, let text = milestoneText {
+                    milestoneToast(text)
+                        .padding(.top, 56)
+                        .transition(
+                            .asymmetric(
+                                insertion: .move(edge: .top).combined(with: .opacity),
+                                removal: .opacity
+                            ))
+                }
             }
-        }
-        .onChange(of: workoutManager.elapsedSeconds) { _, _ in
-            Task {
-                await RideLiveActivityManager.shared.syncIndoorRecording(
-                    isRecording: workoutManager.state == .recording,
-                    prefs: prefs,
-                    workoutManager: workoutManager,
-                    bleManager: bleManager
-                )
-            }
-        }
-        .overlay(alignment: .top) {
-            if milestoneVisible, let text = milestoneText {
-                milestoneToast(text)
-                    .padding(.top, 56)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .top).combined(with: .opacity),
-                        removal: .opacity
-                    ))
-            }
-        }
-        .animation(.easeOut(duration: accessibilityReduceMotion ? 0 : 0.35), value: milestoneVisible)
         }
     }
 
@@ -250,9 +286,10 @@ struct DashboardView: View {
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.white.opacity(0.75))
                             .frame(width: 28, height: 28)
-                            .modifier(IndoorGlassOrOpaqueCircle(
-                                useOpaque: accessibilityReduceTransparency
-                            ))
+                            .modifier(
+                                IndoorGlassOrOpaqueCircle(
+                                    useOpaque: accessibilityReduceTransparency
+                                ))
                     }
                     .frame(minHeight: 28)
                 }
@@ -302,7 +339,10 @@ struct DashboardView: View {
             .padding(.bottom, guidedSession.isActive ? 6 : 14)
 
             // Mini overall progress bar when guided session is active
-            if guidedSession.isActive && (workoutManager.state == .recording || workoutManager.state == .paused || workoutManager.state == .autoPaused) {
+            if guidedSession.isActive
+                && (workoutManager.state == .recording || workoutManager.state == .paused
+                    || workoutManager.state == .autoPaused)
+            {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Rectangle()
@@ -310,7 +350,8 @@ struct DashboardView: View {
                         Rectangle()
                             .fill(AppColor.mango)
                             .frame(width: max(0, geo.size.width * guidedSession.overallProgress))
-                            .animation(.easeInOut(duration: 0.5), value: guidedSession.overallProgress)
+                            .animation(
+                                .easeInOut(duration: 0.5), value: guidedSession.overallProgress)
                     }
                 }
                 .frame(height: 3)
@@ -331,10 +372,12 @@ struct DashboardView: View {
                 Text("End workout?")
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(.white)
-                Text("We’ll open the summary next so you can review power, heart rate, and time — or discard this session with no save.")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(
+                    "We’ll open the summary next so you can review power, heart rate, and time — or discard this session with no save."
+                )
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 12) {
                     Button {
@@ -479,7 +522,10 @@ struct DashboardView: View {
 
             goalProgressSection(fit: fit)
 
-            if guidedSession.isActive && (workoutManager.state == .recording || workoutManager.state == .paused || workoutManager.state == .autoPaused) {
+            if guidedSession.isActive
+                && (workoutManager.state == .recording || workoutManager.state == .paused
+                    || workoutManager.state == .autoPaused)
+            {
                 guidedSessionCard(condensed: fit)
             }
 
@@ -551,7 +597,8 @@ struct DashboardView: View {
                             )
                             .frame(maxWidth: .infinity)
 
-                            indoorLivePerformanceBar(compact: true, layoutMode: .stacked, collapsible: true)
+                            indoorLivePerformanceBar(
+                                compact: true, layoutMode: .stacked, collapsible: true)
 
                             PowerGraphView(
                                 powerHistory: workoutManager.powerHistory,
@@ -598,7 +645,10 @@ struct DashboardView: View {
 
                 goalProgressSection(fit: false)
 
-                if guidedSession.isActive && (workoutManager.state == .recording || workoutManager.state == .paused || workoutManager.state == .autoPaused) {
+                if guidedSession.isActive
+                    && (workoutManager.state == .recording || workoutManager.state == .paused
+                        || workoutManager.state == .autoPaused)
+                {
                     guidedSessionCard(condensed: false)
                 }
 
@@ -726,7 +776,9 @@ struct DashboardView: View {
         .cardStyle()
     }
 
-    private func phoneMetricCell(label: String, value: String, unit: String, color: Color = .white) -> some View {
+    private func phoneMetricCell(label: String, value: String, unit: String, color: Color = .white)
+        -> some View
+    {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(.system(size: 11, weight: .medium))
@@ -736,6 +788,8 @@ struct DashboardView: View {
                 Text(value)
                     .font(.system(size: 26, weight: .bold, design: .monospaced))
                     .foregroundStyle(color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
                 Text(unit)
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.3))
@@ -792,7 +846,8 @@ struct DashboardView: View {
                         compact: false
                     )
 
-                    indoorLivePerformanceBar(compact: false, layoutMode: .stacked, collapsible: true)
+                    indoorLivePerformanceBar(
+                        compact: false, layoutMode: .stacked, collapsible: true)
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
@@ -807,7 +862,9 @@ struct DashboardView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     if guidedSession.isActive,
-                       workoutManager.state == .recording || workoutManager.state == .paused || workoutManager.state == .autoPaused {
+                        workoutManager.state == .recording || workoutManager.state == .paused
+                            || workoutManager.state == .autoPaused
+                    {
                         guidedSessionCard(condensed: false)
                     }
 
@@ -975,6 +1032,14 @@ struct DashboardView: View {
             isWorkoutActive: isActive,
             showRouteSimulationFooterHint: guidedSession.isActive,
             condensed: condensed,
+            intensityMultiplier: workoutManager.intensityMultiplier,
+            onIntensityChange: { newScale in
+                workoutManager.intensityMultiplier = newScale
+            },
+            routeDifficultyScale: workoutManager.routeDifficultyScale,
+            onDifficultyChange: { newScale in
+                workoutManager.routeDifficultyScale = newScale
+            },
             onRouteSim: {
                 if case .simulation = workoutManager.trainerMode {
                     workoutManager.stopRouteSimulation()
@@ -1011,9 +1076,26 @@ struct DashboardView: View {
     // MARK: - Guided Session Setup
 
     private func configureGuidedSession() {
-        guard let dayID = planDayID, let day = plan.day(id: dayID) else { return }
+        let day: PlanDay?
+        if let custom = loadedCustomPlanDay {
+            day = custom
+        } else if let dayID = planDayID {
+            day = plan.day(id: dayID)
+        } else {
+            day = nil
+        }
+        guard let day else { return }
 
-        guidedSession.configure(planDay: day)
+        let scale: Double
+        if customWorkoutTemplateID != nil {
+            scale = 1.0
+        } else {
+            let resolvedPlanID = planID ?? CachedPlan.shared.id
+            scale =
+                allProgress.first(where: { $0.planID == resolvedPlanID })?.adaptiveLoadMultiplier
+                ?? 1.0
+        }
+        guidedSession.configure(planDay: day, adaptiveERGScale: scale)
 
         // Wire trainer mode changes: when the guided session advances to a new step,
         // automatically update the trainer control mode.
@@ -1105,16 +1187,30 @@ struct DashboardView: View {
     private func endRide() {
         workoutManager.endWorkout()
 
-        let workoutIsValid = workoutManager.workout?.isValid ?? false
+        let completedWorkout = workoutManager.workout
+        let workoutIsValid = completedWorkout?.isValid ?? false
 
         // Only mark plan day complete if the workout meets minimum duration.
         // This prevents accidental 3-second starts from counting as "done".
-        if let dayID = planDayID, workoutIsValid {
+        // Custom / ZWO templates are not part of `TrainingPlanProgress`.
+        if customWorkoutTemplateID == nil, let dayID = planDayID, workoutIsValid {
             markPlanDayCompleted(dayID: dayID)
+            if let w = completedWorkout, let day = plan.day(id: dayID) {
+                let resolvedPlanID = planID ?? CachedPlan.shared.id
+                if let progress = allProgress.first(where: { $0.planID == resolvedPlanID }) {
+                    AdaptiveTrainingAdjuster.adjustAfterCompletedPlanWorkout(
+                        workout: w, planDay: day, progress: progress)
+                    try? modelContext.save()
+                }
+            }
         }
 
         // Tear down guided session
         guidedSession.tearDown()
+
+        if let w = completedWorkout {
+            Task { await healthKitManager.saveCyclingWorkoutToHealthIfEnabled(w) }
+        }
 
         if let workoutID = workoutManager.workout?.id {
             // Replace entire navigation stack with summary
@@ -1122,8 +1218,6 @@ struct DashboardView: View {
             navigationPath.append(AppRoute.summary(workoutID: workoutID))
         }
     }
-
-    @Query private var allProgress: [TrainingPlanProgress]
 
     private func markPlanDayCompleted(dayID: String) {
         let resolvedPlanID = planID ?? CachedPlan.shared.id
@@ -1145,81 +1239,4 @@ struct DashboardView: View {
             try? context.save()
         }
     }
-}
-
-// MARK: - Reduce Transparency (header chrome)
-
-private struct IndoorHeaderBarChrome: ViewModifier {
-    let reduceTransparency: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if reduceTransparency {
-            content.background(Color(red: 0.04, green: 0.05, blue: 0.08))
-        } else {
-            content.glassEffect(.regular, in: .rect(cornerRadius: 0))
-        }
-    }
-}
-
-private struct IndoorGlassOrOpaqueCircle: ViewModifier {
-    let useOpaque: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if useOpaque {
-            content.background(Circle().fill(Color.white.opacity(0.12)))
-        } else {
-            content.glassEffect(.regular.interactive(), in: .circle)
-        }
-    }
-}
-
-private struct IndoorMilestoneToastChrome: ViewModifier {
-    let reduceTransparency: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if reduceTransparency {
-            content
-                .background(Capsule().fill(Color(red: 0.08, green: 0.09, blue: 0.12)))
-                .overlay(
-                    Capsule()
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-                )
-        } else {
-            content.glassEffect(.regular, in: .capsule)
-        }
-    }
-}
-
-#Preview("Free Ride") {
-    let ble = BLEManager()
-    let wifi = WiFiTrainerService()
-    let ds = DataSourceCoordinator(bleManager: ble, wifiService: wifi)
-    return DashboardView(
-        navigationPath: .constant(NavigationPath())
-    )
-        .modelContainer(for: [Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self], inMemory: true)
-        .environment(ble)
-        .environment(ds)
-        .environment(RouteManager())
-        .environment(HealthKitManager())
-        .environment(FTPRefreshTrigger.shared)
-}
-
-#Preview("Guided Session") {
-    let ble = BLEManager()
-    let wifi = WiFiTrainerService()
-    let ds = DataSourceCoordinator(bleManager: ble, wifiService: wifi)
-    return DashboardView(
-        navigationPath: .constant(NavigationPath()),
-        planDayID: "w2d2"
-    )
-        .modelContainer(for: [Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self], inMemory: true)
-        .environment(ble)
-        .environment(ds)
-        .environment(RouteManager())
-        .environment(HealthKitManager())
-        .environment(FTPRefreshTrigger.shared)
 }

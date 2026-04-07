@@ -211,6 +211,11 @@ final class RidePreferences {
         static let bikeWeightKg = "ride_pref_bike_weight_kg_v1"
         static let indoorSpeedSource = "ride_pref_indoor_speed_source_v1"
         static let riderCda = "ride_pref_rider_cda_v1"
+        static let riderBirthYear = "ride_pref_rider_birth_year_v1"
+        static let gpxTrimStartM = "ride_pref_gpx_privacy_trim_start_m_v1"
+        static let gpxTrimEndM = "ride_pref_gpx_privacy_trim_end_m_v1"
+        static let bikeOutdoorName = "ride_pref_bike_outdoor_name_v1"
+        static let bikeIndoorName = "ride_pref_bike_indoor_name_v1"
     }
 
     // MARK: - Lap Visibility
@@ -318,6 +323,49 @@ final class RidePreferences {
     /// Typical values: 0.28 (drops) to 0.35 (upright).
     var riderCda: Double {
         didSet { UserDefaults.standard.set(riderCda, forKey: Key.riderCda) }
+    }
+
+    /// Strip this many meters from the **start** of the GPS track in **GPX** exports (home / parking privacy).
+    var gpxPrivacyTrimStartMeters: Double {
+        didSet {
+            UserDefaults.standard.set(
+                gpxPrivacyTrimStartMeters.clamped(to: 0...5000), forKey: Key.gpxTrimStartM)
+        }
+    }
+
+    /// Strip this many meters from the **end** of the GPS track in **GPX** exports.
+    var gpxPrivacyTrimEndMeters: Double {
+        didSet {
+            UserDefaults.standard.set(
+                gpxPrivacyTrimEndMeters.clamped(to: 0...5000), forKey: Key.gpxTrimEndM)
+        }
+    }
+
+    /// Birth year for age-based coaching and W/kg context. Optional — nil means not set.
+    var riderBirthYear: Int? {
+        didSet {
+            if let y = riderBirthYear {
+                UserDefaults.standard.set(y, forKey: Key.riderBirthYear)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Key.riderBirthYear)
+            }
+        }
+    }
+
+    /// Rider age derived from birth year. Nil when birth year is not set.
+    var riderAge: Int? {
+        guard let year = riderBirthYear else { return nil }
+        return Calendar.current.component(.year, from: .now) - year
+    }
+
+    /// Display label for your primary outdoor bike (Strava gear still chosen on upload).
+    var primaryOutdoorBikeName: String {
+        didSet { UserDefaults.standard.set(primaryOutdoorBikeName, forKey: Key.bikeOutdoorName) }
+    }
+
+    /// Display label for indoor / trainer setup.
+    var primaryIndoorBikeName: String {
+        didSet { UserDefaults.standard.set(primaryIndoorBikeName, forKey: Key.bikeIndoorName) }
     }
 
     /// Sensible physical range for road tire circumference (meters).
@@ -462,6 +510,29 @@ final class RidePreferences {
             self.riderCda = max(Self.cdaRange.lowerBound, min(Self.cdaRange.upperBound, storedCda))
         } else {
             self.riderCda = PowerToSpeed.defaultCdA
+        }
+
+        let trimS = UserDefaults.standard.double(forKey: Key.gpxTrimStartM)
+        if UserDefaults.standard.object(forKey: Key.gpxTrimStartM) != nil {
+            self.gpxPrivacyTrimStartMeters = max(0, min(5000, trimS))
+        } else {
+            self.gpxPrivacyTrimStartMeters = 0
+        }
+        let trimE = UserDefaults.standard.double(forKey: Key.gpxTrimEndM)
+        if UserDefaults.standard.object(forKey: Key.gpxTrimEndM) != nil {
+            self.gpxPrivacyTrimEndMeters = max(0, min(5000, trimE))
+        } else {
+            self.gpxPrivacyTrimEndMeters = 0
+        }
+        self.primaryOutdoorBikeName = UserDefaults.standard.string(forKey: Key.bikeOutdoorName) ?? ""
+        self.primaryIndoorBikeName = UserDefaults.standard.string(forKey: Key.bikeIndoorName) ?? ""
+
+        // Birth year — nil when not set (user hasn't entered it yet)
+        if UserDefaults.standard.object(forKey: Key.riderBirthYear) != nil {
+            let y = UserDefaults.standard.integer(forKey: Key.riderBirthYear)
+            self.riderBirthYear = y > 0 ? y : nil
+        } else {
+            self.riderBirthYear = nil
         }
     }
 

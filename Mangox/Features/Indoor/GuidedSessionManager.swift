@@ -111,6 +111,9 @@ final class GuidedSessionManager {
     /// The plan day's notes.
     var dayNotes: String { planDay?.notes ?? "" }
 
+    /// Scales ERG targets and zone bands from ``TrainingPlanProgress/adaptiveLoadMultiplier``.
+    private(set) var adaptiveERGScale: Double = 1.0
+
     /// Whether a guided session is active.
     var isActive: Bool { planDay != nil }
 
@@ -269,8 +272,9 @@ final class GuidedSessionManager {
 
     /// Configure the guided session for a specific plan day.
     /// Call before the workout starts.
-    func configure(planDay: PlanDay) {
+    func configure(planDay: PlanDay, adaptiveERGScale: Double = 1.0) {
         self.planDay = planDay
+        self.adaptiveERGScale = min(max(adaptiveERGScale, 0.75), 1.25)
         self.timeline = Self.buildTimeline(from: planDay.intervals)
         self.elapsedSeconds = 0
         self.currentStepIndex = 0
@@ -285,6 +289,7 @@ final class GuidedSessionManager {
     /// Tear down the guided session.
     func tearDown() {
         planDay = nil
+        adaptiveERGScale = 1.0
         timeline = []
         elapsedSeconds = 0
         currentStepIndex = 0
@@ -319,7 +324,10 @@ final class GuidedSessionManager {
         //    once FTP becomes available.
         // 3. For simulation steps, skip if simulationGrade is nil.
         if currentStepIndex != lastAppliedStep, let step = currentStep {
-            let ergWatts = step.suggestedTrainerMode == .erg ? step.ergTargetWatts : nil
+            let ergWatts: Int? = {
+                guard step.suggestedTrainerMode == .erg, let w = step.ergTargetWatts else { return nil }
+                return Int((Double(w) * adaptiveERGScale).rounded())
+            }()
             let grade = step.suggestedTrainerMode == .simulation ? step.simulationGrade : nil
 
             // Don't consume lastAppliedStep if the required parameter is missing
@@ -344,6 +352,16 @@ final class GuidedSessionManager {
     }
 
     // MARK: - Private
+
+    /// Zone band adjusted by ``adaptiveERGScale`` (matches ERG targets sent to the trainer).
+    func scaledTargetWattRange(for step: TimelineStep) -> ClosedRange<Int>? {
+        guard let base = step.targetWattRange else { return nil }
+        let s = adaptiveERGScale
+        let lo = Int((Double(base.lowerBound) * s).rounded())
+        let hi = Int((Double(base.upperBound) * s).rounded())
+        guard lo <= hi else { return hi...lo }
+        return lo...hi
+    }
 
     private func updateCurrentStep() {
         guard !timeline.isEmpty else { return }
@@ -376,7 +394,7 @@ final class GuidedSessionManager {
     }
 
     private func updateCompliance(currentPower: Int) {
-        guard let step = currentStep, let range = step.targetWattRange else {
+        guard let step = currentStep, let range = scaledTargetWattRange(for: step) else {
             compliance = .inZone
             return
         }

@@ -118,10 +118,24 @@ struct RideComparisonView: View {
 /// Finds the previous workout before a given one and returns a comparison view.
 struct RideComparisonLoader: View {
     let workout: Workout
-    @Query(sort: \Workout.startDate, order: .reverse) private var allWorkouts: [Workout]
+    @Query private var previousCandidates: [Workout]
+
+    init(workout: Workout) {
+        self.workout = workout
+        let wid = workout.id
+        let boundary = workout.startDate
+        var d = FetchDescriptor<Workout>(
+            predicate: #Predicate<Workout> { w in
+                w.id != wid && w.startDate < boundary
+            },
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        d.fetchLimit = 1
+        _previousCandidates = Query(d)
+    }
 
     var body: some View {
-        if let previous = allWorkouts.first(where: { $0.id != workout.id && $0.startDate < workout.startDate }) {
+        if let previous = previousCandidates.first {
             RideComparisonView(current: workout, previous: previous)
         }
     }

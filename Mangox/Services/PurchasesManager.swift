@@ -5,6 +5,10 @@ import os.log
 
 private let rcLogger = Logger(subsystem: "com.abchalita.Mangox", category: "PurchasesManager")
 
+enum PurchasesManagerError: Error {
+    case notConfigured
+}
+
 @MainActor
 @Observable
 final class PurchasesManager {
@@ -38,6 +42,7 @@ final class PurchasesManager {
     }
 
     func sync() async {
+        guard Purchases.isConfigured else { return }
         do {
             let info = try await Purchases.shared.customerInfo()
             updateEntitlements(info)
@@ -47,6 +52,7 @@ final class PurchasesManager {
     }
 
     func loadOfferings() async {
+        guard Purchases.isConfigured else { return }
         isLoading = true
         defer { isLoading = false }
         do {
@@ -57,6 +63,9 @@ final class PurchasesManager {
     }
 
     func purchase(_ package: Package) async throws {
+        guard Purchases.isConfigured else {
+            throw PurchasesManagerError.notConfigured
+        }
         let result = try await Purchases.shared.purchase(package: package)
         updateEntitlements(result.customerInfo)
         if !result.userCancelled {
@@ -65,6 +74,7 @@ final class PurchasesManager {
     }
 
     func restorePurchases() async {
+        guard Purchases.isConfigured else { return }
         do {
             let info = try await Purchases.shared.restorePurchases()
             updateEntitlements(info)
@@ -85,6 +95,36 @@ final class PurchasesManager {
         customerInfo = info
         revenueCatPro = info.entitlements[Self.proEntitlementID]?.isActive == true
     }
+
+    private var activeProEntitlement: EntitlementInfo? {
+        customerInfo?.entitlements[Self.proEntitlementID]
+    }
+
+    /// Billing cadence from the active store entitlement (e.g. Monthly / Yearly).
+    var storeProPlanKind: String? {
+        guard revenueCatPro, let pid = activeProEntitlement?.productIdentifier else { return nil }
+        switch pid {
+        case Self.monthlyProductID: return "Monthly"
+        case Self.yearlyProductID: return "Yearly"
+        default:
+            return activeProEntitlement?.productIdentifier
+        }
+    }
+
+    /// Human-readable renewal or end date for the active subscription, when RevenueCat provides one.
+    var storeProRenewalDescription: String? {
+        guard revenueCatPro, let ent = activeProEntitlement, ent.isActive else { return nil }
+        guard let exp = ent.expirationDate else { return nil }
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        if ent.willRenew {
+            return "Renews \(df.string(from: exp))"
+        }
+        return "Active until \(df.string(from: exp))"
+    }
+
+    /// True when Pro comes only from the DEBUG override (no App Store entitlement).
+    var isProDevUnlockOnly: Bool { isPro && !revenueCatPro }
 
     /// DEBUG-only: grant Pro without a sandbox purchase. Release builds always return `false`.
     ///

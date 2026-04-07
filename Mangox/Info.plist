@@ -6,12 +6,16 @@
 	<string>Mangox uses Bluetooth to connect to your smart trainer, heart rate monitor, and cycling sensors.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Mangox reads heart rate and fitness data to personalize your training zones and ride insights.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Mangox can save completed cycling workouts to Apple Health so they count toward your Activity rings.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Mangox uses your location during outdoor rides to track speed, distance, elevation, and navigation.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Mangox uses your location during outdoor rides to record GPS tracks and live ride metrics.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Mangox uses motion sensors during outdoor rides to smooth auto-pause and auto-resume when GPS signal is weak.</string>
+	<key>MangoxCoachStaffTier</key>
+	<string>$(MANGOX_COACH_STAFF_TIER)</string>
 	<key>UserDataKey</key>
 	<string>$(USER_DATA_KEY)</string>
 	<key>STRAVA_CLIENT_ID</key>
@@ -20,18 +24,25 @@
 	<string>$(STRAVA_CLIENT_SECRET)</string>
 	<key>STRAVA_REDIRECT_URI</key>
 	<string>$(STRAVA_REDIRECT_URI)</string>
+	<key>FacebookAppID</key>
+	<string>986008587288900</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
+		<string>bluetooth-central</string>
 	</array>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>instagram-stories</string>
 		<string>instagram</string>
 	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Mangox can use a coach or language model running on your Wi‑Fi network, such as Ollama on your Mac.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
+		<true/>
+		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
 	<key>NSSupportsLiveActivities</key>

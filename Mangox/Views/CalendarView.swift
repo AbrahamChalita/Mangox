@@ -17,32 +17,52 @@ private enum CalendarScreenMode: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Calendar workout query (bounded, documented)
+
+/// Keeps calendar responsive: time window + hard row cap. Limits are summarized under the layout picker.
+private enum CalendarWorkoutQuery {
+    /// How far back the calendar includes rides (anchor is fixed when the descriptor is first created for the process).
+    static let includedHistoryYears = 5
+    static let maxRows = 12_000
+
+    static let descriptor: FetchDescriptor<Workout> = {
+        let cutoff =
+            Calendar.current.date(byAdding: .year, value: -includedHistoryYears, to: Date())
+            ?? .distantPast
+        var d = FetchDescriptor<Workout>(
+            predicate: #Predicate<Workout> { workout in
+                workout.startDate >= cutoff
+            },
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        d.fetchLimit = maxRows
+        return d
+    }()
+}
+
 /// Calendar month view showing ride history, with an optional list layout.
 /// Each day shows a colored dot for rides, with tap-to-inspect.
 struct CalendarView: View {
     @Environment(\.modelContext) private var modelContext
     @Binding var navigationPath: NavigationPath
 
-    @Query(sort: \Workout.startDate, order: .reverse)
-    private var allWorkouts: [Workout]
+    @Query(CalendarWorkoutQuery.descriptor) private var allWorkouts: [Workout]
 
     @AppStorage("calendarScreenMode") private var screenModeRaw = CalendarScreenMode.monthGrid.rawValue
 
     @State private var currentMonth: Date = Date()
     @State private var selectedDay: Date? = Date()
+    /// Sorted sections for list mode (kept in sync with `workoutsByDayStart`).
+    @State private var workoutsGroupedByDay: [(day: Date, workouts: [Workout])] = []
+    /// O(1) day lookup for month cells (avoids scanning all workouts per cell).
+    @State private var workoutsByDayStart: [Date: [Workout]] = [:]
+    @State private var calendarRegroupTask: Task<Void, Never>?
 
     private let calendar = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
 
     private var screenMode: CalendarScreenMode {
         CalendarScreenMode(rawValue: screenModeRaw) ?? .monthGrid
-    }
-
-    private var workoutsGroupedByDay: [(day: Date, workouts: [Workout])] {
-        let grouped = Dictionary(grouping: allWorkouts) { calendar.startOfDay(for: $0.startDate) }
-        return grouped.keys.sorted(by: >).map { day in
-            (day, grouped[day]!.sorted { $0.startDate > $1.startDate })
-        }
     }
 
     /// Always derived from `allWorkouts` so deletes (e.g. from Summary) remove rows immediately.
@@ -69,7 +89,11 @@ struct CalendarView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 20)
-                .padding(.bottom, 12)
+
+                calendarQueryScopeFootnote
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
 
                 if screenMode == .monthGrid {
                     monthCalendarContent
@@ -83,6 +107,66 @@ struct CalendarView: View {
                 selectedDay = nil
             }
         }
+        .onChange(of: allWorkouts, initial: true) { _, workouts in
+            applyCalendarWorkoutChanges(workouts)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mangoxWorkoutAggregatesMayHaveChanged)) {
+            _ in
+            applyCalendarWorkoutChanges(allWorkouts)
+        }
+    }
+
+    /// One full scan to refresh indexes; debounced after the first population to coalesce SwiftData bursts.
+    private func applyCalendarWorkoutChanges(_ workouts: [Workout]) {
+        if workouts.isEmpty {
+            calendarRegroupTask?.cancel()
+            rebuildCalendarIndexes(from: workouts)
+            return
+        }
+        if workoutsByDayStart.isEmpty {
+            calendarRegroupTask?.cancel()
+            rebuildCalendarIndexes(from: workouts)
+        } else {
+            calendarRegroupTask?.cancel()
+            calendarRegroupTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(56))
+                guard !Task.isCancelled else { return }
+                rebuildCalendarIndexes(from: workouts)
+            }
+        }
+    }
+
+    private func rebuildCalendarIndexes(from workouts: [Workout]) {
+        let grouped = Dictionary(grouping: workouts) { calendar.startOfDay(for: $0.startDate) }
+        var byDay: [Date: [Workout]] = [:]
+        byDay.reserveCapacity(grouped.count)
+        for (day, items) in grouped {
+            byDay[day] = items.sorted { $0.startDate > $1.startDate }
+        }
+        workoutsByDayStart = byDay
+        workoutsGroupedByDay = byDay.keys.sorted(by: >).map { day in (day, byDay[day]!) }
+    }
+
+    /// Surfaces the same bounds as `CalendarWorkoutQuery` so the calendar tradeoffs aren’t hidden.
+    private var calendarQueryScopeFootnote: some View {
+        VStack(spacing: 6) {
+            Text(
+                "Shows rides from about the last \(CalendarWorkoutQuery.includedHistoryYears) years, up to \(CalendarWorkoutQuery.maxRows.formatted()) entries."
+            )
+            .font(.system(size: 10))
+            .foregroundStyle(.white.opacity(0.3))
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+
+            if allWorkouts.count >= CalendarWorkoutQuery.maxRows {
+                Text("You’re at that entry cap—some rides in this window may not appear.")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(AppColor.mango.opacity(0.85))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Month grid
@@ -125,7 +209,7 @@ struct CalendarView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     LazyVGrid(columns: columns, spacing: 8) {
-                        ForEach(daysInMonth, id: \.self) { date in
+                        ForEach(Array(daysInMonth.enumerated()), id: \.offset) { _, date in
                             if let date {
                                 dayCell(date: date)
                             } else {
@@ -361,8 +445,7 @@ struct CalendarView: View {
 
     private func workouts(for date: Date) -> [Workout] {
         let startOfDay = calendar.startOfDay(for: date)
-        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else { return [] }
-        return allWorkouts.filter { $0.startDate >= startOfDay && $0.startDate < endOfDay }
+        return workoutsByDayStart[startOfDay] ?? []
     }
 
     private func changeMonth(by offset: Int) {
@@ -383,8 +466,17 @@ struct CalendarView: View {
         guard let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())) else {
             return 0
         }
-        return allWorkouts
-            .filter { $0.startDate >= weekStart }
-            .reduce(0.0) { $0 + $1.tss }
+        if workoutsByDayStart.isEmpty {
+            return allWorkouts
+                .filter { $0.startDate >= weekStart }
+                .reduce(0.0) { $0 + $1.tss }
+        }
+        var total = 0.0
+        for i in 0..<7 {
+            guard let day = calendar.date(byAdding: .day, value: i, to: weekStart) else { continue }
+            let sod = calendar.startOfDay(for: day)
+            total += workoutsByDayStart[sod]?.reduce(0.0) { $0 + $1.tss } ?? 0
+        }
+        return total
     }
 }

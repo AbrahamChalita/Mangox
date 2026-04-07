@@ -85,6 +85,38 @@ enum WorkoutExportService {
         }
     }
 
+    // MARK: - Distance alignment (TCX / GPX)
+
+    /// Raw per-second speed integration often under-reports vs the wheel/sensor total stored on `Workout` / `LapSplit`.
+    /// Strava recomputes distance from trackpoints, so we scale sample increments so they sum to `targetMeters`.
+    /// Also used by `FITWorkoutCodec` so FIT record distances match session totals.
+    static func scaledDistanceIncrements(samples: [WorkoutSample], targetMeters: Double) -> [Double] {
+        let n = samples.count
+        guard n > 0 else { return [] }
+        if targetMeters <= 0 {
+            return Array(repeating: 0, count: n)
+        }
+        let raw = samples.map { max(0, $0.speed / 3.6) }
+        let rawSum = raw.reduce(0, +)
+        if rawSum > 0.001 {
+            let scale = targetMeters / rawSum
+            return raw.map { $0 * scale }
+        }
+        let each = targetMeters / Double(n)
+        return Array(repeating: each, count: n)
+    }
+
+    /// Seconds between this sample and the previous (minimum 1) for speed = Δdistance / Δtime on exports.
+    static func elapsedDeltaSeconds(samples: [WorkoutSample], index: Int) -> Double {
+        guard index < samples.count else { return 1 }
+        if index == 0 {
+            let e = samples[0].elapsedSeconds
+            return Double(max(1, e))
+        }
+        let d = samples[index].elapsedSeconds - samples[index - 1].elapsedSeconds
+        return Double(max(1, d))
+    }
+
     // MARK: - TCX Export
 
     /// Exports to Training Center XML (TCX) — the ideal format for indoor trainer data.
@@ -229,13 +261,13 @@ enum WorkoutExportService {
     ) -> String {
         // Start accumulation from the offset so multi-lap exports look up the
         // correct coordinate/elevation on the GPX route for every trackpoint.
+        let increments = scaledDistanceIncrements(samples: samples, targetMeters: distanceMeters)
         var cumulativeDistance: Double = distanceOffset
         var trackpointParts: [String] = []
         trackpointParts.reserveCapacity(samples.count)
 
-        for sample in samples {
-            // Accumulate distance from speed (m/s at 1 Hz)
-            cumulativeDistance += max(0, sample.speed / 3.6)
+        for (idx, sample) in samples.enumerated() {
+            cumulativeDistance += increments[idx]
 
             let coordinate: CLLocationCoordinate2D?
             let elevationMeters: Double?
@@ -273,10 +305,14 @@ enum WorkoutExportService {
                 tp += "            <Cadence>\(Int(sample.cadence.rounded()))</Cadence>\n"
             }
 
+            // Speed (m/s) matches scaled distance increment over elapsed delta — consistent with DistanceMeters.
+            let dt = elapsedDeltaSeconds(samples: samples, index: idx)
+            let speedMps = max(0, increments[idx] / dt)
+
             // Garmin ActivityExtension/v2: power + speed
             tp += "            <Extensions>\n"
             tp += "              <tpx:TPX>\n"
-            tp += "                <tpx:Speed>\(String(format: "%.2f", max(0, sample.speed / 3.6)))</tpx:Speed>\n"
+            tp += "                <tpx:Speed>\(String(format: "%.2f", speedMps))</tpx:Speed>\n"
             tp += "                <tpx:Watts>\(sample.power)</tpx:Watts>\n"
             tp += "              </tpx:TPX>\n"
             tp += "            </Extensions>\n"
@@ -306,9 +342,12 @@ enum WorkoutExportService {
         lap += "        <TriggerMethod>Manual</TriggerMethod>\n"
 
         // Lap-level extensions: avg power, max power, avg speed, avg cadence
+        let lapAvgSpeedMps = durationSeconds > 0
+            ? distanceMeters / durationSeconds
+            : max(0, avgSpeed / 3.6)
         lap += "        <Extensions>\n"
         lap += "          <tpx:LX>\n"
-        lap += "            <tpx:AvgSpeed>\(String(format: "%.2f", max(0, avgSpeed / 3.6)))</tpx:AvgSpeed>\n"
+        lap += "            <tpx:AvgSpeed>\(String(format: "%.2f", max(0, lapAvgSpeedMps)))</tpx:AvgSpeed>\n"
         lap += "            <tpx:AvgWatts>\(avgPower)</tpx:AvgWatts>\n"
         lap += "            <tpx:MaxWatts>\(maxPower)</tpx:MaxWatts>\n"
         lap += "          </tpx:LX>\n"
@@ -346,11 +385,25 @@ enum WorkoutExportService {
             "Mangox Ride \(workout.startDate.formatted(date: .abbreviated, time: .shortened))"
         )
 
+        let increments = scaledDistanceIncrements(samples: samples, targetMeters: workout.distance)
         var cumulativeDistance: Double = 0
         var trackpoints: [String] = []
 
-        for sample in samples {
-            cumulativeDistance += max(0, sample.speed / 3.6)
+        let trimStart = RidePreferences.shared.gpxPrivacyTrimStartMeters
+        let trimEnd = RidePreferences.shared.gpxPrivacyTrimEndMeters
+        let routeLen = max(workout.distance, 1)
+
+        for (idx, sample) in samples.enumerated() {
+            cumulativeDistance += increments[idx]
+
+            if GPXPrivacyTrimLogic.isExcluded(
+                cumulativeDistanceAlongRoute: cumulativeDistance,
+                trimStartMeters: trimStart,
+                trimEndMeters: trimEnd,
+                routeLengthMeters: routeLen
+            ) {
+                continue
+            }
 
             guard let coordinate = routeManager?.coordinate(forDistance: cumulativeDistance) else {
                 continue
@@ -358,7 +411,8 @@ enum WorkoutExportService {
             let elevationMeters = routeManager?.elevation(forDistance: cumulativeDistance)
 
             let time = iso8601(workout.startDate.addingTimeInterval(TimeInterval(sample.elapsedSeconds)))
-            let speedMps = max(0, sample.speed / 3.6)
+            let dt = elapsedDeltaSeconds(samples: samples, index: idx)
+            let speedMps = max(0, increments[idx] / dt)
 
             var trkpt = ""
             trkpt += "      <trkpt lat=\"\(coordinate.latitude)\" lon=\"\(coordinate.longitude)\">\n"
@@ -388,6 +442,44 @@ enum WorkoutExportService {
             trkpt += "      </trkpt>"
 
             trackpoints.append(trkpt)
+        }
+
+        if trackpoints.isEmpty, trimStart > 0 || trimEnd > 0 {
+            // Privacy trim removed every point — fall back to full export.
+            cumulativeDistance = 0
+            trackpoints = []
+            for (idx, sample) in samples.enumerated() {
+                cumulativeDistance += increments[idx]
+                guard let coordinate = routeManager?.coordinate(forDistance: cumulativeDistance) else {
+                    continue
+                }
+                let elevationMeters = routeManager?.elevation(forDistance: cumulativeDistance)
+                let time = iso8601(workout.startDate.addingTimeInterval(TimeInterval(sample.elapsedSeconds)))
+                let dt = elapsedDeltaSeconds(samples: samples, index: idx)
+                let speedMps = max(0, increments[idx] / dt)
+                var trkpt = ""
+                trkpt += "      <trkpt lat=\"\(coordinate.latitude)\" lon=\"\(coordinate.longitude)\">\n"
+                if let elevationMeters {
+                    trkpt += "        <ele>\(String(format: "%.1f", elevationMeters))</ele>\n"
+                }
+                trkpt += "        <time>\(time)</time>\n"
+                trkpt += "        <extensions>\n"
+                trkpt += "          <gpxtpx:TrackPointExtension>\n"
+                if sample.heartRate > 0 {
+                    trkpt += "            <gpxtpx:hr>\(sample.heartRate)</gpxtpx:hr>\n"
+                }
+                if sample.cadence > 0 {
+                    trkpt += "            <gpxtpx:cad>\(Int(sample.cadence.rounded()))</gpxtpx:cad>\n"
+                }
+                trkpt += "            <gpxtpx:speed>\(String(format: "%.2f", speedMps))</gpxtpx:speed>\n"
+                trkpt += "          </gpxtpx:TrackPointExtension>\n"
+                trkpt += "          <pwr:PowerExtension>\n"
+                trkpt += "            <pwr:Watts>\(sample.power)</pwr:Watts>\n"
+                trkpt += "          </pwr:PowerExtension>\n"
+                trkpt += "        </extensions>\n"
+                trkpt += "      </trkpt>"
+                trackpoints.append(trkpt)
+            }
         }
 
         guard !trackpoints.isEmpty else { throw WorkoutExportError.noTrackpoints }

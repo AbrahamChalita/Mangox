@@ -5,9 +5,11 @@
 /// SwiftUI uses value equality to skip re-rendering a subtree whose inputs
 /// haven't changed — the key mechanism for reducing 4 Hz BLE re-renders.
 
+import SwiftData
 import SwiftUI
+
 #if canImport(UIKit)
-import UIKit
+    import UIKit
 #endif
 
 // MARK: - Goal Progress Pill
@@ -123,7 +125,8 @@ struct GoalProgressPill: View {
                             .lineLimit(1)
                         Text("km")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(isComplete ? AppColor.success.opacity(0.7) : .white.opacity(0.55))
+                            .foregroundStyle(
+                                isComplete ? AppColor.success.opacity(0.7) : .white.opacity(0.55))
                         if !isComplete {
                             Text("/ \(targetValue)")
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -161,7 +164,7 @@ struct GoalProgressPill: View {
                                 colors: [
                                     AppColor.mango.opacity(0.45),
                                     AppColor.mango,
-                                    Color(red: 1, green: 0.48, blue: 0.15)
+                                    Color(red: 1, green: 0.48, blue: 0.15),
                                 ],
                                 startPoint: .leading,
                                 endPoint: .trailing
@@ -311,14 +314,28 @@ struct LivePerformanceBar: View {
                     let npSize = compact ? 13.0 : 15.0
                     let viSize = compact ? 10.0 : 11.0
                     let avgSize = compact ? 12.0 : 14.0
-                    liveMetricPill(label: "NP", value: formattedNP, unit: "W", valueSize: npSize, dimmed: false, fixedWidth: true)
-                    liveMetricPill(label: "IF", value: formattedIF, unit: "", valueSize: npSize, dimmed: !ftpIsSet, fixedWidth: true)
-                    liveMetricPill(label: "TSS", value: formattedTSS, unit: "", valueSize: npSize, dimmed: !ftpIsSet, fixedWidth: true)
-                    liveMetricPill(label: "VI", value: formattedVI, unit: "", valueSize: viSize, dimmed: true, fixedWidth: true)
+                    liveMetricPill(
+                        label: "NP", value: formattedNP, unit: "W", valueSize: npSize,
+                        dimmed: false, fixedWidth: true)
+                    liveMetricPill(
+                        label: "IF", value: formattedIF, unit: "", valueSize: npSize,
+                        dimmed: !ftpIsSet, fixedWidth: true)
+                    liveMetricPill(
+                        label: "TSS", value: formattedTSS, unit: "", valueSize: npSize,
+                        dimmed: !ftpIsSet, fixedWidth: true)
+                    liveMetricPill(
+                        label: "VI", value: formattedVI, unit: "", valueSize: viSize, dimmed: true,
+                        fixedWidth: true)
                     if showEfficiency {
-                        liveMetricPill(label: "AVG", value: formattedAvgPower, unit: "W", valueSize: avgSize, dimmed: false, fixedWidth: true)
-                        liveMetricPill(label: "Pw:HR", value: formattedEfficiency, unit: "W/bpm", valueSize: avgSize, dimmed: false, fixedWidth: true)
-                        liveMetricPill(label: "kJ", value: formattedKJ, unit: "", valueSize: avgSize, dimmed: false, fixedWidth: true)
+                        liveMetricPill(
+                            label: "AVG", value: formattedAvgPower, unit: "W", valueSize: avgSize,
+                            dimmed: false, fixedWidth: true)
+                        liveMetricPill(
+                            label: "Pw:HR", value: formattedEfficiency, unit: "W/bpm",
+                            valueSize: avgSize, dimmed: false, fixedWidth: true)
+                        liveMetricPill(
+                            label: "kJ", value: formattedKJ, unit: "", valueSize: avgSize,
+                            dimmed: false, fixedWidth: true)
                     }
                 }
             }
@@ -334,20 +351,36 @@ struct LivePerformanceBar: View {
         if effectiveLayout == .horizontalScroll {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    liveMetricPill(label: "NP", value: formattedNP, unit: "W", valueSize: npSize, dimmed: false, fixedWidth: true)
-                    liveMetricPill(label: "IF", value: formattedIF, unit: "", valueSize: npSize, dimmed: !ftpIsSet, fixedWidth: true)
-                    liveMetricPill(label: "TSS", value: formattedTSS, unit: "", valueSize: npSize, dimmed: !ftpIsSet, fixedWidth: true)
-                    liveMetricPill(label: "VI", value: formattedVI, unit: "", valueSize: viSize, dimmed: true, fixedWidth: true)
+                    liveMetricPill(
+                        label: "NP", value: formattedNP, unit: "W", valueSize: npSize,
+                        dimmed: false, fixedWidth: true)
+                    liveMetricPill(
+                        label: "IF", value: formattedIF, unit: "", valueSize: npSize,
+                        dimmed: !ftpIsSet, fixedWidth: true)
+                    liveMetricPill(
+                        label: "TSS", value: formattedTSS, unit: "", valueSize: npSize,
+                        dimmed: !ftpIsSet, fixedWidth: true)
+                    liveMetricPill(
+                        label: "VI", value: formattedVI, unit: "", valueSize: viSize, dimmed: true,
+                        fixedWidth: true)
                 }
             }
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             HStack(spacing: compact ? 6 : 10) {
-                liveMetricPill(label: "NP", value: formattedNP, unit: "W", valueSize: npSize, dimmed: false, fixedWidth: false)
-                liveMetricPill(label: "IF", value: formattedIF, unit: "", valueSize: npSize, dimmed: !ftpIsSet, fixedWidth: false)
-                liveMetricPill(label: "TSS", value: formattedTSS, unit: "", valueSize: npSize, dimmed: !ftpIsSet, fixedWidth: false)
-                liveMetricPill(label: "VI", value: formattedVI, unit: "", valueSize: viSize, dimmed: true, fixedWidth: false)
+                liveMetricPill(
+                    label: "NP", value: formattedNP, unit: "W", valueSize: npSize, dimmed: false,
+                    fixedWidth: false)
+                liveMetricPill(
+                    label: "IF", value: formattedIF, unit: "", valueSize: npSize, dimmed: !ftpIsSet,
+                    fixedWidth: false)
+                liveMetricPill(
+                    label: "TSS", value: formattedTSS, unit: "", valueSize: npSize,
+                    dimmed: !ftpIsSet, fixedWidth: false)
+                liveMetricPill(
+                    label: "VI", value: formattedVI, unit: "", valueSize: viSize, dimmed: true,
+                    fixedWidth: false)
             }
         }
     }
@@ -358,18 +391,30 @@ struct LivePerformanceBar: View {
         if effectiveLayout == .horizontalScroll {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    liveMetricPill(label: "AVG", value: formattedAvgPower, unit: "W", valueSize: avgSize, dimmed: false, fixedWidth: true)
-                    liveMetricPill(label: "Pw:HR", value: formattedEfficiency, unit: "W/bpm", valueSize: avgSize, dimmed: false, fixedWidth: true)
-                    liveMetricPill(label: "kJ", value: formattedKJ, unit: "", valueSize: avgSize, dimmed: false, fixedWidth: true)
+                    liveMetricPill(
+                        label: "AVG", value: formattedAvgPower, unit: "W", valueSize: avgSize,
+                        dimmed: false, fixedWidth: true)
+                    liveMetricPill(
+                        label: "Pw:HR", value: formattedEfficiency, unit: "W/bpm",
+                        valueSize: avgSize, dimmed: false, fixedWidth: true)
+                    liveMetricPill(
+                        label: "kJ", value: formattedKJ, unit: "", valueSize: avgSize,
+                        dimmed: false, fixedWidth: true)
                 }
             }
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             HStack(spacing: compact ? 6 : 10) {
-                liveMetricPill(label: "AVG", value: formattedAvgPower, unit: "W", valueSize: avgSize, dimmed: false, fixedWidth: false)
-                liveMetricPill(label: "Pw:HR", value: formattedEfficiency, unit: "W/bpm", valueSize: avgSize, dimmed: false, fixedWidth: false)
-                liveMetricPill(label: "kJ", value: formattedKJ, unit: "", valueSize: avgSize, dimmed: false, fixedWidth: false)
+                liveMetricPill(
+                    label: "AVG", value: formattedAvgPower, unit: "W", valueSize: avgSize,
+                    dimmed: false, fixedWidth: false)
+                liveMetricPill(
+                    label: "Pw:HR", value: formattedEfficiency, unit: "W/bpm", valueSize: avgSize,
+                    dimmed: false, fixedWidth: false)
+                liveMetricPill(
+                    label: "kJ", value: formattedKJ, unit: "", valueSize: avgSize, dimmed: false,
+                    fixedWidth: false)
             }
         }
     }
@@ -447,8 +492,10 @@ struct SessionStatsMetricGrid: View {
 
             if showEfficiency {
                 HStack(spacing: 8) {
-                    statTileFlexible(label: "AVG", value: formattedAvgPower, unit: "W", dimmed: false)
-                    statTileFlexible(label: "Pw:HR", value: formattedEfficiency, unit: "W/bpm", dimmed: false)
+                    statTileFlexible(
+                        label: "AVG", value: formattedAvgPower, unit: "W", dimmed: false)
+                    statTileFlexible(
+                        label: "Pw:HR", value: formattedEfficiency, unit: "W/bpm", dimmed: false)
                     statTileFlexible(label: "kJ", value: formattedKJ, unit: "", dimmed: false)
                 }
             }
@@ -487,7 +534,9 @@ struct SessionStatsMetricGrid: View {
         )
     }
 
-    private func statTileFlexible(label: String, value: String, unit: String, dimmed: Bool) -> some View {
+    private func statTileFlexible(label: String, value: String, unit: String, dimmed: Bool)
+        -> some View
+    {
         let baseOpacity = dimmed ? 0.45 : 0.88
         return VStack(alignment: .center, spacing: 4) {
             Text(label)
@@ -567,7 +616,11 @@ struct CollapsibleLivePerformanceBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(IndoorDashboardL10n.sessionStatsTitle)
-            .accessibilityValue(expanded ? String(localized: "indoor.session_stats.a11y_expanded") : String(localized: "indoor.session_stats.a11y_collapsed"))
+            .accessibilityValue(
+                expanded
+                    ? String(localized: "indoor.session_stats.a11y_expanded")
+                    : String(localized: "indoor.session_stats.a11y_collapsed")
+            )
             .accessibilityHint(IndoorDashboardL10n.sessionStatsExpandHint)
 
             if expanded {
@@ -617,40 +670,40 @@ struct CollapsibleLivePerformanceBar: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
         )
-#if canImport(UIKit)
-        /// First tap on Session stats often failed: UIScrollView defers touches to see if the user is scrolling.
-        .overlay(alignment: .topLeading) {
-            ScrollViewImmediateTouchesAnchor()
+        #if canImport(UIKit)
+            /// First tap on Session stats often failed: UIScrollView defers touches to see if the user is scrolling.
+            .overlay(alignment: .topLeading) {
+                ScrollViewImmediateTouchesAnchor()
                 .frame(width: 1, height: 1)
                 .allowsHitTesting(false)
-        }
-#endif
+            }
+        #endif
     }
 }
 
 #if canImport(UIKit)
-/// Finds the enclosing `UIScrollView` and sets `delaysContentTouches = false` so buttons respond on the first tap.
-private struct ScrollViewImmediateTouchesAnchor: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIView {
-        let v = UIView()
-        v.isUserInteractionEnabled = false
-        v.backgroundColor = .clear
-        return v
-    }
+    /// Finds the enclosing `UIScrollView` and sets `delaysContentTouches = false` so buttons respond on the first tap.
+    private struct ScrollViewImmediateTouchesAnchor: UIViewRepresentable {
+        func makeUIView(context: Context) -> UIView {
+            let v = UIView()
+            v.isUserInteractionEnabled = false
+            v.backgroundColor = .clear
+            return v
+        }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
-        DispatchQueue.main.async {
-            var superview: UIView? = uiView.superview
-            while let s = superview {
-                if let scroll = s as? UIScrollView {
-                    scroll.delaysContentTouches = false
-                    return
+        func updateUIView(_ uiView: UIView, context: Context) {
+            DispatchQueue.main.async {
+                var superview: UIView? = uiView.superview
+                while let s = superview {
+                    if let scroll = s as? UIScrollView {
+                        scroll.delaysContentTouches = false
+                        return
+                    }
+                    superview = s.superview
                 }
-                superview = s.superview
             }
         }
     }
-}
 #endif
 
 // MARK: - Indoor ride mode (free vs route)
@@ -713,6 +766,12 @@ struct TrainerControlCard: View {
     /// Tighter chrome for portrait single-screen layouts.
     var condensed: Bool = false
 
+    var intensityMultiplier: Double = 1.0
+    var onIntensityChange: ((Double) -> Void)? = nil
+
+    var routeDifficultyScale: Double = 0.5
+    var onDifficultyChange: ((Double) -> Void)? = nil
+
     let onRouteSim: () -> Void
     let onERG: () -> Void
     let onResistance: () -> Void
@@ -733,9 +792,9 @@ struct TrainerControlCard: View {
 
     private func gradeColor(for grade: Double) -> Color {
         let abs = Swift.abs(grade)
-        if abs < 2   { return AppColor.success }
-        if abs < 5   { return AppColor.yellow }
-        if abs < 8   { return AppColor.orange }
+        if abs < 2 { return AppColor.success }
+        if abs < 5 { return AppColor.yellow }
+        if abs < 8 { return AppColor.orange }
         return AppColor.red
     }
 
@@ -746,7 +805,8 @@ struct TrainerControlCard: View {
                 HStack(spacing: 6) {
                     Image(systemName: "gearshape.2.fill")
                         .font(.system(size: 10))
-                        .foregroundStyle(trainerMode.isActive ? AppColor.success : .white.opacity(0.3))
+                        .foregroundStyle(
+                            trainerMode.isActive ? AppColor.success : .white.opacity(0.3))
                     Text("TRAINER CONTROL")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white.opacity(0.3))
@@ -755,7 +815,9 @@ struct TrainerControlCard: View {
 
                     Text(trainerMode.label)
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(trainerMode.isActive ? AppColor.success : .white.opacity(0.35))
+                        .foregroundStyle(
+                            trainerMode.isActive ? AppColor.success : .white.opacity(0.35)
+                        )
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(
@@ -773,10 +835,22 @@ struct TrainerControlCard: View {
                             .font(.system(size: condensed ? 11 : 12, weight: .bold))
                             .foregroundStyle(gradeColor(for: grade))
                         Text(String(format: "%.1f%%", grade))
-                            .font(.system(size: condensed ? 18 : 22, weight: .bold, design: .monospaced))
+                            .font(
+                                .system(
+                                    size: condensed ? 18 : 22, weight: .bold, design: .monospaced)
+                            )
                             .foregroundStyle(gradeColor(for: grade))
                     }
                     Spacer()
+                    if let onDifficultyChange = onDifficultyChange {
+                        compactStepper(
+                            value: routeDifficultyScale,
+                            step: 0.1,
+                            minVal: 0.1,
+                            maxVal: 2.0,
+                            action: onDifficultyChange
+                        )
+                    }
                 }
             }
 
@@ -791,9 +865,20 @@ struct TrainerControlCard: View {
                         .foregroundStyle(.white.opacity(0.3))
                         .tracking(1)
                     Text("\(watts)W")
-                        .font(.system(size: condensed ? 17 : 20, weight: .bold, design: .monospaced))
+                        .font(
+                            .system(size: condensed ? 17 : 20, weight: .bold, design: .monospaced)
+                        )
                         .foregroundStyle(AppColor.orange)
                     Spacer()
+                    if let onIntensityChange = onIntensityChange {
+                        compactStepper(
+                            value: intensityMultiplier,
+                            step: 0.05,
+                            minVal: 0.5,
+                            maxVal: 1.5,
+                            action: onIntensityChange
+                        )
+                    }
                 }
             }
 
@@ -801,16 +886,24 @@ struct TrainerControlCard: View {
             if isWorkoutActive {
                 HStack(spacing: condensed ? 6 : 8) {
                     if supportsSimulation && hasRoute {
-                        trainerButton("Route", icon: "map.fill", isActive: isRouteSimActive, action: onRouteSim, condensed: condensed)
+                        trainerButton(
+                            "Route", icon: "map.fill", isActive: isRouteSimActive,
+                            action: onRouteSim, condensed: condensed)
                     }
                     if supportsERG {
-                        trainerButton("ERG", icon: "lock.fill", isActive: isERGActive, action: onERG, condensed: condensed)
+                        trainerButton(
+                            "ERG", icon: "lock.fill", isActive: isERGActive, action: onERG,
+                            condensed: condensed)
                     }
                     if supportsResistance {
-                        trainerButton("Resist", icon: "dial.medium.fill", isActive: isResistanceActive, action: onResistance, condensed: condensed)
+                        trainerButton(
+                            "Resist", icon: "dial.medium.fill", isActive: isResistanceActive,
+                            action: onResistance, condensed: condensed)
                     }
                     if trainerMode.isActive {
-                        trainerButton("Free", icon: "figure.outdoor.cycle", isActive: false, action: onFreeRide, condensed: condensed)
+                        trainerButton(
+                            "Free", icon: "figure.outdoor.cycle", isActive: false,
+                            action: onFreeRide, condensed: condensed)
                     }
                 }
             }
@@ -823,16 +916,20 @@ struct TrainerControlCard: View {
                     HStack(spacing: 6) {
                         Image(systemName: "gearshape.2.fill")
                             .font(.system(size: 9))
-                            .foregroundStyle(trainerMode.isActive ? AppColor.success : .white.opacity(0.25))
+                            .foregroundStyle(
+                                trainerMode.isActive ? AppColor.success : .white.opacity(0.25))
                         Text(trainerMode.label)
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(trainerMode.isActive ? AppColor.success : .white.opacity(0.35))
+                            .foregroundStyle(
+                                trainerMode.isActive ? AppColor.success : .white.opacity(0.35))
                         Spacer()
                     }
                 }
             }
 
-            if supportsSimulation, !hasRoute, isWorkoutActive, showRouteSimulationFooterHint, !condensed {
+            if supportsSimulation, !hasRoute, isWorkoutActive, showRouteSimulationFooterHint,
+                !condensed
+            {
                 Text(IndoorDashboardL10n.trainerRouteSimFooter)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.28))
@@ -840,17 +937,61 @@ struct TrainerControlCard: View {
             }
         }
         .padding(.horizontal, condensed ? 10 : 12)
-        .padding(.vertical, supportsSimulation && !hasRoute && isWorkoutActive && showRouteSimulationFooterHint && !condensed ? 10 : (condensed ? 8 : 12))
+        .padding(
+            .vertical,
+            supportsSimulation && !hasRoute && isWorkoutActive && showRouteSimulationFooterHint
+                && !condensed ? 10 : (condensed ? 8 : 12)
+        )
         .background(Color.white.opacity(0.02))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(
-                    trainerMode.isActive ? AppColor.success.opacity(0.15) : Color.white.opacity(0.06),
+                    trainerMode.isActive
+                        ? AppColor.success.opacity(0.15) : Color.white.opacity(0.06),
                     lineWidth: 1
                 )
         )
         .animation(.easeInOut(duration: 0.3), value: trainerMode.label)
+    }
+
+    @ViewBuilder
+    private func compactStepper(
+        value: Double,
+        step: Double,
+        minVal: Double,
+        maxVal: Double,
+        action: @escaping (Double) -> Void
+    ) -> some View {
+        HStack(spacing: 6) {
+            Button {
+                action(max(minVal, value - step))
+            } label: {
+                Image(systemName: "minus")
+                    .font(.system(size: 11, weight: .bold))
+                    .frame(width: 24, height: 24)
+                    .background(Color.white.opacity(0.1))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+
+            Text("\(Int(round(value * 100)))%")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.8))
+                .frame(minWidth: 40)
+                .multilineTextAlignment(.center)
+
+            Button {
+                action(min(maxVal, value + step))
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .bold))
+                    .frame(width: 24, height: 24)
+                    .background(Color.white.opacity(0.1))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private func trainerButton(
@@ -896,7 +1037,7 @@ struct GuidedSessionCard: View {
 
     private var complianceColor: Color {
         switch session.compliance {
-        case .inZone:    return AppColor.success
+        case .inZone: return AppColor.success
         case .belowZone: return AppColor.yellow
         case .aboveZone: return AppColor.red
         }
@@ -992,7 +1133,7 @@ struct GuidedSessionCard: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(complianceColor)
                 }
-                if let range = step.targetWattRange {
+                if let range = session.scaledTargetWattRange(for: step) {
                     Text("\(range.lowerBound)–\(range.upperBound) W")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundStyle(guidedZoneColor(step.zone))
@@ -1089,7 +1230,7 @@ struct GuidedSessionCard: View {
                         .animation(.easeInOut(duration: 0.3), value: session.stepSecondsRemaining)
                 }
                 Spacer()
-                if let range = step.targetWattRange {
+                if let range = session.scaledTargetWattRange(for: step) {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text("TARGET")
                             .font(.system(size: 10, weight: .medium))
@@ -1259,12 +1400,15 @@ struct GuidedSessionCard: View {
                 .frame(height: 1)
 
             HStack(spacing: 0) {
-                guidedStatPill(label: "OVERALL",
-                               value: String(format: "%.0f%%", session.overallProgress * 100))
-                guidedStatPill(label: "IN ZONE",
-                               value: String(format: "%.0f%%", session.totalInZonePercent))
-                guidedStatPill(label: "ELAPSED",
-                               value: GuidedSessionManager.formatCountdown(session.elapsedSeconds))
+                guidedStatPill(
+                    label: "OVERALL",
+                    value: String(format: "%.0f%%", session.overallProgress * 100))
+                guidedStatPill(
+                    label: "IN ZONE",
+                    value: String(format: "%.0f%%", session.totalInZonePercent))
+                guidedStatPill(
+                    label: "ELAPSED",
+                    value: GuidedSessionManager.formatCountdown(session.elapsedSeconds))
                 guidedStatPill(
                     label: "REMAINING",
                     value: GuidedSessionManager.formatCountdown(
@@ -1328,7 +1472,6 @@ struct PhonePowerDisplay: View {
                         Text("W")
                             .font(.system(size: secondaryFontSize, weight: .medium))
                             .foregroundStyle(.white.opacity(0.3))
-                            .padding(.bottom, 4)
                             .fixedSize(horizontal: true, vertical: false)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1337,7 +1480,9 @@ struct PhonePowerDisplay: View {
                         Capsule().fill(Color.white.opacity(AppOpacity.cardBorder))
                         Capsule()
                             .fill(zone.color)
-                            .scaleEffect(x: min(Double(smoothedWatts) / 500.0, 1.0), y: 1, anchor: .leading)
+                            .scaleEffect(
+                                x: min(Double(smoothedWatts) / 500.0, 1.0), y: 1, anchor: .leading
+                            )
                             .animation(.easeOut(duration: 0.35), value: smoothedWatts)
                     }
                     .frame(height: max(3, progressBarHeight))
@@ -1357,7 +1502,7 @@ struct PhonePowerDisplay: View {
                             .multilineTextAlignment(.trailing)
                             .frame(minWidth: 0, maxWidth: .infinity, alignment: .trailing)
                         if let s = avg3s {
-                            HStack(spacing: 4) {
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
                                 Text("3s")
                                     .font(.system(size: 8, weight: .bold))
                                     .foregroundStyle(.white.opacity(0.38))
@@ -1393,11 +1538,103 @@ struct PhonePowerDisplay: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
                 }
-                .frame(width: avg3s != nil ? zoneColumnWidthWithPill : zoneColumnWidth, alignment: .trailing)
+                .frame(
+                    width: avg3s != nil ? zoneColumnWidthWithPill : zoneColumnWidth,
+                    alignment: .trailing
+                )
                 .layoutPriority(0)
             }
         }
         .padding(.vertical, 8)
         .animation(.easeInOut(duration: 0.25), value: zone.id)
     }
+}
+
+// MARK: - Reduce Transparency (header chrome)
+
+struct IndoorHeaderBarChrome: ViewModifier {
+    let reduceTransparency: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(Color(red: 0.04, green: 0.05, blue: 0.08))
+        } else {
+            content.glassEffect(.regular, in: .rect(cornerRadius: 0))
+        }
+    }
+}
+
+struct IndoorGlassOrOpaqueCircle: ViewModifier {
+    let useOpaque: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if useOpaque {
+            content.background(Circle().fill(Color.white.opacity(0.12)))
+        } else {
+            content.glassEffect(.regular.interactive(), in: .circle)
+        }
+    }
+}
+
+struct IndoorMilestoneToastChrome: ViewModifier {
+    let reduceTransparency: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content
+                .background(Capsule().fill(Color(red: 0.08, green: 0.09, blue: 0.12)))
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                )
+        } else {
+            content.glassEffect(.regular, in: .capsule)
+        }
+    }
+}
+
+#Preview("Free Ride") {
+    let ble = BLEManager()
+    let wifi = WiFiTrainerService()
+    let ds = DataSourceCoordinator(bleManager: ble, wifiService: wifi)
+    return DashboardView(
+        navigationPath: .constant(NavigationPath())
+    )
+    .modelContainer(
+        for: [
+            Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self,
+            CustomWorkoutTemplate.self,
+        ],
+        inMemory: true
+    )
+    .environment(ble)
+    .environment(ds)
+    .environment(RouteManager())
+    .environment(HealthKitManager())
+    .environment(FTPRefreshTrigger.shared)
+}
+
+#Preview("Guided Session") {
+    let ble = BLEManager()
+    let wifi = WiFiTrainerService()
+    let ds = DataSourceCoordinator(bleManager: ble, wifiService: wifi)
+    return DashboardView(
+        navigationPath: .constant(NavigationPath()),
+        planDayID: "w2d2"
+    )
+    .modelContainer(
+        for: [
+            Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self,
+            CustomWorkoutTemplate.self,
+        ],
+        inMemory: true
+    )
+    .environment(ble)
+    .environment(ds)
+    .environment(RouteManager())
+    .environment(HealthKitManager())
+    .environment(FTPRefreshTrigger.shared)
 }

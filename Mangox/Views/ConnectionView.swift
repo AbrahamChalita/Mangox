@@ -1,7 +1,8 @@
-import SwiftUI
 import CoreBluetooth
-import UniformTypeIdentifiers
 import MapKit
+import SwiftData
+import SwiftUI
+import UniformTypeIdentifiers
 
 enum ConnectionStartMode {
     case ride
@@ -41,7 +42,11 @@ struct ConnectionView: View {
     @Environment(DataSourceCoordinator.self) private var dataSource
     @Environment(RouteManager.self) private var routeManager
     @Environment(LocationManager.self) private var locationManager
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
+    @Query(sort: \CustomWorkoutTemplate.createdAt, order: .reverse)
+    private var customWorkoutTemplates: [CustomWorkoutTemplate]
     @Binding var navigationPath: NavigationPath
     var startMode: ConnectionStartMode = .ride
     var planID: String? = nil
@@ -56,15 +61,18 @@ struct ConnectionView: View {
     @State private var scanPulse = false
     @State private var routeDropTargeted = false
     @State private var rideLaunchMode: RideLaunchMode = .indoor
+    @State private var selectedCustomTemplateID: UUID?
+    @State private var showZWOImporter = false
+    @State private var zwoImportError: String?
 
     private let prefs = RidePreferences.shared
 
-    private let accentGreen = AppColor.success
     private let accentSuccess = AppColor.success
     private let accentYellow = AppColor.yellow
     private let accentOrange = AppColor.orange
     private let accentRed = AppColor.red
     private let accentBlue = AppColor.blue
+    private let accentMango = AppColor.mango
     private let bg = AppColor.bg
 
     private var canStartRide: Bool {
@@ -95,7 +103,9 @@ struct ConnectionView: View {
     // MARK: - Status banner copy (full-width rows; avoids squeezed 3-column pills)
 
     private var showTrainerStatusRow: Bool { !outdoorSensorsOnly }
-    private var showWiFiStatusRow: Bool { !outdoorSensorsOnly && startMode == .ride && rideLaunchMode == .indoor }
+    private var showWiFiStatusRow: Bool {
+        !outdoorSensorsOnly && startMode == .ride && rideLaunchMode == .indoor
+    }
     private var showCSCStatusRow: Bool { outdoorSensorsOnly }
 
     private var trainerStatusBannerTitle: String {
@@ -167,11 +177,15 @@ struct ConnectionView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 20)
 
-                    if bleManager.bluetoothState != .poweredOn && (rideLaunchMode == .indoor || outdoorSensorsOnly) {
+                    if bleManager.bluetoothState != .poweredOn
+                        && (rideLaunchMode == .indoor || outdoorSensorsOnly)
+                    {
                         bluetoothOffCard
                             .padding(.horizontal, 20)
                     } else {
-                        if startMode == .ride, planDayID == nil, !indoorRideLocked, !outdoorSensorsOnly {
+                        if startMode == .ride, planDayID == nil, !indoorRideLocked,
+                            !outdoorSensorsOnly
+                        {
                             rideModeCard
                                 .padding(.horizontal, 20)
                                 .padding(.bottom, 20)
@@ -183,8 +197,8 @@ struct ConnectionView: View {
                             icon: "antenna.radiowaves.left.and.right",
                             prominent: true
                         )
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 10)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 10)
 
                         scanButton
                             .padding(.horizontal, 20)
@@ -214,6 +228,19 @@ struct ConnectionView: View {
                                 .padding(.bottom, 24)
                         }
 
+                        // Zwift-style .zwo library (indoor free ride only — plan rides use the calendar day)
+                        if startMode == .ride, rideLaunchMode == .indoor, !outdoorSensorsOnly,
+                            planDayID == nil
+                        {
+                            sectionHeader(title: "CUSTOM WORKOUT", icon: "doc.text.fill")
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 10)
+
+                            customWorkoutLibraryCard
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 24)
+                        }
+
                         // Settings quick glance
                         if !outdoorSensorsOnly {
                             setupSummaryCard
@@ -223,11 +250,11 @@ struct ConnectionView: View {
                     }
 
                     #if DEBUG
-                    if !outdoorSensorsOnly {
-                        debugOverlay
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 16)
-                    }
+                        if !outdoorSensorsOnly {
+                            debugOverlay
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 16)
+                        }
                     #endif
 
                     // Bottom spacer for sticky action bar
@@ -237,7 +264,9 @@ struct ConnectionView: View {
             .scrollIndicators(.hidden)
 
             // Sticky bottom action bar
-            if bleManager.bluetoothState == .poweredOn || (startMode == .ride && rideLaunchMode == .outdoor) || outdoorSensorsOnly {
+            if bleManager.bluetoothState == .poweredOn
+                || (startMode == .ride && rideLaunchMode == .outdoor) || outdoorSensorsOnly
+            {
                 stickyActionBar
             }
         }
@@ -262,13 +291,17 @@ struct ConnectionView: View {
             if indoorRideLocked {
                 rideLaunchMode = .indoor
             }
+            if planDayID != nil {
+                selectedCustomTemplateID = nil
+            }
             if outdoorSensorsOnly {
                 if bleManager.bluetoothState == .poweredOn {
                     bleManager.reconnectOrScan()
                 }
             } else if rideLaunchMode == .indoor,
-                      bleManager.bluetoothState == .poweredOn,
-                      !bleManager.trainerConnectionState.isConnected {
+                bleManager.bluetoothState == .poweredOn,
+                !bleManager.trainerConnectionState.isConnected
+            {
                 bleManager.reconnectOrScan()
             }
         }
@@ -297,14 +330,76 @@ struct ConnectionView: View {
                 routeImportError = error.localizedDescription
             }
         }
-        .alert("Route Import Failed", isPresented: Binding(
-            get: { routeImportError != nil },
-            set: { if !$0 { routeImportError = nil } }
-        ), actions: {
-            Button("OK") { routeImportError = nil }
-        }, message: {
-            Text(routeImportError ?? "")
-        })
+        .alert(
+            "Route Import Failed",
+            isPresented: Binding(
+                get: { routeImportError != nil },
+                set: { if !$0 { routeImportError = nil } }
+            ),
+            actions: {
+                Button("OK") { routeImportError = nil }
+            },
+            message: {
+                Text(routeImportError ?? "")
+            })
+        .fileImporter(
+            isPresented: $showZWOImporter,
+            allowedContentTypes: [UTType(filenameExtension: "zwo") ?? .xml],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                Task {
+                    var data: Data?
+                    if url.startAccessingSecurityScopedResource() {
+                        defer { url.stopAccessingSecurityScopedResource() }
+                        data = try? Data(contentsOf: url)
+                    } else {
+                        data = try? Data(contentsOf: url)
+                    }
+                    guard let raw = data else {
+                        await MainActor.run {
+                            zwoImportError = "Could not read the selected file."
+                        }
+                        return
+                    }
+                    do {
+                        let parsed = try ZWOImportService.parse(data: raw)
+                        await MainActor.run {
+                            let t = CustomWorkoutTemplate(name: parsed.name, intervals: parsed.intervals)
+                            modelContext.insert(t)
+                            try? modelContext.save()
+                            selectedCustomTemplateID = t.id
+                        }
+                    } catch {
+                        await MainActor.run {
+                            zwoImportError =
+                                (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                        }
+                    }
+                }
+            case .failure(let error):
+                zwoImportError = error.localizedDescription
+            }
+        }
+        .alert(
+            "Workout Import Failed",
+            isPresented: Binding(
+                get: { zwoImportError != nil },
+                set: { if !$0 { zwoImportError = nil } }
+            ),
+            actions: {
+                Button("OK") { zwoImportError = nil }
+            },
+            message: {
+                Text(zwoImportError ?? "")
+            })
+        .onChange(of: rideLaunchMode) { _, newMode in
+            if newMode == .outdoor {
+                selectedCustomTemplateID = nil
+            }
+        }
     }
 
     // MARK: - Status Banner
@@ -313,7 +408,7 @@ struct ConnectionView: View {
         var n = 0
         if showTrainerStatusRow { n += 1 }
         if showWiFiStatusRow { n += 1 }
-        n += 1 // heart rate
+        n += 1  // heart rate
         if showCSCStatusRow { n += 1 }
         return n
     }
@@ -525,7 +620,9 @@ struct ConnectionView: View {
                         .foregroundStyle(rideLaunchMode == mode ? AppColor.bg : .white.opacity(0.7))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
-                        .background(rideLaunchMode == mode ? accentGreen : Color.white.opacity(0.05))
+                        .background(
+                            rideLaunchMode == mode ? accentSuccess : Color.white.opacity(0.05)
+                        )
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(MangoxPressStyle())
@@ -582,7 +679,7 @@ struct ConnectionView: View {
                 ZStack {
                     if bleManager.isScanningForDevices {
                         Circle()
-                            .fill(accentGreen.opacity(scanPulse ? 0.2 : 0.05))
+                            .fill(accentSuccess.opacity(scanPulse ? 0.2 : 0.05))
                             .frame(width: 36, height: 36)
                             .animation(
                                 accessibilityReduceMotion
@@ -592,16 +689,16 @@ struct ConnectionView: View {
                             )
 
                         ProgressView()
-                            .tint(accentGreen)
+                            .tint(accentSuccess)
                             .scaleEffect(0.75)
                     } else {
                         Circle()
-                            .fill(accentGreen.opacity(0.12))
+                            .fill(accentSuccess.opacity(0.12))
                             .frame(width: 36, height: 36)
 
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(accentGreen)
+                            .foregroundStyle(accentSuccess)
                     }
                 }
 
@@ -609,24 +706,32 @@ struct ConnectionView: View {
                     Text(bleManager.isScanningForDevices ? "Scanning…" : "Scan for Devices")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
-                    Text(bleManager.isScanningForDevices ? "Tap to stop" : (outdoorSensorsOnly ? "Find speed/cadence sensors & heart rate monitors" : "Find nearby trainers & HR monitors"))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.35))
+                    Text(
+                        bleManager.isScanningForDevices
+                            ? "Tap to stop"
+                            : (outdoorSensorsOnly
+                                ? "Find speed/cadence sensors & heart rate monitors"
+                                : "Find nearby trainers & HR monitors")
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.35))
                 }
 
                 Spacer()
 
-                Image(systemName: bleManager.isScanningForDevices ? "stop.circle" : "arrow.clockwise")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(accentGreen.opacity(0.6))
+                Image(
+                    systemName: bleManager.isScanningForDevices ? "stop.circle" : "arrow.clockwise"
+                )
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(accentSuccess.opacity(0.6))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
-            .background(accentGreen.opacity(0.05))
+            .background(accentSuccess.opacity(0.05))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(accentGreen.opacity(0.15), lineWidth: 1)
+                    .strokeBorder(accentSuccess.opacity(0.15), lineWidth: 1)
             )
         }
     }
@@ -638,13 +743,19 @@ struct ConnectionView: View {
     private var connectedDeviceRows: [ConnectedDeviceStateRow] {
         var rows: [ConnectedDeviceStateRow] = []
         if !outdoorSensorsOnly, let name = bleManager.connectedTrainerName {
-            rows.append(ConnectedDeviceStateRow(name: name, type: .trainer, state: bleManager.trainerConnectionState))
+            rows.append(
+                ConnectedDeviceStateRow(
+                    name: name, type: .trainer, state: bleManager.trainerConnectionState))
         }
         if let name = bleManager.connectedHRName {
-            rows.append(ConnectedDeviceStateRow(name: name, type: .heartRateMonitor, state: bleManager.hrConnectionState))
+            rows.append(
+                ConnectedDeviceStateRow(
+                    name: name, type: .heartRateMonitor, state: bleManager.hrConnectionState))
         }
         if let name = bleManager.connectedCSCName {
-            rows.append(ConnectedDeviceStateRow(name: name, type: .cyclingSpeedCadence, state: bleManager.cscConnectionState))
+            rows.append(
+                ConnectedDeviceStateRow(
+                    name: name, type: .cyclingSpeedCadence, state: bleManager.cscConnectionState))
         }
         return rows
     }
@@ -669,7 +780,8 @@ struct ConnectionView: View {
 
         // Scan results minus already-connected devices
         let scanResults = bleManager.discoveredPeripherals.filter { !dupIDs.contains($0.id) }
-        let scanForDisplay = outdoorSensorsOnly ? scanResults.filter { $0.deviceType != .trainer } : scanResults
+        let scanForDisplay =
+            outdoorSensorsOnly ? scanResults.filter { $0.deviceType != .trainer } : scanResults
         let trainers = scanForDisplay.filter { $0.deviceType == .trainer }
         let hrMonitors = scanForDisplay.filter { $0.deviceType == .heartRateMonitor }
         let cscSensors = scanForDisplay.filter { $0.deviceType == .cyclingSpeedCadence }
@@ -692,19 +804,30 @@ struct ConnectionView: View {
                         if !connected.isEmpty { sectionDivider }
 
                         if !trainers.isEmpty {
-                            deviceSection(title: "Trainers", icon: "bicycle", devices: trainers, type: .trainer)
+                            deviceSection(
+                                title: "Trainers", icon: "bicycle", devices: trainers,
+                                type: .trainer)
                         }
                         if !hrMonitors.isEmpty {
                             if !trainers.isEmpty { sectionDivider }
-                            deviceSection(title: "HR Monitors", icon: "heart.fill", devices: hrMonitors, type: .heartRateMonitor)
+                            deviceSection(
+                                title: "HR Monitors", icon: "heart.fill", devices: hrMonitors,
+                                type: .heartRateMonitor)
                         }
                         if !cscSensors.isEmpty {
                             if !trainers.isEmpty || !hrMonitors.isEmpty { sectionDivider }
-                            deviceSection(title: "Speed / Cadence", icon: "arrow.trianglehead.2.clockwise.rotate.90", devices: cscSensors, type: .cyclingSpeedCadence)
+                            deviceSection(
+                                title: "Speed / Cadence",
+                                icon: "arrow.trianglehead.2.clockwise.rotate.90",
+                                devices: cscSensors, type: .cyclingSpeedCadence)
                         }
                         if !unknowns.isEmpty {
-                            if !trainers.isEmpty || !hrMonitors.isEmpty || !cscSensors.isEmpty { sectionDivider }
-                            deviceSection(title: "Other Devices", icon: "questionmark.circle", devices: unknowns, type: .unknown)
+                            if !trainers.isEmpty || !hrMonitors.isEmpty || !cscSensors.isEmpty {
+                                sectionDivider
+                            }
+                            deviceSection(
+                                title: "Other Devices", icon: "questionmark.circle",
+                                devices: unknowns, type: .unknown)
                         }
                     }
 
@@ -756,13 +879,15 @@ struct ConnectionView: View {
         return VStack(spacing: 0) {
             wifiTrainerDiscoveryButton
 
-            Text("Finds trainers on your Wi‑Fi that advertise as a bridge (e.g. Zwift Companion, Wahoo, FTMS).")
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.28))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, showWifiRows || showBrowsingFooter ? 10 : 14)
+            Text(
+                "Finds trainers on your Wi‑Fi that advertise as a bridge (e.g. Zwift Companion, Wahoo, FTMS)."
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(.white.opacity(0.28))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, showWifiRows || showBrowsingFooter ? 10 : 14)
 
             if case .error(let message) = wifiState {
                 HStack(alignment: .top, spacing: 8) {
@@ -942,7 +1067,8 @@ struct ConnectionView: View {
         .padding(.vertical, 10)
     }
 
-    private func wifiTrainerRow(trainer: DiscoveredWiFiTrainer, connectDisabled: Bool) -> some View {
+    private func wifiTrainerRow(trainer: DiscoveredWiFiTrainer, connectDisabled: Bool) -> some View
+    {
         Button {
             dataSource.connectWiFi(to: trainer)
         } label: {
@@ -1075,7 +1201,7 @@ struct ConnectionView: View {
     private var scanningFooter: some View {
         HStack(spacing: 8) {
             ProgressView()
-                .tint(accentGreen.opacity(0.6))
+                .tint(accentSuccess.opacity(0.6))
                 .scaleEffect(0.65)
             Text("Scanning for more devices…")
                 .font(.system(size: 11))
@@ -1135,13 +1261,15 @@ struct ConnectionView: View {
                                             endPoint: .trailing
                                         )
                                     )
-                                    .offset(x: accessibilityReduceMotion ? 0 : (scanPulse ? 100 : -100))
+                                    .offset(
+                                        x: accessibilityReduceMotion ? 0 : (scanPulse ? 100 : -100)
+                                    )
                                     .animation(
                                         accessibilityReduceMotion
                                             ? .default
                                             : .easeInOut(duration: 1.5)
-                                            .repeatForever(autoreverses: false)
-                                            .delay(Double(i) * 0.2),
+                                                .repeatForever(autoreverses: false)
+                                                .delay(Double(i) * 0.2),
                                         value: scanPulse
                                     )
                             )
@@ -1156,17 +1284,28 @@ struct ConnectionView: View {
                     .foregroundStyle(.white.opacity(0.3))
                     .padding(.bottom, 16)
             } else {
-                Image(systemName: "sensor.tag.radiowaves.forward")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.white.opacity(0.12))
-                    .padding(.top, 20)
-                Text("No devices found")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.3))
-                Text("Tap scan to discover nearby BLE devices")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.2))
-                    .padding(.bottom, 20)
+                VStack(spacing: 8) {
+                    Image(systemName: "sensor.tag.radiowaves.forward")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.white.opacity(0.12))
+                        .padding(.top, 12)
+                    Text("No devices found")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.3))
+                    Text("Tap scan to discover nearby BLE devices")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.2))
+                    #if targetEnvironment(simulator)
+                        Text(
+                            "Bluetooth doesn’t discover trainers or sensors in the Simulator — use a physical iPhone."
+                        )
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.28))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 8)
+                    #endif
+                }
+                .padding(.bottom, 20)
             }
         }
         .frame(maxWidth: .infinity)
@@ -1179,7 +1318,9 @@ struct ConnectionView: View {
             .padding(.horizontal, 16)
     }
 
-    private func deviceSection(title: String, icon: String, devices: [DiscoveredPeripheral], type: DeviceType) -> some View {
+    private func deviceSection(
+        title: String, icon: String, devices: [DiscoveredPeripheral], type: DeviceType
+    ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
@@ -1232,7 +1373,9 @@ struct ConnectionView: View {
             if case .connecting(let n) = connState, n == device.name { return true }
             return false
         }()
-        let rowColor = isThisConnected ? accentSuccess : (isThisConnecting ? accentYellow : Color.white.opacity(0.5))
+        let rowColor =
+            isThisConnected
+            ? accentSuccess : (isThisConnecting ? accentYellow : Color.white.opacity(0.5))
         let icon: String = {
             switch type {
             case .heartRateMonitor: return "heart.fill"
@@ -1272,7 +1415,10 @@ struct ConnectionView: View {
                         HStack(spacing: 2) {
                             ForEach(0..<4) { bar in
                                 RoundedRectangle(cornerRadius: 1)
-                                    .fill(bar < signalBars(rssi: device.rssi) ? rowColor : Color.white.opacity(0.1))
+                                    .fill(
+                                        bar < signalBars(rssi: device.rssi)
+                                            ? rowColor : Color.white.opacity(0.1)
+                                    )
                                     .frame(width: 3, height: CGFloat(4 + bar * 3))
                             }
                         }
@@ -1312,6 +1458,131 @@ struct ConnectionView: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - Custom workout library (.zwo)
+
+    private var customWorkoutLibraryCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(
+                    "Import a Zwift .zwo file or pick a saved workout for a structured indoor session with ERG targets."
+                )
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.38))
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 18)
+            .padding(.bottom, customWorkoutTemplates.isEmpty ? 12 : 8)
+
+            if !customWorkoutTemplates.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(customWorkoutTemplates, id: \.id) { template in
+                        customWorkoutRow(template)
+                        if template.id != customWorkoutTemplates.last?.id {
+                            Divider().background(Color.white.opacity(0.06))
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+            }
+
+            Button {
+                showZWOImporter = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.up.doc.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(accentMango)
+                    Text("Import .zwo file")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(accentMango)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(accentMango.opacity(0.08))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 14)
+        }
+        .background(
+            ZStack {
+                Color.white.opacity(0.02)
+                GridPatternView().opacity(0.25)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+        )
+    }
+
+    private func customWorkoutRow(_ template: CustomWorkoutTemplate) -> some View {
+        let selected = selectedCustomTemplateID == template.id
+        return HStack(spacing: 10) {
+            Button {
+                selectedCustomTemplateID = selected ? nil : template.id
+            } label: {
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(
+                                (selected ? accentMango : Color.white.opacity(0.5)).opacity(0.12)
+                            )
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "figure.indoor.cycle")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(selected ? accentMango : Color.white.opacity(0.55))
+                    }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(template.name)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        Text("\(template.intervals.count) steps")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.28))
+                    }
+
+                    Spacer(minLength: 0)
+
+                    if selected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(accentMango)
+                    }
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                deleteCustomTemplate(template)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.35))
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func deleteCustomTemplate(_ template: CustomWorkoutTemplate) {
+        if selectedCustomTemplateID == template.id {
+            selectedCustomTemplateID = nil
+        }
+        modelContext.delete(template)
+        try? modelContext.save()
+    }
+
     // MARK: - Route Card
 
     private var routeCard: some View {
@@ -1326,7 +1597,7 @@ struct ConnectionView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(
-                    routeDropTargeted ? accentGreen.opacity(0.6) : Color.white.opacity(0.07),
+                    routeDropTargeted ? accentSuccess.opacity(0.6) : Color.white.opacity(0.07),
                     lineWidth: routeDropTargeted ? 2 : 1
                 )
         )
@@ -1364,11 +1635,13 @@ struct ConnectionView: View {
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(.white.opacity(0.85))
 
-                    Text("Import a GPX file to track your position\nduring the ride and unlock route-based GPX export")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.35))
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(2)
+                    Text(
+                        "Import a GPX file to track your position\nduring the ride and unlock route-based GPX export"
+                    )
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.35))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
                 }
 
                 // Upload area
@@ -1412,7 +1685,8 @@ struct ConnectionView: View {
             // Map preview
             if let region = routeManager.cameraRegion {
                 Map(initialPosition: .region(region)) {
-                    ForEach(Array(routeManager.polylineSegments.enumerated()), id: \.offset) { _, segment in
+                    ForEach(Array(routeManager.polylineSegments.enumerated()), id: \.offset) {
+                        _, segment in
                         let coordinates = segment.sanitizedForMapPolyline()
                         if coordinates.count > 1 {
                             MapPolyline(coordinates: coordinates)
@@ -1484,7 +1758,9 @@ struct ConnectionView: View {
     }
 
     private var routeSubtitle: String {
-        let base = String(format: "%.1f km · %d waypoints", routeManager.totalDistance / 1000, routeManager.points.count)
+        let base = String(
+            format: "%.1f km · %d waypoints", routeManager.totalDistance / 1000,
+            routeManager.points.count)
         let gain = Int(routeManager.totalElevationGain.rounded())
         if gain > 0 {
             return "\(base) · +\(gain)m"
@@ -1494,12 +1770,12 @@ struct ConnectionView: View {
 
     // MARK: - Setup Summary
 
-    @State private var rideGoalDistance: Double = 0 // 0 = no goal
+    @State private var rideGoalDistance: Double = 0  // 0 = no goal
     @State private var showCustomDistanceSheet = false
     @State private var customDistanceDraft = ""
 
     /// Preset chips for distance goal (km). `0` = none.
-    private let distanceQuickGoalPresets: [Double] = [0, 5, 10, 20, 40, 60]
+    private let distanceQuickGoalPresets: [Double] = [0, 10, 20, 30, 40, 50, 100]
 
     private var isCustomDistanceGoalSelected: Bool {
         guard rideGoalDistance > 0 else { return false }
@@ -1508,73 +1784,81 @@ struct ConnectionView: View {
 
     private var setupSummaryCard: some View {
         FTPRefreshScope {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 7) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.3))
-                Text("QUICK SETTINGS")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.35))
-                    .tracking(2)
-                Spacer()
-            }
-
-            HStack(spacing: 10) {
-                settingChip(label: "FTP", value: "\(PowerZone.ftp) W", color: accentYellow)
-                settingChip(label: "Max HR", value: "\(HeartRateZone.maxHR) bpm", color: accentRed)
-                if HeartRateZone.hasRestingHR {
-                    settingChip(label: "Rest HR", value: "\(HeartRateZone.restingHR)", color: accentBlue)
-                }
-            }
-
-            // Ride display toggles
-            Rectangle()
-                .fill(Color.white.opacity(0.06))
-                .frame(height: 1)
-
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "flag.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(accentBlue.opacity(0.7))
-                    Text("Show Laps")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.75))
-                }
-                Spacer()
-                Toggle("", isOn: Binding(
-                    get: { prefs.showLaps },
-                    set: { prefs.showLaps = $0 }
-                ))
-                .labelsHidden()
-                .tint(accentBlue)
-            }
-
-            // Ride goal
-            Rectangle()
-                .fill(Color.white.opacity(0.06))
-                .frame(height: 1)
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 6) {
-                    Image(systemName: "flag.checkered")
-                        .font(.system(size: 10))
-                        .foregroundStyle(accentGreen.opacity(0.7))
-                    Text("RIDE GOAL")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 7) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.3))
+                    Text("QUICK SETTINGS")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white.opacity(0.35))
                         .tracking(2)
                     Spacer()
-                    if rideGoalDistance > 0 {
-                        Text("\(Int(rideGoalDistance)) km")
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(accentGreen)
+                }
+
+                HStack(spacing: 10) {
+                    settingChip(label: "FTP", value: "\(PowerZone.ftp) W", color: accentYellow)
+                    settingChip(
+                        label: "Max HR", value: "\(HeartRateZone.maxHR) bpm", color: accentRed)
+                    if HeartRateZone.hasRestingHR {
+                        settingChip(
+                            label: "Rest HR", value: "\(HeartRateZone.restingHR)", color: accentBlue
+                        )
                     }
                 }
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                // Ride display toggles
+                Rectangle()
+                    .fill(Color.white.opacity(0.06))
+                    .frame(height: 1)
+
+                HStack {
+                    HStack(spacing: 6) {
+                        Image(systemName: "flag.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(accentBlue.opacity(0.7))
+                        Text("Show Laps")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
+                    Spacer()
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { prefs.showLaps },
+                            set: { prefs.showLaps = $0 }
+                        )
+                    )
+                    .labelsHidden()
+                    .tint(accentBlue)
+                }
+
+                // Ride goal
+                Rectangle()
+                    .fill(Color.white.opacity(0.06))
+                    .frame(height: 1)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "flag.checkered")
+                            .font(.system(size: 10))
+                            .foregroundStyle(accentSuccess.opacity(0.7))
+                        Text("RIDE GOAL")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.35))
+                            .tracking(2)
+                        Spacer()
+                        if rideGoalDistance > 0 {
+                            Text("\(Int(rideGoalDistance)) km")
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(accentSuccess)
+                        }
+                    }
+
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4),
+                        spacing: 8
+                    ) {
                         ForEach(distanceQuickGoalPresets, id: \.self) { km in
                             goalPresetButton(km: km)
                         }
@@ -1582,19 +1866,20 @@ struct ConnectionView: View {
                     }
                 }
             }
-        }
-        .padding(16)
-        .background(Color.white.opacity(AppOpacity.pillBg))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
-        )
-        .sheet(isPresented: $showCustomDistanceSheet) {
-            customDistanceSheet
-        }
+            .padding(16)
+            .background(Color.white.opacity(AppOpacity.pillBg))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+            )
+            .sheet(isPresented: $showCustomDistanceSheet) {
+                customDistanceSheet
+            }
         }
     }
+
+    @FocusState private var isCustomDistanceFocused: Bool
 
     private var customDistanceSheet: some View {
         let range = RideGoal.Kind.distance.range
@@ -1605,7 +1890,8 @@ struct ConnectionView: View {
                     .foregroundStyle(.white.opacity(0.55))
 
                 TextField("km", text: $customDistanceDraft)
-                    .keyboardType(.numberPad)
+                    .keyboardType(.decimalPad)
+                    .focused($isCustomDistanceFocused)
                     .font(.system(size: 20, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white)
                     .padding(12)
@@ -1623,6 +1909,10 @@ struct ConnectionView: View {
             .background(Color(red: 0.05, green: 0.06, blue: 0.09))
             .navigationTitle("Custom distance")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                // Focus the text field immediately so the system warms up the keyboard process
+                isCustomDistanceFocused = true
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { showCustomDistanceSheet = false }
@@ -1649,11 +1939,15 @@ struct ConnectionView: View {
         rideGoalDistance = km
         if km > 0 {
             prefs.setGoalTarget(.distance, target: km)
-            if let idx = prefs.goals.firstIndex(where: { $0.kind == .distance }), !prefs.goals[idx].isEnabled {
+            if let idx = prefs.goals.firstIndex(where: { $0.kind == .distance }),
+                !prefs.goals[idx].isEnabled
+            {
                 prefs.toggleGoal(.distance)
             }
         } else {
-            if let idx = prefs.goals.firstIndex(where: { $0.kind == .distance }), prefs.goals[idx].isEnabled {
+            if let idx = prefs.goals.firstIndex(where: { $0.kind == .distance }),
+                prefs.goals[idx].isEnabled
+            {
                 prefs.toggleGoal(.distance)
             }
         }
@@ -1676,9 +1970,9 @@ struct ConnectionView: View {
             Text(label)
                 .font(.system(size: 13, weight: isSelected ? .bold : .medium, design: .monospaced))
                 .foregroundStyle(isSelected ? .black : .white.opacity(0.7))
-                .frame(width: km == 0 ? 60 : 50)
+                .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
-                .background(isSelected ? accentGreen : Color.white.opacity(0.06))
+                .background(isSelected ? accentSuccess : Color.white.opacity(0.06))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -1687,7 +1981,8 @@ struct ConnectionView: View {
     private var customDistanceGoalButton: some View {
         let isSelected = isCustomDistanceGoalSelected
         return Button {
-            customDistanceDraft = rideGoalDistance > 0
+            customDistanceDraft =
+                rideGoalDistance > 0
                 ? "\(Int(rideGoalDistance))"
                 : "\(Int(RideGoal.Kind.distance.defaultValue))"
             showCustomDistanceSheet = true
@@ -1698,7 +1993,7 @@ struct ConnectionView: View {
                 .frame(minWidth: 68)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 8)
-                .background(isSelected ? accentGreen : Color.white.opacity(0.06))
+                .background(isSelected ? accentSuccess : Color.white.opacity(0.06))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -1742,17 +2037,17 @@ struct ConnectionView: View {
                 .padding(.vertical, 16)
                 .background(
                     canStartRide
-                        ? AnyShapeStyle(accentGreen)
+                        ? AnyShapeStyle(accentSuccess)
                         : AnyShapeStyle(Color.white.opacity(0.06))
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .shadow(color: canStartRide ? accentGreen.opacity(0.3) : .clear, radius: 12, y: 4)
+                .shadow(color: canStartRide ? accentSuccess.opacity(0.3) : .clear, radius: 12, y: 4)
             }
             .disabled(!canStartRide)
 
             HStack(spacing: 4) {
                 Circle()
-                    .fill(canStartRide ? accentGreen : accentOrange)
+                    .fill(canStartRide ? accentSuccess : accentOrange)
                     .frame(width: 5, height: 5)
                 Text(primaryActionHint)
                     .font(.system(size: 11))
@@ -1764,12 +2059,19 @@ struct ConnectionView: View {
         .padding(.bottom, 12)
         .background {
             ZStack(alignment: .top) {
-                // Glass panel — picks up scroll content colour through the blur
+                // Stable dark panel — avoids gray tint bleed from blurred/material backgrounds.
                 Rectangle()
-                    .glassEffect(.regular, in: .rect)
+                    .fill(bg)
+                    .overlay(
+                        Rectangle()
+                            .fill(Color.white.opacity(0.04))
+                            .frame(height: 1),
+                        alignment: .top
+                    )
                     .ignoresSafeArea(edges: .bottom)
+                    .allowsHitTesting(false)
 
-                // Gradient fade above the bar so list rows dissolve into it
+                // Subtle fade into content above the bar.
                 LinearGradient(
                     colors: [bg.opacity(0), bg],
                     startPoint: .top,
@@ -1800,11 +2102,15 @@ struct ConnectionView: View {
                 Text("Bluetooth Required")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.white.opacity(0.8))
-                Text(outdoorSensorsOnly ? "Enable Bluetooth in Settings to\nconnect heart rate and speed/cadence sensors." : "Enable Bluetooth in Settings to\nconnect to your trainer and sensors.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.35))
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(2)
+                Text(
+                    outdoorSensorsOnly
+                        ? "Enable Bluetooth in Settings to\nconnect heart rate and speed/cadence sensors."
+                        : "Enable Bluetooth in Settings to\nconnect to your trainer and sensors."
+                )
+                .font(.system(size: 13))
+                .foregroundStyle(.white.opacity(0.35))
+                .multilineTextAlignment(.center)
+                .lineSpacing(2)
             }
             .padding(.bottom, 40)
         }
@@ -1864,8 +2170,14 @@ struct ConnectionView: View {
                         : "Ready — GPS free ride with optional BLE sensors"
                 }
                 if rideLaunchMode == .indoor,
-                   dataSource.wifiConnectionState.isConnected,
-                   !bleManager.trainerConnectionState.isConnected {
+                    selectedCustomTemplateID != nil
+                {
+                    return "Ready — guided workout from your library"
+                }
+                if rideLaunchMode == .indoor,
+                    dataSource.wifiConnectionState.isConnected,
+                    !bleManager.trainerConnectionState.isConnected
+                {
                     return "Ready — WiFi trainer connected"
                 }
                 return "Ready — trainer connected"
@@ -1886,7 +2198,8 @@ struct ConnectionView: View {
     private var rideModeHint: String {
         switch rideLaunchMode {
         case .indoor:
-            return "Indoor rides need a Bluetooth or Wi‑Fi trainer and can optionally use a GPX route for simulation."
+            return
+                "Indoor rides need a Bluetooth or Wi‑Fi trainer and can optionally use a GPX route for simulation."
         case .outdoor:
             return routeManager.hasRoute
                 ? "Your loaded GPX route will appear on the outdoor map with off-course tracking."
@@ -1904,7 +2217,10 @@ struct ConnectionView: View {
             if rideLaunchMode == .outdoor {
                 navigationPath.append(AppRoute.outdoorDashboard)
             } else if let dayID = planDayID {
-                navigationPath.append(AppRoute.planDashboard(planID: planID ?? CachedPlan.shared.id, dayID: dayID))
+                navigationPath.append(
+                    AppRoute.planDashboard(planID: planID ?? CachedPlan.shared.id, dayID: dayID))
+            } else if let tid = selectedCustomTemplateID {
+                navigationPath.append(AppRoute.customWorkoutRide(templateID: tid))
             } else {
                 navigationPath.append(AppRoute.dashboard)
             }
@@ -1916,134 +2232,19 @@ struct ConnectionView: View {
     // MARK: - Debug
 
     #if DEBUG
-    private var debugOverlay: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
-            Text("DEBUG")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.white.opacity(0.25))
-                .tracking(2)
-            Text("BT: \(String(describing: bleManager.bluetoothState.rawValue))  Trainer: \(bleManager.trainerConnectionState.label)  HR: \(bleManager.hrConnectionState.label)  Devices: \(bleManager.discoveredPeripherals.count)")
+        private var debugOverlay: some View {
+            VStack(alignment: .leading, spacing: 4) {
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+                Text("DEBUG")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.25))
+                    .tracking(2)
+                Text(
+                    "BT: \(String(describing: bleManager.bluetoothState.rawValue))  Trainer: \(bleManager.trainerConnectionState.label)  HR: \(bleManager.hrConnectionState.label)  Devices: \(bleManager.discoveredPeripherals.count)"
+                )
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.2))
+            }
         }
-    }
     #endif
-}
-
-// MARK: - Route Illustration (Dashed Path)
-
-private struct RouteIllustration: View {
-    @State private var phase: CGFloat = 0
-
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-
-            Canvas { context, size in
-                let path = Path { p in
-                    p.move(to: CGPoint(x: 0, y: h * 0.7))
-                    p.addCurve(
-                        to: CGPoint(x: w * 0.35, y: h * 0.25),
-                        control1: CGPoint(x: w * 0.12, y: h * 0.65),
-                        control2: CGPoint(x: w * 0.22, y: h * 0.2)
-                    )
-                    p.addCurve(
-                        to: CGPoint(x: w * 0.65, y: h * 0.55),
-                        control1: CGPoint(x: w * 0.48, y: h * 0.3),
-                        control2: CGPoint(x: w * 0.52, y: h * 0.6)
-                    )
-                    p.addCurve(
-                        to: CGPoint(x: w, y: h * 0.3),
-                        control1: CGPoint(x: w * 0.78, y: h * 0.5),
-                        control2: CGPoint(x: w * 0.88, y: h * 0.25)
-                    )
-                }
-
-                // Glow path
-                context.stroke(
-                    path,
-                    with: .color(Color(red: 107/255, green: 127/255, blue: 212/255).opacity(0.08)),
-                    style: StrokeStyle(lineWidth: 12, lineCap: .round)
-                )
-
-                // Dashed main path
-                context.stroke(
-                    path,
-                    with: .color(Color(red: 107/255, green: 127/255, blue: 212/255).opacity(0.25)),
-                    style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [6, 8], dashPhase: phase)
-                )
-
-                // Waypoint dots
-                let dots: [CGPoint] = [
-                    CGPoint(x: 0, y: h * 0.7),
-                    CGPoint(x: w * 0.35, y: h * 0.25),
-                    CGPoint(x: w * 0.65, y: h * 0.55),
-                    CGPoint(x: w, y: h * 0.3)
-                ]
-                for dot in dots {
-                    let rect = CGRect(x: dot.x - 3, y: dot.y - 3, width: 6, height: 6)
-                    context.fill(Circle().path(in: rect), with: .color(Color(red: 107/255, green: 127/255, blue: 212/255).opacity(0.4)))
-                }
-            }
-        }
-        .onAppear {
-            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
-                phase = 28
-            }
-        }
-    }
-}
-
-// MARK: - Grid Pattern View
-
-private struct GridPatternView: View {
-    var body: some View {
-        Canvas { context, size in
-            let spacing: CGFloat = 24
-            let color = Color.white.opacity(0.015)
-
-            // Vertical lines
-            var x: CGFloat = 0
-            while x < size.width {
-                let path = Path { p in
-                    p.move(to: CGPoint(x: x, y: 0))
-                    p.addLine(to: CGPoint(x: x, y: size.height))
-                }
-                context.stroke(path, with: .color(color), lineWidth: 1)
-                x += spacing
-            }
-
-            // Horizontal lines
-            var y: CGFloat = 0
-            while y < size.height {
-                let path = Path { p in
-                    p.move(to: CGPoint(x: 0, y: y))
-                    p.addLine(to: CGPoint(x: size.width, y: y))
-                }
-                context.stroke(path, with: .color(color), lineWidth: 1)
-                y += spacing
-            }
-        }
-    }
-}
-
-// MARK: - Preview
-
-#Preview {
-    let ble = BLEManager()
-    let wifi = WiFiTrainerService()
-    let dataSource = DataSourceCoordinator(bleManager: ble, wifiService: wifi)
-    NavigationStack {
-        ConnectionView(
-            navigationPath: .constant(NavigationPath())
-        )
-    }
-    .environment(ble)
-    .environment(wifi)
-    .environment(dataSource)
-    .environment(FTPRefreshTrigger.shared)
-    .environment(RouteManager())
-    .environment(LocationManager())
 }

@@ -14,9 +14,9 @@ enum FTPTestState: Equatable {
 /// A logged trainer resistance change event during the FTP test.
 struct TrainerEvent: Identifiable {
     let id = UUID()
-    let elapsed: Int          // seconds since test start
+    let elapsed: Int  // seconds since test start
     let phaseName: String
-    let mode: String          // e.g. "ERG 133W", "Free Ride", "Resistance 0%"
+    let mode: String  // e.g. "ERG 133W", "Free Ride", "Resistance 0%"
     let timestamp: Date = .now
 }
 
@@ -62,26 +62,33 @@ struct FTPTestPhase: Identifiable, Equatable {
 final class FTPTestManager {
     static let protocolPhases: [FTPTestPhase] = [
         // Warm-up ramps progressively: Z1 → Z2 → Z3 (easy → endurance → tempo)
-        FTPTestPhase(id: 1, name: "Warm Up — Easy", duration: 5 * 60,
-                     detail: "Easy spin, loosen the legs.",
-                     ergTargetPercent: 0.50),
-        FTPTestPhase(id: 2, name: "Warm Up — Endurance", duration: 5 * 60,
-                     detail: "Build into endurance pace.",
-                     ergTargetPercent: 0.65),
-        FTPTestPhase(id: 3, name: "Warm Up — Tempo", duration: 5 * 60,
-                     detail: "Tempo effort. You should feel the work.",
-                     ergTargetPercent: 0.80),
-        FTPTestPhase(id: 4, name: "Openers", duration: 5 * 60,
-                     detail: "Hard effort to prime your aerobic system.",
-                     ergTargetPercent: 0.90),
-        FTPTestPhase(id: 5, name: "Recovery", duration: 10 * 60,
-                     detail: "Easy spin. Breathe and prepare for the main effort.",
-                     ergTargetPercent: 0.45),
-        FTPTestPhase(id: 6, name: "20 Min Test", duration: 20 * 60,
-                     detail: "Sustained best effort. Pace evenly — don't go out too hard."),
-        FTPTestPhase(id: 7, name: "Cool Down", duration: 10 * 60,
-                     detail: "Easy spin and controlled breathing.",
-                     ergTargetPercent: 0.45),
+        FTPTestPhase(
+            id: 1, name: "Warm Up — Easy", duration: 5 * 60,
+            detail: "Easy spin, loosen the legs.",
+            ergTargetPercent: 0.50),
+        FTPTestPhase(
+            id: 2, name: "Warm Up — Endurance", duration: 5 * 60,
+            detail: "Build into endurance pace.",
+            ergTargetPercent: 0.65),
+        FTPTestPhase(
+            id: 3, name: "Warm Up — Tempo", duration: 5 * 60,
+            detail: "Tempo effort. You should feel the work.",
+            ergTargetPercent: 0.80),
+        FTPTestPhase(
+            id: 4, name: "5-Min Clearing", duration: 5 * 60,
+            detail: "All-out anaerobic blowout to clear W-prime. Hold on!",
+            ergTargetPercent: 1.10),
+        FTPTestPhase(
+            id: 5, name: "Recovery", duration: 10 * 60,
+            detail: "Easy spin. Breathe and prepare for the main effort.",
+            ergTargetPercent: 0.45),
+        FTPTestPhase(
+            id: 6, name: "20 Min Test", duration: 20 * 60,
+            detail: "Sustained best effort. Pace evenly — don't go out too hard."),
+        FTPTestPhase(
+            id: 7, name: "Cool Down", duration: 10 * 60,
+            detail: "Easy spin and controlled breathing.",
+            ergTargetPercent: 0.45),
     ]
 
     // MARK: - Public State
@@ -112,6 +119,31 @@ final class FTPTestManager {
     /// Final 20-minute average (set once on completion).
     var averageTwentyMinutePower: Double = 0
     var estimatedFTP: Int = 0
+
+    /// Gamification: Live estimated FTP based on running 20-minute average.
+    var liveProjectedFTP: Int {
+        if currentPhaseIndex == 5 && runningTwentyMinAvg > 0 {
+            return Int((runningTwentyMinAvg * 0.95).rounded())
+        }
+        return 0
+    }
+
+    /// Dynamic pacing coach text during the 20-minute test.
+    var dynamicCoachingText: String? {
+        guard currentPhase.id == 6 else { return nil }
+        let elapsedInPhase = currentPhase.duration - secondsRemainingInPhase
+
+        switch elapsedInPhase {
+        case 0..<300:
+            return "Settle in. Find a sustainable rhythm. Don't go out too hard!"
+        case 300..<600:
+            return "Hold the line. Keep your breathing deep and controlled."
+        case 600..<900:
+            return "Over halfway. This is where it counts. Dig deep."
+        default:
+            return "Empty the tank! Hold nothing back. Give it everything you have left!"
+        }
+    }
 
     /// Per-phase average power so the user can review pacing after the test.
     var phaseAveragePowers: [Int: Double] = [:]  // phase id → avg watts
@@ -193,7 +225,8 @@ final class FTPTestManager {
         self.dataSource = dataSource
 
         // ERG only applies when a BLE trainer is connected; Wi‑Fi bridges are manual resistance.
-        ergEnabled = bleManager.ftmsControl.supportsERG && bleManager.trainerConnectionState.isConnected
+        ergEnabled =
+            bleManager.ftmsControl.supportsERG && bleManager.trainerConnectionState.isConnected
 
         if let dataSource {
             dataSource.subscribeCyclingMetrics(id: Self.subscriberID) { [weak self] metrics in
@@ -351,17 +384,28 @@ final class FTPTestManager {
         timer = nil
     }
 
+    private var lastNonZeroPower: Int = 0
+
     private func tick() {
         guard state == .running else { return }
         totalElapsedSeconds += 1
 
+        let timeSinceLastPacket: TimeInterval
+        if let lastPacket = bleManager?.lastPacketReceived {
+            timeSinceLastPacket = Date().timeIntervalSince(lastPacket)
+        } else {
+            timeSinceLastPacket = .infinity
+        }
+        let isShortGap = timeSinceLastPacket > 1.0 && timeSinceLastPacket <= 5.0
+
         // Average all BLE readings from this 1-second window.
         let avgPower: Int
         if powerAccumulator.isEmpty {
-            // No BLE packets this second — use 0 (trainer may be idle)
-            avgPower = 0
+            // Smooth over short BLE drops (< 5s), otherwise zero out
+            avgPower = isShortGap ? lastNonZeroPower : 0
         } else {
             avgPower = TrainerPowerMetrics.meanInt(samples: powerAccumulator)
+            lastNonZeroPower = avgPower
         }
         powerAccumulator.removeAll(keepingCapacity: true)
 
@@ -399,6 +443,14 @@ final class FTPTestManager {
 
         // Phase countdown
         secondsRemainingInPhase -= 1
+
+        // Dynamic coaching haptics for the 20-minute test block
+        if currentPhase.id == 6 {
+            let elapsedInPhase = currentPhase.duration - secondsRemainingInPhase
+            if elapsedInPhase == 300 || elapsedInPhase == 600 || elapsedInPhase == 900 {
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            }
+        }
 
         // 10-second warning before next phase (haptic + audio cue)
         if secondsRemainingInPhase == 10 && currentPhaseIndex < phases.count - 1 {
@@ -520,14 +572,19 @@ final class FTPTestManager {
             Task {
                 do {
                     if bleManager.ftmsControl.supportsResistance {
-                        try await bleManager.ftmsControl.setResistanceLevel(0)
-                        ftpLogger.info("FTP Test: Resistance → 0 for free-ride phase \(phase.name)")
+                        // Apply ~45% resistance to provide "pacing rails" and a solid road-like feel for the 20-min block
+                        try await bleManager.ftmsControl.setResistanceLevel(0.45)
+                        ftpLogger.info(
+                            "FTP Test: Resistance → 45% for free-ride phase \(phase.name)")
                     } else {
                         await bleManager.ftmsControl.releaseControl()
-                        ftpLogger.info("FTP Test: Released control for free-ride phase \(phase.name)")
+                        ftpLogger.info(
+                            "FTP Test: Released control for free-ride phase \(phase.name)")
                     }
                 } catch {
-                    ftpLogger.error("FTP Test: Free-ride transition failed for phase \(phase.name): \(error.localizedDescription)")
+                    ftpLogger.error(
+                        "FTP Test: Free-ride transition failed for phase \(phase.name): \(error.localizedDescription)"
+                    )
                 }
             }
         }

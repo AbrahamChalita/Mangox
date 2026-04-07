@@ -1,41 +1,80 @@
+import CryptoKit
 import Foundation
 import SwiftData
 import SwiftUI
-import CryptoKit
 import os.log
 
 // MARK: - Chat Models
 
-struct ChatMessage: Identifiable, Equatable {
+struct ChatMessage: Identifiable, Equatable, Sendable {
     let id: UUID
     let role: MessageRole
     let content: String
     let timestamp: Date
     let suggestedActions: [SuggestedAction]
     let followUpQuestion: String?
+    /// When non-empty, UI shows one reply card per block; flat `followUpQuestion` / `suggestedActions` are unused for the panel.
+    let followUpBlocks: [CoachFollowUpBlock]
     let thinkingSteps: [String]
-    var shouldAnimate: Bool
     let category: String?
     let tags: [String]
     let references: [ChatReference]
+    /// True when the coach used live web sources (API flag or link-backed references).
+    let usedWebSearch: Bool
+    var feedbackScore: Int?
+    var confidence: Double
 
     static func user(_ text: String) -> ChatMessage {
         ChatMessage(
             id: UUID(), role: .user, content: text, timestamp: .now,
-            suggestedActions: [], followUpQuestion: nil, thinkingSteps: [],
-            shouldAnimate: false, category: nil, tags: [], references: []
+            suggestedActions: [], followUpQuestion: nil, followUpBlocks: [],
+            thinkingSteps: [],
+            category: nil, tags: [], references: [], usedWebSearch: false,
+            feedbackScore: nil, confidence: 1.0
         )
     }
 }
 
-enum MessageRole: String, Equatable {
+enum MessageRole: String, Equatable, Sendable {
     case user, assistant
 }
 
-struct SuggestedAction: Codable, Identifiable, Equatable {
-    var id: String { label }
+struct SuggestedAction: Codable, Identifiable, Equatable, Sendable {
+    var id: String { "\(type)|\(label)" }
     let label: String
     let type: String
+}
+
+/// One "Coach asks" card + its chips (from `followUpBlocks` on the coach API).
+struct CoachFollowUpBlock: Codable, Equatable, Sendable {
+    let question: String
+    let suggestedActions: [SuggestedAction]
+
+    enum CodingKeys: String, CodingKey {
+        case question
+        case suggestedActions
+        case suggested_actions
+    }
+
+    init(question: String, suggestedActions: [SuggestedAction]) {
+        self.question = question
+        self.suggestedActions = suggestedActions
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        question = try c.decode(String.self, forKey: .question)
+        suggestedActions =
+            (try? c.decodeIfPresent([SuggestedAction].self, forKey: .suggestedActions))
+            ?? (try? c.decodeIfPresent([SuggestedAction].self, forKey: .suggested_actions))
+            ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(question, forKey: .question)
+        try c.encode(suggestedActions, forKey: .suggestedActions)
+    }
 }
 
 // MARK: - API Request / Response Models
@@ -49,6 +88,10 @@ struct ChatRequest: Encodable {
     /// When present, `user_context` is nil.
     let user_context_encrypted: String?
     let is_pro: Bool
+    /// Device local calendar date `yyyy-MM-dd` so the coach anchors schedules correctly.
+    let client_local_date: String
+    /// IANA zone id (e.g. `America/Los_Angeles`).
+    let client_time_zone: String
 }
 
 struct HistoryTurn: Encodable {
@@ -61,29 +104,72 @@ struct ChatAPIResponse: Decodable {
     let content: String
     let suggestedActions: [SuggestedAction]
     let followUpQuestion: String?
+    let followUpBlocks: [CoachFollowUpBlock]
     let confidence: Double
     let thinkingSteps: [String]
     let tags: [String]
     let references: [ChatReference]
+    let toolCalls: [ToolCall]
+    let usedWebSearch: Bool
+
+    init(
+        category: String,
+        content: String,
+        suggestedActions: [SuggestedAction],
+        followUpQuestion: String?,
+        followUpBlocks: [CoachFollowUpBlock] = [],
+        confidence: Double,
+        thinkingSteps: [String],
+        tags: [String],
+        references: [ChatReference],
+        toolCalls: [ToolCall],
+        usedWebSearch: Bool = false
+    ) {
+        self.category = category
+        self.content = content
+        self.suggestedActions = suggestedActions
+        self.followUpQuestion = followUpQuestion
+        self.followUpBlocks = followUpBlocks
+        self.confidence = confidence
+        self.thinkingSteps = thinkingSteps
+        self.tags = tags
+        self.references = references
+        self.toolCalls = toolCalls
+        self.usedWebSearch = usedWebSearch
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         category = (try? c.decodeIfPresent(String.self, forKey: .category)) ?? "training_advice"
         content = try c.decode(String.self, forKey: .content)
-        suggestedActions = (try? c.decodeIfPresent([SuggestedAction].self, forKey: .suggestedActions)) ?? []
-        followUpQuestion = try? c.decodeIfPresent(String.self, forKey: .followUpQuestion)
+        suggestedActions =
+            (try? c.decodeIfPresent([SuggestedAction].self, forKey: .suggestedActions))
+            ?? (try? c.decodeIfPresent([SuggestedAction].self, forKey: .suggested_actions))
+            ?? []
+        followUpQuestion =
+            (try? c.decodeIfPresent(String.self, forKey: .followUpQuestion))
+            ?? (try? c.decodeIfPresent(String.self, forKey: .follow_up_question))
+        followUpBlocks =
+            (try? c.decodeIfPresent([CoachFollowUpBlock].self, forKey: .followUpBlocks))
+            ?? (try? c.decodeIfPresent([CoachFollowUpBlock].self, forKey: .follow_up_blocks))
+            ?? []
         confidence = (try? c.decodeIfPresent(Double.self, forKey: .confidence)) ?? 1.0
         thinkingSteps = (try? c.decodeIfPresent([String].self, forKey: .thinkingSteps)) ?? []
         tags = (try? c.decodeIfPresent([String].self, forKey: .tags)) ?? []
         references = (try? c.decodeIfPresent([ChatReference].self, forKey: .references)) ?? []
+        toolCalls = (try? c.decodeIfPresent([ToolCall].self, forKey: .toolCalls)) ?? []
+        usedWebSearch = (try? c.decodeIfPresent(Bool.self, forKey: .usedWebSearch)) ?? false
     }
 
     enum CodingKeys: String, CodingKey {
-        case category, content, suggestedActions, followUpQuestion, confidence, thinkingSteps, tags, references
+        case category, content, suggestedActions, followUpQuestion, followUpBlocks, confidence,
+            thinkingSteps, tags, references, toolCalls
+        case suggested_actions, follow_up_question, follow_up_blocks
+        case usedWebSearch = "used_web_search"
     }
 }
 
-struct ChatReference: Codable, Equatable {
+struct ChatReference: Codable, Equatable, Sendable {
     let title: String
     let url: String?
     let snippet: String?
@@ -96,8 +182,22 @@ struct UserContext: Encodable {
     let recentWorkoutsCount: Int
     let activePlanName: String?
     let activePlanProgress: String?
+    /// `builtin` (template) or `ai` when an active plan is resolved.
+    let activePlanSource: String?
+    /// Sum of TSS from valid completed rides in the current calendar week.
+    let weekActualTss: Int
+    /// Guided ERG scale as percent (100 = plan as written).
+    let adaptiveErgPercent: Int
     let ftpHistory: String?
     let lastRide: LastRideContext?
+    /// Optional goal event / phase from in-app settings.
+    let seasonGoalSummary: String?
+    /// Short hint about optional vs mandatory plan days when the active week includes flexible sessions.
+    let planKeyDaySemanticsHint: String?
+    /// Rider body weight in kg when set. Used to compute W/kg context.
+    let riderWeightKg: Double?
+    /// Rider age in years when birth year is set.
+    let riderAge: Int?
 }
 
 struct LastRideContext: Encodable {
@@ -112,25 +212,345 @@ struct LastRideContext: Encodable {
     let normalizedPower: Double
     let tss: Double
     let intensityFactor: Double
+    /// Human-readable line for the coach; omits misleading 0W/NP when no power meter.
     let summary: String
+    let powerDataAvailable: Bool
 }
 
 struct PlanGenerationRequest: Encodable {
     let inputs: PlanInputs
+    let is_pro: Bool
+    let user_context_encrypted: String?
+    let client_local_date: String
+    let client_time_zone: String
 }
 
-struct PlanInputs: Encodable {
+struct PlanInputs: Codable, Equatable, Sendable {
     let event_name: String
     let event_date: String
     let ftp: Int
     let weekly_hours: Int?
     let experience: String?
+    /// e.g. long, medium, short — when the event publishes multiple routes.
+    let route_option: String?
+    /// Official or user-stated route distance (km).
+    let target_distance_km: Double?
+    /// Total climbing (m) when known.
+    let target_elevation_m: Double?
+    let event_location: String?
+    /// Short free-text: mass start, gravel, etc.
+    let event_notes: String?
+
+    /// Lines for the confirm UI (omits empty fields).
+    var coachConfirmDetailLines: [String] {
+        var lines: [String] = []
+        if let r = route_option?.trimmingCharacters(in: .whitespacesAndNewlines), !r.isEmpty {
+            lines.append("Route: \(r)")
+        }
+        if let km = target_distance_km, km > 0 {
+            let s = km >= 100 ? String(format: "%.0f km", km) : String(format: "%.1f km", km)
+            lines.append("Distance: \(s)")
+        }
+        if let m = target_elevation_m, m > 0 {
+            lines.append("Climbing: \(Int(m.rounded())) m")
+        }
+        if let loc = event_location?.trimmingCharacters(in: .whitespacesAndNewlines), !loc.isEmpty {
+            lines.append("Location: \(loc)")
+        }
+        if let n = event_notes?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty {
+            lines.append(n)
+        }
+        return lines
+    }
 }
 
 struct PlanGenerationResponse: Decodable {
     let plan: TrainingPlan
     let credits_used: Int?
     let credits_remaining: Int?
+    let request_id: String?
+    let validation_warnings: [String]?
+    let generation_metrics: PlanGenerationMetrics?
+}
+
+struct PlanLLMModelsResolved: Decodable, Sendable, Equatable {
+    let skeleton: String
+    let week: String
+    /// Taper/race week tier; absent on older API responses.
+    let weekPremium: String?
+
+    enum CodingKeys: String, CodingKey {
+        case skeleton
+        case week
+        case weekPremium = "week_premium"
+    }
+}
+
+struct PlanGenerationMetrics: Decodable, Sendable, Equatable {
+    let expectedWeeks: Int
+    let skeletonMs: Int
+    let weeksMs: Int
+    let totalMs: Int
+    let parallelConcurrency: Int
+    let weeksSucceededLlm: Int
+    let weeksUsedFallback: Int
+    let fallbackWeekNumbers: [Int]
+    let templateIntervalExpansions: Int
+    let models: PlanLLMModelsResolved?
+    let rulesVersion: String
+    let weekBatchSize: Int?
+    let weekLlmCalls: Int?
+    let planParallelVersion: String?
+    let skeletonProgressionWarnings: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case expectedWeeks = "expected_weeks"
+        case skeletonMs = "skeleton_ms"
+        case weeksMs = "weeks_ms"
+        case totalMs = "total_ms"
+        case parallelConcurrency = "parallel_concurrency"
+        case weeksSucceededLlm = "weeks_succeeded_llm"
+        case weeksUsedFallback = "weeks_used_fallback"
+        case fallbackWeekNumbers = "fallback_week_numbers"
+        case templateIntervalExpansions = "template_interval_expansions"
+        case models
+        case rulesVersion = "rules_version"
+        case weekBatchSize = "week_batch_size"
+        case weekLlmCalls = "week_llm_calls"
+        case planParallelVersion = "plan_parallel_version"
+        case skeletonProgressionWarnings = "skeleton_progression_warnings"
+    }
+}
+
+struct PlanGenerationResult: Sendable {
+    let plan: TrainingPlan
+    let requestId: String?
+    let validationWarnings: [String]
+    let creditsRemaining: Int?
+    let generationMetrics: PlanGenerationMetrics?
+}
+
+/// Progress state streamed from `/api/generate-plan/stream`.
+struct PlanGenerationProgress: Equatable {
+    let phase: String  // "skeleton", "weeks", "validating", "assembling"
+    let message: String
+    let current: Int?  // current week (during "weeks" phase)
+    let total: Int?  // total weeks
+    var fraction: Double {
+        guard phase == "weeks", let current, let total, total > 0 else {
+            switch phase {
+            case "skeleton": return 0.05
+            case "validating", "assembling": return 0.95
+            default: return 0
+            }
+        }
+        // skeleton=5%, weeks=5-90%, validate=90-100%
+        return 0.05 + 0.85 * (Double(current) / Double(total))
+    }
+}
+
+/// Shown in a sheet so the user confirms before `/api/generate-plan` runs.
+struct PlanGenerationDraft: Identifiable, Equatable {
+    let id: UUID
+    var inputs: PlanInputs
+    var summaryLine: String
+
+    init(id: UUID = UUID(), inputs: PlanInputs, summaryLine: String) {
+        self.id = id
+        self.inputs = inputs
+        self.summaryLine = summaryLine
+    }
+}
+
+struct PlanSaveCelebration: Identifiable, Equatable {
+    let planID: String
+    let planName: String
+    let warnings: [String]
+    /// Weeks that used server-side fallback days; user can retry via `/api/regenerate-plan-week`.
+    let fallbackWeekNumbers: [Int]
+    /// Latest full plan JSON (for week regeneration + persistence).
+    let planSnapshotJSON: Data?
+    let planInputs: PlanInputs?
+
+    var id: String { planID }
+}
+
+struct ToolCall: Codable, Identifiable, Equatable, Sendable {
+    var id: String { "\(name)-\(state)-\(detail ?? "")" }
+    let name: String
+    let state: String
+    let detail: String?
+}
+
+/// JSON in `ToolCall.detail` when `name == "generate_plan"` (matches `/api/generate-plan` inputs).
+private struct GeneratePlanToolDetail: Decodable {
+    let event_name: String
+    let event_date: String?
+    let weekly_hours: Int?
+    let experience: String?
+    let route_option: String?
+    let target_distance_km: Double?
+    let target_elevation_m: Double?
+    let event_location: String?
+    let event_notes: String?
+
+    enum CodingKeys: String, CodingKey {
+        case event_name, event_date, weekly_hours, experience
+        case route_option, target_distance_km, target_elevation_m, event_location, event_notes
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        event_name = try c.decode(String.self, forKey: .event_name)
+        event_date = try c.decodeIfPresent(String.self, forKey: .event_date)
+        weekly_hours = Self.decodeFlexibleInt(c, forKey: .weekly_hours)
+        experience = try c.decodeIfPresent(String.self, forKey: .experience)
+        route_option = try c.decodeIfPresent(String.self, forKey: .route_option)
+        target_distance_km = Self.decodeFlexibleDouble(c, forKey: .target_distance_km)
+        target_elevation_m = Self.decodeFlexibleDouble(c, forKey: .target_elevation_m)
+        event_location = try c.decodeIfPresent(String.self, forKey: .event_location)
+        event_notes = try c.decodeIfPresent(String.self, forKey: .event_notes)
+    }
+
+    private static func decodeFlexibleDouble(
+        _ c: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) -> Double? {
+        if let d = try? c.decodeIfPresent(Double.self, forKey: key) { return d }
+        if let i = try? c.decodeIfPresent(Int.self, forKey: key) { return Double(i) }
+        if let s = try? c.decodeIfPresent(String.self, forKey: key) {
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let d = Double(t) { return d }
+            let filtered = t.filter { $0.isNumber || $0 == "." || $0 == "," }
+            let normalized = filtered.replacingOccurrences(of: ",", with: ".")
+            if let d = Double(normalized) { return d }
+        }
+        return nil
+    }
+
+    private static func decodeFlexibleInt(
+        _ c: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) -> Int? {
+        if let i = try? c.decodeIfPresent(Int.self, forKey: key) { return i }
+        if let d = try? c.decodeIfPresent(Double.self, forKey: key) { return Int(d.rounded()) }
+        if let s = try? c.decodeIfPresent(String.self, forKey: key),
+            let v = Int(s.trimmingCharacters(in: .whitespacesAndNewlines))
+        {
+            return v
+        }
+        return nil
+    }
+}
+
+/// Normalizes model-supplied dates to `yyyy-MM-dd` for `/api/generate-plan` and UI.
+private enum PlanEventDateNormalization {
+    private static let ymd: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    static func normalizedYYYYMMDD(from raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let cal = Calendar.current
+
+        if let d = ymd.date(from: trimmed) {
+            return ymd.string(from: cal.startOfDay(for: d))
+        }
+
+        let isoFull = ISO8601DateFormatter()
+        isoFull.formatOptions = [
+            .withInternetDateTime, .withDashSeparatorInDate, .withColonSeparatorInTime,
+        ]
+        if let d = isoFull.date(from: trimmed) {
+            return ymd.string(from: cal.startOfDay(for: d))
+        }
+
+        let isoDay = ISO8601DateFormatter()
+        isoDay.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        if let d = isoDay.date(from: trimmed) {
+            return ymd.string(from: cal.startOfDay(for: d))
+        }
+
+        let medium = DateFormatter()
+        medium.locale = .current
+        medium.timeZone = TimeZone.current
+        medium.dateStyle = .medium
+        medium.timeStyle = .none
+        if let d = medium.date(from: trimmed) {
+            return ymd.string(from: cal.startOfDay(for: d))
+        }
+
+        let long = DateFormatter()
+        long.locale = .current
+        long.timeZone = TimeZone.current
+        long.dateStyle = .long
+        long.timeStyle = .none
+        if let d = long.date(from: trimmed) {
+            return ymd.string(from: cal.startOfDay(for: d))
+        }
+
+        let us = DateFormatter()
+        us.locale = Locale(identifier: "en_US_POSIX")
+        us.timeZone = TimeZone.current
+        for pattern in ["MM/dd/yyyy", "M/d/yyyy", "MM-dd-yyyy"] {
+            us.dateFormat = pattern
+            if let d = us.date(from: trimmed) {
+                return ymd.string(from: cal.startOfDay(for: d))
+            }
+        }
+
+        let eu = DateFormatter()
+        eu.locale = Locale(identifier: "en_GB")
+        eu.timeZone = TimeZone.current
+        for pattern in ["dd/MM/yyyy", "d/M/yyyy", "dd-MM-yyyy"] {
+            eu.dateFormat = pattern
+            if let d = eu.date(from: trimmed) {
+                return ymd.string(from: cal.startOfDay(for: d))
+            }
+        }
+
+        if let d = extractDateWithDataDetector(from: trimmed) {
+            return ymd.string(from: cal.startOfDay(for: d))
+        }
+
+        return nil
+    }
+
+    private static func extractDateWithDataDetector(from string: String) -> Date? {
+        guard
+            let detector = try? NSDataDetector(
+                types: NSTextCheckingResult.CheckingType.date.rawValue)
+        else { return nil }
+        let range = NSRange(string.startIndex..<string.endIndex, in: string)
+        var found: Date?
+        detector.enumerateMatches(in: string, options: [], range: range) { match, _, _ in
+            guard let match, let d = match.date else { return }
+            if found == nil { found = d }
+        }
+        return found
+    }
+}
+
+enum ChatRuntimeEvent: Sendable {
+    case status(String)
+    case textDelta(String)
+    case toolCalls([ToolCall])
+    case completed(ChatAPIResponse)
+    case failed(String)
+}
+
+struct ChatWireEvent: Decodable, Sendable {
+    let type: String
+    let delta: String?
+    let status: String?
+    let message: ChatAPIResponse?
+    let error: String?
 }
 
 // MARK: - AIService
@@ -144,27 +564,173 @@ final class AIService {
     var isLoading: Bool = false
     var error: String? = nil
     var generatingPlan: Bool = false
+    var planProgress: PlanGenerationProgress?
     var lastCreditsRemaining: Int? = nil
+
+    /// User must confirm before we call the plan API (set from chat `generate_plan` tool or Regenerate).
+    var planConfirmationDraft: PlanGenerationDraft?
+    /// After a successful save, celebration UI + optional navigation to the plan.
+    var planSaveCelebration: PlanSaveCelebration?
+
+    /// Shown while the backend streams the coach reply (`/api/chat/stream` extracts `content` text).
+    /// Refreshes on a short debounce so the UI does not repaint every token.
+    var streamDraftText: String = ""
+    /// Short status from SSE before the first content delta (e.g. "Reviewing your training context").
+    var streamStatusText: String?
+    /// True while the model is emitting a `<think>` block with no visible content yet.
+    var streamIsThinking: Bool = false
+
+    private var streamRawBuffer: String = ""
+    private var streamDisplayThrottleTask: Task<Void, Never>?
 
     /// The currently active chat session. Nil means no session selected.
     var currentSessionID: UUID?
 
-    /// IDs of messages whose typewriter animation has already played.
-    /// Prevents re-animation when dismissing/reopening the chat sheet.
-    private var animatedMessageIDs: Set<UUID> = []
-
-    /// Returns true only the FIRST time — after that the ID is remembered.
-    func shouldAnimateMessage(_ id: UUID) -> Bool {
-        !animatedMessageIDs.contains(id)
-    }
-
-    func markAnimated(_ id: UUID) {
-        animatedMessageIDs.insert(id)
-    }
-
     // MARK: Constants
 
     static let freeDailyLimit = 5
+
+    /// When `Info.plist` `MangoxCoachStaffTier` is `admin` or `superuser` (via build setting `MANGOX_COACH_STAFF_TIER`), the free-tier daily coach cap is skipped. Leave empty for App Store builds.
+    static var bypassesDailyCoachMessageLimit: Bool {
+        let raw =
+            (Bundle.main.object(forInfoDictionaryKey: "MangoxCoachStaffTier") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        let norm = raw.replacingOccurrences(of: "_", with: "").replacingOccurrences(
+            of: "-", with: "")
+        return norm == "admin" || norm == "superuser"
+    }
+
+    /// In-chat quick-reply chips (model `suggestedActions`). Trim, cap, drop empties.
+    private static func sanitizedSuggestedActions(_ raw: [SuggestedAction]) -> [SuggestedAction] {
+        raw
+            .map {
+                SuggestedAction(
+                    label: $0.label.trimmingCharacters(in: .whitespacesAndNewlines),
+                    type: $0.type.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            }
+            .filter { !$0.label.isEmpty }
+            .prefix(4)
+            .map { $0 }
+    }
+
+    /// Up to three follow-up cards; drops empty questions or empty chip lists.
+    private static func sanitizedFollowUpBlocks(_ raw: [CoachFollowUpBlock]) -> [CoachFollowUpBlock]
+    {
+        Array(
+            raw
+                .prefix(3)
+                .map {
+                    CoachFollowUpBlock(
+                        question: $0.question.trimmingCharacters(in: .whitespacesAndNewlines),
+                        suggestedActions: sanitizedSuggestedActions($0.suggestedActions)
+                    )
+                }
+                .filter { !$0.question.isEmpty }
+        )
+    }
+
+    private static func cappedThinkingSteps(_ raw: [String]) -> [String] {
+        raw
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .prefix(3)
+            .map { String($0.prefix(1200)) }
+    }
+
+    /// Short question line only — never the full clarification paragraph (avoids duplicating the main bubble).
+    private static func firstQuestionSentence(in content: String, maxLength: Int = 160) -> String? {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let qMark = trimmed.firstIndex(of: "?") else { return nil }
+        let head = trimmed[..<qMark]
+        let start: String.Index
+        if let lineBreak = head.lastIndex(of: "\n") {
+            start = trimmed.index(after: lineBreak)
+        } else if let period = head.lastIndex(of: ".") {
+            start = trimmed.index(after: period)
+        } else {
+            start = trimmed.startIndex
+        }
+        let end = trimmed.index(after: qMark)
+        let sentence = String(trimmed[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard sentence.count >= 8 else { return nil }
+        if sentence.count > maxLength { return nil }
+        return sentence
+    }
+
+    private static func isFollowUpRedundantWithBody(followUp: String, body: String) -> Bool {
+        let f = followUp.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let b = body.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if f.isEmpty { return true }
+        if b.hasPrefix(f) { return true }
+        if f.count >= 48, b.contains(f) { return true }
+        let prefixLen = min(100, b.count)
+        if prefixLen > 0, f.hasPrefix(b.prefix(prefixLen)) { return true }
+        return false
+    }
+
+    /// True when we should attach plan-intake chips without echoing the whole `content` as `followUpQuestion`.
+    private static func shouldOfferClarificationRecovery(category: String, content: String) -> Bool {
+        let cat = category.lowercased()
+        if cat == "clarification" || cat.contains("clarif") { return true }
+        let lower = content.lowercased()
+        if lower.contains("training plan"), lower.contains("detail") || lower.contains("need") {
+            return true
+        }
+        return false
+    }
+
+    /// Optional short question; chips carry the real “what next” affordances.
+    private static func tightClarificationQuestion(category: String, content: String) -> String? {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let cat = category.lowercased()
+        let categoryMatches = cat == "clarification" || cat.contains("clarif")
+        let looseMatch =
+            !categoryMatches && trimmed.count >= 40
+            && (trimmed.lowercased().contains("detail") || trimmed.lowercased().contains("plan"))
+        guard categoryMatches || looseMatch else { return nil }
+        return firstQuestionSentence(in: trimmed, maxLength: 160)
+    }
+
+    /// Concrete next-step chips when the API omits structured follow-ups (e.g. Gemma JSON parse failure).
+    private static func planIntakeClarificationChips() -> [SuggestedAction] {
+        [
+            SuggestedAction(label: "Target event & date", type: "ask_followup"),
+            SuggestedAction(label: "Distance & elevation", type: "ask_followup"),
+            SuggestedAction(label: "FTP & hours per week", type: "ask_followup"),
+            SuggestedAction(label: "I’m new — guide me step by step", type: "ask_followup"),
+        ]
+    }
+
+    /// Matches server `used_web_search` only. References alone can be model-invented URLs;
+    /// inferring "live search" from `references` caused false "Answer used live web sources" badges.
+    private static func resolvedUsedWebSearch(_ response: ChatAPIResponse) -> Bool {
+        response.usedWebSearch
+    }
+
+    /// Normalizes user-entered race day for `/api/generate-plan` (yyyy-MM-dd and common variants).
+    static func normalizeEventDateForPlan(_ raw: String) -> String? {
+        PlanEventDateNormalization.normalizedYYYYMMDD(from: raw)
+    }
+
+    /// Short headline for the plan confirmation banner and saved `userPrompt`.
+    static func planSummaryLine(for inputs: PlanInputs) -> String {
+        var parts = [inputs.event_name, inputs.event_date]
+        if let r = inputs.route_option?.trimmingCharacters(in: .whitespacesAndNewlines), !r.isEmpty
+        {
+            parts.append(r)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func nonEmptyTrimmed(_ s: String?) -> String? {
+        guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else {
+            return nil
+        }
+        return t
+    }
 
     private let logger = Logger(subsystem: "com.abchalita.Mangox", category: "AIService")
 
@@ -190,10 +756,12 @@ final class AIService {
 
     func hasReachedFreeLimit(isPro: Bool) -> Bool {
         if isPro { return false }
+        if Self.bypassesDailyCoachMessageLimit { return false }
         return todayMessageCount >= Self.freeDailyLimit
     }
 
     private func incrementDailyCount() {
+        if Self.bypassesDailyCoachMessageLimit { return }
         let today = todayDateString
         if UserDefaults.standard.string(forKey: udDateKey) != today {
             UserDefaults.standard.set(today, forKey: udDateKey)
@@ -206,8 +774,13 @@ final class AIService {
 
     // MARK: Networking
 
-    private var baseURL: String {
-        Bundle.main.object(forInfoDictionaryKey: "MangoxAPIBaseURL") as? String
+    /// REST base for `/api/generate-plan` etc. Matches Mangox Cloud provider URL from Settings; falls back to Info.plist or production when using OpenAI-compatible chat only.
+    private var apiBaseURL: String {
+        let cfg = ChatProviderResolver().resolve()
+        if cfg.kind == .mangoxBackend, !cfg.baseURL.isEmpty {
+            return cfg.baseURL
+        }
+        return Bundle.main.object(forInfoDictionaryKey: "MangoxAPIBaseURL") as? String
             ?? "https://mangox-backend-production.up.railway.app"
     }
 
@@ -224,9 +797,10 @@ final class AIService {
     /// Nil when not configured (dev builds without the key set).
     private var encryptionKey: SymmetricKey? {
         guard let b64 = Bundle.main.object(forInfoDictionaryKey: "UserDataKey") as? String,
-              !b64.isEmpty,
-              let keyData = Data(base64Encoded: b64),
-              keyData.count == 32 else { return nil }
+            !b64.isEmpty,
+            let keyData = Data(base64Encoded: b64),
+            keyData.count == 32
+        else { return nil }
         return SymmetricKey(data: keyData)
     }
 
@@ -234,10 +808,35 @@ final class AIService {
     /// Returns nil if the key is not configured or encryption fails.
     private func encryptUserContext(_ context: UserContext) -> String? {
         guard let key = encryptionKey,
-              let json = try? JSONEncoder().encode(context) else { return nil }
+            let json = try? JSONEncoder().encode(context)
+        else { return nil }
         guard let sealed = try? AES.GCM.seal(json, using: key),
-              let combined = sealed.combined else { return nil }
+            let combined = sealed.combined
+        else { return nil }
         return combined.base64EncodedString()
+    }
+
+    // MARK: - Streaming display (debounced)
+
+    private func scheduleStreamDraftDisplayFlush() {
+        streamDisplayThrottleTask?.cancel()
+        streamDisplayThrottleTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(40))
+            guard !Task.isCancelled else { return }
+            let snap = CoachThinkingTagParser.snapshot(streamBuffer: streamRawBuffer)
+            streamDraftText = snap.visible
+            streamIsThinking =
+                snap.visible.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && snap.openDraft != nil
+        }
+    }
+
+    private func flushStreamDraftToUI() {
+        streamDisplayThrottleTask?.cancel()
+        streamDisplayThrottleTask = nil
+        let snap = CoachThinkingTagParser.snapshot(streamBuffer: streamRawBuffer)
+        streamDraftText = snap.visible
+        streamIsThinking = false
     }
 
     // MARK: - Send Chat Message
@@ -265,6 +864,11 @@ final class AIService {
 
         isLoading = true
         error = nil
+        streamDraftText = ""
+        streamRawBuffer = ""
+        streamDisplayThrottleTask?.cancel()
+        streamDisplayThrottleTask = nil
+        streamStatusText = nil
 
         let history = buildHistory()
         let context = buildUserContext(modelContext: modelContext)
@@ -274,49 +878,179 @@ final class AIService {
             history: history,
             user_context: encryptedContext == nil ? context : nil,
             user_context_encrypted: encryptedContext,
-            is_pro: isPro
+            is_pro: isPro,
+            client_local_date: Self.dateFormatter.string(from: .now),
+            client_time_zone: TimeZone.current.identifier
         )
 
+        let provider = ChatProviderResolver().resolve()
+        let adapter = ChatProviderFactory.makeAdapter(for: provider.kind)
+
         do {
-            let response: ChatAPIResponse = try await post(path: "/api/chat", body: request)
+            var finalResponse: ChatAPIResponse?
+            var streamFailure: String?
+
+            for try await event in adapter.streamChat(
+                request: request, configuration: provider, userID: userID)
+            {
+                switch event {
+                case .status(let s):
+                    streamStatusText = s
+                case .textDelta(let delta):
+                    streamRawBuffer += delta
+                    streamStatusText = nil
+                    scheduleStreamDraftDisplayFlush()
+                case .toolCalls:
+                    break
+                case .completed(let message):
+                    finalResponse = message
+                case .failed(let err):
+                    streamFailure = err
+                }
+            }
+
+            flushStreamDraftToUI()
+            streamDraftText = ""
+            streamRawBuffer = ""
+            streamDisplayThrottleTask?.cancel()
+            streamDisplayThrottleTask = nil
+            streamStatusText = nil
+            streamIsThinking = false
             isLoading = false
+
+            if let streamFailure {
+                let errMsg = ChatMessage(
+                    id: UUID(),
+                    role: .assistant,
+                    content: streamFailure,
+                    timestamp: .now,
+                    suggestedActions: [],
+                    followUpQuestion: nil,
+                    followUpBlocks: [],
+                    thinkingSteps: [],
+                    category: "error",
+                    tags: [],
+                    references: [],
+                    usedWebSearch: false,
+                    feedbackScore: nil,
+                    confidence: 0
+                )
+                messages.append(errMsg)
+                persistCoachMessage(errMsg, modelContext: modelContext)
+                self.error = streamFailure
+                return
+            }
+
+            guard let response = finalResponse else {
+                let errMsg = ChatMessage(
+                    id: UUID(),
+                    role: .assistant,
+                    content: "The coach didn't return a complete reply. Please try again.",
+                    timestamp: .now,
+                    suggestedActions: [],
+                    followUpQuestion: nil,
+                    followUpBlocks: [],
+                    thinkingSteps: [],
+                    category: "error",
+                    tags: [],
+                    references: [],
+                    usedWebSearch: false,
+                    feedbackScore: nil,
+                    confidence: 0
+                )
+                messages.append(errMsg)
+                persistCoachMessage(errMsg, modelContext: modelContext)
+                self.error = "Empty response"
+                return
+            }
+
+            let (cleanContent, parsedThinkingBlocks) = CoachThinkingTagParser.finalizedContent(
+                response.content)
+
+            let blocks = Self.sanitizedFollowUpBlocks(response.followUpBlocks)
+            var panelActions: [SuggestedAction]
+            var panelFollowUp: String?
+            if blocks.isEmpty {
+                panelActions = Self.sanitizedSuggestedActions(response.suggestedActions)
+                let rawFollow = response.followUpQuestion
+                if let raw = rawFollow,
+                    Self.isFollowUpRedundantWithBody(followUp: raw, body: cleanContent)
+                {
+                    panelFollowUp = nil
+                } else {
+                    panelFollowUp = rawFollow
+                }
+            } else {
+                panelActions = []
+                panelFollowUp = nil
+            }
+
+            if blocks.isEmpty,
+                Self.nonEmptyTrimmed(panelFollowUp) == nil,
+                panelActions.isEmpty,
+                Self.shouldOfferClarificationRecovery(category: response.category, content: cleanContent)
+            {
+                panelActions = Self.planIntakeClarificationChips()
+                if let q = Self.tightClarificationQuestion(
+                    category: response.category, content: cleanContent),
+                    !Self.isFollowUpRedundantWithBody(followUp: q, body: cleanContent)
+                {
+                    panelFollowUp = q
+                }
+            }
+
+            // For Mangox Cloud: use server-supplied thinkingSteps.
+            // For OpenAI-compatible (e.g. local Ollama): capture <think> blocks parsed from content.
+            let thinkingSource =
+                response.thinkingSteps.isEmpty ? parsedThinkingBlocks : response.thinkingSteps
 
             let aiMsg = ChatMessage(
                 id: UUID(),
                 role: .assistant,
-                content: response.content,
+                content: cleanContent,
                 timestamp: .now,
-                suggestedActions: response.suggestedActions,
-                followUpQuestion: response.followUpQuestion,
-                thinkingSteps: response.thinkingSteps,
-                shouldAnimate: true,
+                suggestedActions: panelActions,
+                followUpQuestion: panelFollowUp,
+                followUpBlocks: blocks,
+                thinkingSteps: Self.cappedThinkingSteps(thinkingSource),
                 category: response.category,
                 tags: response.tags,
-                references: response.references
+                references: response.references,
+                usedWebSearch: Self.resolvedUsedWebSearch(response),
+                feedbackScore: nil,
+                confidence: response.confidence
             )
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
-                messages.append(aiMsg)
-            }
+            messages.append(aiMsg)
             persistCoachMessage(aiMsg, modelContext: modelContext)
+
+            await executePendingGeneratePlanToolIfNeeded(from: response, modelContext: modelContext)
         } catch {
             logger.error("sendMessage failed: \(error)")
+            streamDraftText = ""
+            streamRawBuffer = ""
+            streamDisplayThrottleTask?.cancel()
+            streamDisplayThrottleTask = nil
+            streamStatusText = nil
+            streamIsThinking = false
             isLoading = false
             let errMsg = ChatMessage(
                 id: UUID(),
                 role: .assistant,
-                content: "I couldn't connect to the coaching server. Please check your connection and try again.",
+                content:
+                    "I couldn't connect to the coaching server. Please check your connection and try again.",
                 timestamp: .now,
-                suggestedActions: [SuggestedAction(label: "Try again", type: "retry")],
+                suggestedActions: [],
                 followUpQuestion: nil,
+                followUpBlocks: [],
                 thinkingSteps: [],
-                shouldAnimate: false,
                 category: "error",
                 tags: [],
-                references: []
+                references: [],
+                usedWebSearch: false,
+                feedbackScore: nil,
+                confidence: 0
             )
-            withAnimation(.spring(response: 0.4)) {
-                messages.append(errMsg)
-            }
+            messages.append(errMsg)
             persistCoachMessage(errMsg, modelContext: modelContext)
             self.error = error.localizedDescription
         }
@@ -324,14 +1058,360 @@ final class AIService {
 
     // MARK: - Generate Plan
 
-    func generatePlan(inputs: PlanInputs) async throws -> TrainingPlan {
+    func generatePlan(
+        inputs: PlanInputs,
+        isPro: Bool,
+        modelContext: ModelContext,
+        idempotencyKey: String
+    ) async throws -> PlanGenerationResult {
         generatingPlan = true
-        defer { generatingPlan = false }
+        planProgress = nil
+        defer {
+            generatingPlan = false
+            planProgress = nil
+        }
 
-        let request = PlanGenerationRequest(inputs: inputs)
-        let response: PlanGenerationResponse = try await post(path: "/api/generate-plan", body: request)
+        let encrypted = encryptUserContext(buildUserContext(modelContext: modelContext))
+        let request = PlanGenerationRequest(
+            inputs: inputs,
+            is_pro: isPro,
+            user_context_encrypted: encrypted,
+            client_local_date: Self.dateFormatter.string(from: .now),
+            client_time_zone: TimeZone.current.identifier
+        )
+
+        // Try streaming endpoint first (progress events); fall back to regular endpoint.
+        do {
+            return try await generatePlanStreaming(request: request, idempotencyKey: idempotencyKey)
+        } catch {
+            logger.info(
+                "Streaming plan endpoint unavailable, falling back to regular: \(error.localizedDescription)"
+            )
+        }
+
+        let response: PlanGenerationResponse = try await post(
+            path: "/api/generate-plan",
+            body: request,
+            extraHTTPHeaders: ["Idempotency-Key": idempotencyKey]
+        )
         lastCreditsRemaining = response.credits_remaining
-        return response.plan
+        return PlanGenerationResult(
+            plan: response.plan,
+            requestId: response.request_id,
+            validationWarnings: response.validation_warnings ?? [],
+            creditsRemaining: response.credits_remaining,
+            generationMetrics: response.generation_metrics
+        )
+    }
+
+    /// Streaming plan generation with SSE progress events.
+    private func generatePlanStreaming(
+        request: PlanGenerationRequest,
+        idempotencyKey: String
+    ) async throws -> PlanGenerationResult {
+        guard let url = URL(string: apiBaseURL + "/api/generate-plan/stream") else {
+            throw URLError(.badURL)
+        }
+
+        var urlReq = URLRequest(url: url)
+        urlReq.httpMethod = "POST"
+        urlReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlReq.setValue(userID, forHTTPHeaderField: "X-User-ID")
+        urlReq.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        urlReq.mangox_applyDevTunnelHeadersIfNeeded(mangoxBaseURL: apiBaseURL)
+        urlReq.timeoutInterval = 300
+        urlReq.httpBody = try JSONEncoder().encode(request)
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: urlReq)
+
+        if let http = response as? HTTPURLResponse {
+            // If the streaming endpoint doesn't exist (404) or returns non-SSE, throw to trigger fallback
+            guard http.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+            let ct = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+            if ct.contains("application/json") {
+                // Server returned a cached idempotent response (regular JSON, not SSE)
+                var data = Data()
+                for try await byte in bytes { data.append(byte) }
+                let decoded = try JSONDecoder().decode(PlanGenerationResponse.self, from: data)
+                lastCreditsRemaining = decoded.credits_remaining
+                return PlanGenerationResult(
+                    plan: decoded.plan,
+                    requestId: decoded.request_id,
+                    validationWarnings: decoded.validation_warnings ?? [],
+                    creditsRemaining: decoded.credits_remaining,
+                    generationMetrics: decoded.generation_metrics
+                )
+            }
+        }
+
+        // Parse SSE events
+        for try await line in bytes.lines {
+            guard line.hasPrefix("data: ") else { continue }
+            let json = String(line.dropFirst(6))
+            guard let data = json.data(using: .utf8) else { continue }
+
+            guard let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let type = event["type"] as? String
+            else { continue }
+
+            switch type {
+            case "progress":
+                let phase = event["phase"] as? String ?? ""
+                let message = event["message"] as? String ?? ""
+                let current = event["current"] as? Int
+                let total = event["total"] as? Int
+                planProgress = PlanGenerationProgress(
+                    phase: phase, message: message, current: current, total: total
+                )
+
+            case "complete":
+                // The complete event contains the full response payload
+                let decoded = try JSONDecoder().decode(PlanGenerationResponse.self, from: data)
+                lastCreditsRemaining = decoded.credits_remaining
+                return PlanGenerationResult(
+                    plan: decoded.plan,
+                    requestId: decoded.request_id,
+                    validationWarnings: decoded.validation_warnings ?? [],
+                    creditsRemaining: decoded.credits_remaining,
+                    generationMetrics: decoded.generation_metrics
+                )
+
+            case "error":
+                let errorMsg = event["error"] as? String ?? "Plan generation failed"
+                throw NSError(
+                    domain: "PlanGeneration", code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: errorMsg])
+
+            default:
+                break
+            }
+        }
+
+        throw URLError(.badServerResponse)
+    }
+
+    /// Persists `AIGeneratedPlan`, clears the confirmation draft, and presents success.
+    func runConfirmedPlanGeneration(
+        draft: PlanGenerationDraft,
+        isPro: Bool,
+        modelContext: ModelContext
+    ) async throws {
+        let result = try await generatePlan(
+            inputs: draft.inputs,
+            isPro: isPro,
+            modelContext: modelContext,
+            idempotencyKey: draft.id.uuidString
+        )
+        guard let json = try? JSONEncoder().encode(result.plan) else {
+            throw URLError(.cannotCreateFile)
+        }
+        let inputsData = try? JSONEncoder().encode(draft.inputs)
+        let stored = AIGeneratedPlan(
+            id: result.plan.id,
+            planJSON: json,
+            userPrompt: draft.summaryLine,
+            regenerationInputsJSON: inputsData
+        )
+        modelContext.insert(stored)
+        try modelContext.save()
+
+        planConfirmationDraft = nil
+        let snap = try? JSONEncoder().encode(result.plan)
+        let fb = result.generationMetrics?.fallbackWeekNumbers ?? []
+        planSaveCelebration = PlanSaveCelebration(
+            planID: result.plan.id,
+            planName: result.plan.name,
+            warnings: result.validationWarnings,
+            fallbackWeekNumbers: fb,
+            planSnapshotJSON: snap,
+            planInputs: draft.inputs
+        )
+
+        appendLocalAssistantMessage(
+            "Your plan **\(result.plan.name)** is saved. You can open it from **My Plans** or tap **Open plan** on the celebration screen.",
+            category: "plan_analysis",
+            modelContext: modelContext
+        )
+    }
+
+    /// Re-runs AI for one week (after a server fallback) via `/api/regenerate-plan-week`; updates SwiftData and celebration state.
+    func regenerateFallbackPlanWeek(
+        weekNumber: Int,
+        celebration: PlanSaveCelebration,
+        isPro: Bool,
+        modelContext: ModelContext
+    ) async throws {
+        guard let inputs = celebration.planInputs else {
+            throw URLError(.cannotCreateFile)
+        }
+        guard let snap = celebration.planSnapshotJSON,
+            let plan = TrainingPlan.decodeFromStoredJSON(snap)
+        else {
+            throw URLError(.cannotDecodeContentData)
+        }
+
+        struct RegeneratePlanWeekRequest: Encodable {
+            let inputs: PlanInputs
+            let week_number: Int
+            let plan: TrainingPlan
+            let is_pro: Bool
+            let client_local_date: String
+            let client_time_zone: String
+            let user_context_encrypted: String?
+        }
+
+        struct RegeneratePlanWeekResponse: Decodable {
+            let days: [PlanDay]
+            let week_number: Int
+        }
+
+        let enc = encryptUserContext(buildUserContext(modelContext: modelContext))
+        let body = RegeneratePlanWeekRequest(
+            inputs: inputs,
+            week_number: weekNumber,
+            plan: plan,
+            is_pro: isPro,
+            client_local_date: Self.dateFormatter.string(from: .now),
+            client_time_zone: TimeZone.current.identifier,
+            user_context_encrypted: enc
+        )
+
+        // Stable per (snapshot, week): duplicate in-flight requests dedupe on the server; a new snapshot after success gets a new key.
+        let idemBasis = snap + Data("\(weekNumber)".utf8)
+        let idemKey = SHA256.hash(data: idemBasis).map { String(format: "%02x", $0) }.joined()
+
+        let res: RegeneratePlanWeekResponse = try await post(
+            path: "/api/regenerate-plan-week",
+            body: body,
+            extraHTTPHeaders: ["Idempotency-Key": idemKey]
+        )
+
+        let updated = plan.replacingDays(forWeekNumber: res.week_number, days: res.days)
+        guard let json = try? JSONEncoder().encode(updated) else {
+            throw URLError(.cannotCreateFile)
+        }
+
+        let planId = celebration.planID
+        let descriptor = FetchDescriptor<AIGeneratedPlan>(
+            predicate: #Predicate<AIGeneratedPlan> { $0.id == planId }
+        )
+        if let rows = try? modelContext.fetch(descriptor), let row = rows.first {
+            row.planJSON = json
+            try modelContext.save()
+        }
+
+        let newFallback = celebration.fallbackWeekNumbers.filter { $0 != weekNumber }
+        planSaveCelebration = PlanSaveCelebration(
+            planID: updated.id,
+            planName: updated.name,
+            warnings: celebration.warnings,
+            fallbackWeekNumbers: newFallback,
+            planSnapshotJSON: json,
+            planInputs: inputs
+        )
+    }
+
+    /// Runs after a normal chat reply: if the model requested plan generation, stage a confirmation draft (user confirms before `/api/generate-plan`).
+    private func executePendingGeneratePlanToolIfNeeded(
+        from response: ChatAPIResponse, modelContext: ModelContext
+    ) async {
+        let pending = response.toolCalls.filter {
+            $0.name == "generate_plan" && $0.state == "pending"
+        }
+        guard let call = pending.first,
+            let raw = call.detail?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
+        else {
+            return
+        }
+
+        guard let data = raw.data(using: .utf8) else {
+            logger.error("generate_plan detail not UTF-8")
+            return
+        }
+
+        let detail: GeneratePlanToolDetail
+        do {
+            detail = try JSONDecoder().decode(GeneratePlanToolDetail.self, from: data)
+        } catch {
+            logger.error("generate_plan detail JSON decode failed: \(error.localizedDescription)")
+            appendLocalAssistantMessage(
+                "I couldn't read the plan details from that reply. Try asking again with your event name and target date (YYYY-MM-DD).",
+                category: "clarification",
+                modelContext: modelContext
+            )
+            return
+        }
+
+        let eventName = detail.event_name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let eventDateRaw = (detail.event_date ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !eventName.isEmpty else {
+            appendLocalAssistantMessage(
+                "To generate your plan I need an event name and a target date.",
+                category: "clarification",
+                modelContext: modelContext
+            )
+            return
+        }
+        guard let eventDate = PlanEventDateNormalization.normalizedYYYYMMDD(from: eventDateRaw)
+        else {
+            if eventDateRaw.isEmpty {
+                appendLocalAssistantMessage(
+                    "To generate your plan I need a **target date** for your event (say it in your own words, or as yyyy-MM-dd).",
+                    category: "clarification",
+                    modelContext: modelContext
+                )
+            } else {
+                appendLocalAssistantMessage(
+                    "I couldn't parse the event date \"\(eventDateRaw)\". Please confirm the race day as **yyyy-MM-dd** (for example \(Self.dateFormatter.string(from: .now))).",
+                    category: "clarification",
+                    modelContext: modelContext
+                )
+            }
+            return
+        }
+
+        let inputs = PlanInputs(
+            event_name: eventName,
+            event_date: eventDate,
+            ftp: PowerZone.ftp,
+            weekly_hours: detail.weekly_hours,
+            experience: detail.experience,
+            route_option: Self.nonEmptyTrimmed(detail.route_option),
+            target_distance_km: detail.target_distance_km,
+            target_elevation_m: detail.target_elevation_m,
+            event_location: Self.nonEmptyTrimmed(detail.event_location),
+            event_notes: Self.nonEmptyTrimmed(detail.event_notes)
+        )
+        let summary = Self.planSummaryLine(for: inputs)
+        planConfirmationDraft = PlanGenerationDraft(inputs: inputs, summaryLine: summary)
+        // Confirmation UI is the bottom sheet; avoid a second bubble with duplicate "confirm" copy (it overlapped the card visually).
+    }
+
+    private func appendLocalAssistantMessage(
+        _ text: String,
+        category: String,
+        modelContext: ModelContext
+    ) {
+        let msg = ChatMessage(
+            id: UUID(),
+            role: .assistant,
+            content: text,
+            timestamp: .now,
+            suggestedActions: [],
+            followUpQuestion: nil,
+            followUpBlocks: [],
+            thinkingSteps: [],
+            category: category,
+            tags: [],
+            references: [],
+            usedWebSearch: false,
+            feedbackScore: nil,
+            confidence: 1.0
+        )
+        messages.append(msg)
+        persistCoachMessage(msg, modelContext: modelContext)
     }
 
     // MARK: - Context Building
@@ -355,15 +1435,56 @@ final class AIService {
         let progresses = (try? modelContext.fetch(progressDescriptor)) ?? []
         let activeProgress = progresses.first
 
+        let weekRange = TrainingPlanCompliance.currentWeekRange()
+
         var planName: String? = nil
         var planProgressStr: String? = nil
-        if let p = activeProgress, p.planID == CachedPlan.shared.id {
-            planName = CachedPlan.shared.name
-            let totalDays = CachedPlan.shared.allDays
-                .filter { $0.dayType == .workout || $0.dayType == .ftpTest }
-                .count
+        var planSource: String? = nil
+        var adaptiveErgPercent = 100
+        var planSemanticsHint: String?
+        if let p = activeProgress,
+            let plan = PlanLibrary.resolvePlan(planID: p.planID, modelContext: modelContext)
+        {
+            planName = plan.name
+            planSource = p.planID == CachedPlan.shared.id ? "builtin" : "ai"
+            let totalDays = plan.allDays.filter {
+                switch $0.dayType {
+                case .workout, .ftpTest, .optionalWorkout, .commute: return true
+                default: return false
+                }
+            }.count
             planProgressStr = "\(p.completedCount) of \(totalDays) workouts done"
+            adaptiveErgPercent = Int((p.adaptiveLoadMultiplier * 100).rounded())
+
+            var sawOptional = false
+            var sawCommute = false
+            for day in plan.allDays {
+                let d = p.calendarDate(for: day)
+                guard d >= weekRange.start, d < weekRange.end else { continue }
+                if day.dayType == .optionalWorkout { sawOptional = true }
+                if day.dayType == .commute { sawCommute = true }
+            }
+            if sawOptional || sawCommute {
+                planSemanticsHint =
+                    "This calendar week includes optional and/or commute days. Optional days are flexible volume; starred key days are priority quality sessions unless the day is explicitly optional. Commute days should stay easy."
+            }
         }
+
+        let weekStart = weekRange.start
+        let weekEnd = weekRange.end
+        let weekWorkouts = (try? modelContext.fetch(
+            FetchDescriptor<Workout>(
+                predicate: #Predicate<Workout> {
+                    $0.startDate >= weekStart && $0.startDate < weekEnd
+                }
+            )
+        )) ?? []
+        let weekActualTss = Int(
+            weekWorkouts
+                .filter { $0.status == .completed && $0.isValid }
+                .reduce(0.0) { $0 + $1.tss }
+                .rounded()
+        )
 
         // FTP history — last 3 test results
         let ftpHistory = FTPTestHistory.load()
@@ -385,13 +1506,30 @@ final class AIService {
             let formatter = RelativeDateTimeFormatter()
             formatter.unitsStyle = .full
             let dateStr = formatter.localizedString(for: ride.startDate, relativeTo: .now)
-            let summaryParts: [String] = [
+            let powerOK = ride.maxPower > 0 || ride.avgPower > 0
+            var summaryParts: [String] = [
                 "\(Int(ride.duration / 60))min",
                 String(format: "%.1fkm", ride.distance / 1000),
-                "\(Int(ride.avgPower))W avg",
-                "NP \(Int(ride.normalizedPower))W",
-                "TSS \(Int(ride.tss))"
             ]
+            if powerOK {
+                summaryParts.append(contentsOf: [
+                    "\(Int(ride.avgPower))W avg",
+                    "NP \(Int(ride.normalizedPower))W",
+                    "TSS \(Int(ride.tss))",
+                ])
+            } else {
+                summaryParts.append("no power data — NP/TSS not power-based")
+                if ride.displayAverageSpeedKmh > 0.5 {
+                    summaryParts.append(
+                        String(format: "%.1f km/h avg", ride.displayAverageSpeedKmh))
+                }
+            }
+            if ride.avgHR > 0 {
+                summaryParts.append("\(Int(ride.avgHR)) bpm avg HR")
+            }
+            if ride.elevationGain > 1 {
+                summaryParts.append(String(format: "%.0f m elev", ride.elevationGain))
+            }
 
             lastRideContext = LastRideContext(
                 date: dateStr,
@@ -405,9 +1543,13 @@ final class AIService {
                 normalizedPower: ride.normalizedPower,
                 tss: ride.tss,
                 intensityFactor: ride.intensityFactor,
-                summary: summaryParts.joined(separator: " · ")
+                summary: summaryParts.joined(separator: " · "),
+                powerDataAvailable: powerOK
             )
         }
+
+        let riderPrefs = RidePreferences.shared
+        let riderWeight: Double? = riderPrefs.riderWeightKg > 0 ? riderPrefs.riderWeightKg : nil
 
         return UserContext(
             ftp: ftp,
@@ -416,25 +1558,39 @@ final class AIService {
             recentWorkoutsCount: recentCount,
             activePlanName: planName,
             activePlanProgress: planProgressStr,
+            activePlanSource: planSource,
+            weekActualTss: weekActualTss,
+            adaptiveErgPercent: adaptiveErgPercent,
             ftpHistory: ftpHistory.isEmpty ? nil : ftpHistory,
-            lastRide: lastRideContext
+            lastRide: lastRideContext,
+            seasonGoalSummary: MangoxTrainingGoals.summaryLineForCoach,
+            planKeyDaySemanticsHint: planSemanticsHint,
+            riderWeightKg: riderWeight,
+            riderAge: riderPrefs.riderAge
         )
     }
 
     /// Restores the coach thread from SwiftData (in-memory `messages` was always empty after relaunch).
-    func loadPersistedMessages(modelContext: ModelContext) {
+    ///
+    /// Stays on the main actor with the view-supplied `ModelContext` so SwiftData never runs
+    /// synchronous store work from `Task.detached` (which triggers
+    /// "unsafeForcedSync called from Swift Concurrent context" and is structurally unsupported).
+    /// Yields first so chat chrome can commit before the capped fetch (100 rows).
+    func loadPersistedMessages(modelContext: ModelContext) async {
         guard messages.isEmpty else {
-            logger.debug("loadPersistedMessages skipped — \(self.messages.count) messages already in memory")
+            logger.debug(
+                "loadPersistedMessages skipped — \(self.messages.count) messages already in memory")
             return
         }
 
-        // Try to load the most recent session first
+        await Task.yield()
+        await Task.yield()
+
         if let sessionID = currentSessionID {
             loadSession(sessionID, modelContext: modelContext)
             return
         }
 
-        // Fall back to loading the most recent session
         let sessionDescriptor = FetchDescriptor<ChatSession>(
             sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
         )
@@ -444,24 +1600,23 @@ final class AIService {
             return
         }
 
-        // No sessions exist — start fresh
         logger.debug("No sessions found, starting fresh")
     }
 
     private func loadSession(_ sessionID: UUID, modelContext: ModelContext) {
-        let descriptor = FetchDescriptor<CoachChatMessage>(
+        // Fetch newest 100 messages (sort descending so the limit keeps the tail,
+        // then reverse in-memory for chronological display order).
+        var descriptor = FetchDescriptor<CoachChatMessage>(
             predicate: #Predicate<CoachChatMessage> { $0.session?.id == sessionID },
-            sortBy: [SortDescriptor(\.timestamp, order: .forward)]
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
+        descriptor.fetchLimit = 100
         do {
             let rows = try modelContext.fetch(descriptor)
             logger.debug("Loaded \(rows.count) persisted messages from session \(sessionID)")
-            guard messages.isEmpty else { return }
-            let loaded = rows.map { $0.toChatMessage() }
-            messages = loaded
-            for msg in loaded {
-                animatedMessageIDs.insert(msg.id)
-            }
+            // Always replace when loading a session — switching threads must not bail out
+            // just because the previous conversation is still in memory.
+            messages = rows.reversed().map { $0.toChatMessage() }
         } catch {
             logger.error("Failed to load persisted messages: \(error)")
         }
@@ -475,7 +1630,6 @@ final class AIService {
             try modelContext.save()
             currentSessionID = session.id
             messages.removeAll()
-            animatedMessageIDs.removeAll()
             logger.debug("Created new session \(session.id)")
         } catch {
             logger.error("Failed to create new session: \(error)")
@@ -485,7 +1639,6 @@ final class AIService {
     /// Switches to an existing session by ID.
     func switchToSession(_ sessionID: UUID, modelContext: ModelContext) {
         currentSessionID = sessionID
-        animatedMessageIDs.removeAll()
         loadSession(sessionID, modelContext: modelContext)
     }
 
@@ -500,7 +1653,6 @@ final class AIService {
                 try modelContext.save()
                 if currentSessionID == sessionID {
                     messages.removeAll()
-                    animatedMessageIDs.removeAll()
                     currentSessionID = nil
                 }
                 logger.debug("Deleted session \(sessionID)")
@@ -574,8 +1726,12 @@ final class AIService {
             .map { HistoryTurn(role: $0.role.rawValue, content: $0.content) }
     }
 
-    private func post<Req: Encodable, Res: Decodable>(path: String, body: Req) async throws -> Res {
-        guard let url = URL(string: baseURL + path) else {
+    private func post<Req: Encodable, Res: Decodable>(
+        path: String,
+        body: Req,
+        extraHTTPHeaders: [String: String] = [:]
+    ) async throws -> Res {
+        guard let url = URL(string: apiBaseURL + path) else {
             throw URLError(.badURL)
         }
 
@@ -583,7 +1739,11 @@ final class AIService {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(userID, forHTTPHeaderField: "X-User-ID")
-        req.timeoutInterval = 90
+        req.mangox_applyDevTunnelHeadersIfNeeded(mangoxBaseURL: apiBaseURL)
+        for (k, v) in extraHTTPHeaders {
+            req.setValue(v, forHTTPHeaderField: k)
+        }
+        req.timeoutInterval = 300
         req.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await URLSession.shared.data(for: req)
@@ -591,8 +1751,12 @@ final class AIService {
         if let httpResponse = response as? HTTPURLResponse {
             logger.debug("\(path) → HTTP \(httpResponse.statusCode)")
             if httpResponse.statusCode >= 400 {
-                if let body = String(data: data, encoding: .utf8) {
+                let body = String(data: data, encoding: .utf8) ?? ""
+                if !body.isEmpty {
                     logger.error("Error body: \(body.prefix(500), privacy: .private)")
+                }
+                if body.localizedCaseInsensitiveContains("<!doctype") {
+                    throw CoachHTTPError.tunnelReturnedHTML(status: httpResponse.statusCode)
                 }
                 throw URLError(.badServerResponse)
             }
@@ -607,5 +1771,121 @@ final class AIService {
             }
             throw error
         }
+    }
+
+    // MARK: - Feedback
+
+    func submitFeedback(for messageID: UUID, score: Int) {
+        if let index = messages.firstIndex(where: { $0.id == messageID }) {
+            messages[index].feedbackScore = score
+        }
+    }
+
+    // MARK: - Regenerate
+
+    func regenerateLastMessage(isPro: Bool, modelContext: ModelContext) async {
+        guard let lastUserMsg = messages.last(where: { $0.role == .user }) else { return }
+        guard !isLoading else { return }
+        if let lastIdx = messages.lastIndex(where: { $0.role == .assistant }) {
+            messages.remove(at: lastIdx)
+        }
+        await sendMessage(lastUserMsg.content, isPro: isPro, modelContext: modelContext)
+    }
+
+    // MARK: - Context Window
+
+    var contextWindowSize: Int { 12 }
+    var currentContextCount: Int {
+        min(messages.count, contextWindowSize)
+    }
+
+    // MARK: - Recovery Status
+
+    enum RecoveryStatus: String {
+        case fresh = "Fresh"
+        case recovering = "Recovering"
+        case fatigued = "Fatigued"
+
+        var icon: String {
+            switch self {
+            case .fresh: return "battery.100"
+            case .recovering: return "battery.50"
+            case .fatigued: return "battery.25"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .fresh: return AppColor.success
+            case .recovering: return AppColor.yellow
+            case .fatigued: return AppColor.orange
+            }
+        }
+    }
+
+    func recoveryStatus(modelContext: ModelContext) -> RecoveryStatus {
+        let desc = FetchDescriptor<Workout>(
+            predicate: #Predicate<Workout> { $0.statusRaw == "completed" },
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        guard let ride = (try? modelContext.fetch(desc))?.first else { return .fresh }
+        let hoursSince = Date().timeIntervalSince(ride.startDate) / 3600
+        let tss = ride.tss
+        if tss > 300 && hoursSince < 24 { return .fatigued }
+        if tss > 200 && hoursSince < 12 { return .fatigued }
+        if hoursSince < 24 { return .recovering }
+        if tss > 150 && hoursSince < 48 { return .recovering }
+        return .fresh
+    }
+
+    func hasRecentRide(modelContext: ModelContext) -> Bool {
+        let desc = FetchDescriptor<Workout>(
+            predicate: #Predicate<Workout> { $0.statusRaw == "completed" },
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        guard let ride = (try? modelContext.fetch(desc))?.first else { return false }
+        return Date().timeIntervalSince(ride.startDate) / 3600 < 48
+    }
+
+    // MARK: - Contextual Quick Prompts
+
+    struct QuickPrompt: Identifiable {
+        var id: String { text }
+        let text: String
+        let icon: String
+    }
+
+    /// User-visible copy for plan API failures (avoids raw DecodingError strings in the confirm banner).
+    static func userFacingPlanGenerationError(_ error: Error) -> String {
+        if let urlErr = error as? URLError, urlErr.code == .badServerResponse {
+            return "The plan server returned an error. Check your connection and try again."
+        }
+        if error is DecodingError {
+            return
+                "Couldn't read the generated plan from the server (format mismatch). Tap Generate again, or update Mangox if this keeps happening."
+        }
+        return error.localizedDescription
+    }
+
+    func contextualQuickPrompts(modelContext: ModelContext) -> [QuickPrompt] {
+        var prompts: [QuickPrompt] = []
+        let status = recoveryStatus(modelContext: modelContext)
+        if status != .fresh {
+            prompts.append(QuickPrompt(text: "Analyze my last ride", icon: "chart.bar.fill"))
+        }
+        let pd = FetchDescriptor<TrainingPlanProgress>(
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        if let p = try? modelContext.fetch(pd), !p.isEmpty {
+            prompts.append(QuickPrompt(text: "How's my training load?", icon: "heart.fill"))
+            prompts.append(
+                QuickPrompt(text: "What's my workout today?", icon: "calendar.badge.clock"))
+        }
+        prompts.append(QuickPrompt(text: "How's my FTP trend?", icon: "bolt.fill"))
+        if prompts.isEmpty {
+            prompts.append(
+                QuickPrompt(text: "What should I do today?", icon: "figure.outdoor.cycle"))
+        }
+        return Array(prompts.prefix(4))
     }
 }

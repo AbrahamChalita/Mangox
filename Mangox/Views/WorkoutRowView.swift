@@ -15,7 +15,6 @@ struct WorkoutRowView: View {
     private let accentYellow = AppColor.yellow
     private let accentOrange = AppColor.orange
     private let accentRed = AppColor.red
-    private let accentBlue = AppColor.blue
 
     var body: some View {
         VStack(spacing: 0) {

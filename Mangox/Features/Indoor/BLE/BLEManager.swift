@@ -228,7 +228,8 @@ final class BLEManager: NSObject {
         isReconnecting = true
         reconnectTask?.cancel()
 
-        reconnectTask = Task { @MainActor [weak self] in
+        reconnectTask = Task { [weak self] in
+            // BLEManager is @MainActor; closure inherits isolation — no hop needed
             guard let self else { return }
 
             // Try to retrieve the peripheral from cache and reconnect
@@ -457,7 +458,8 @@ final class BLEManager: NSObject {
     /// to a fresh scan so the user isn't stuck on "Connecting…" forever.
     private func scheduleConnectTimeout(for role: DeviceType, peripheral: CBPeripheral) {
         let peripheralID = peripheral.identifier
-        let task = Task { @MainActor [weak self] in
+        // Task inherits @MainActor isolation from containing class — no explicit hop needed
+        let task = Task { [weak self] in
             try? await Task.sleep(nanoseconds: (self?.connectionTimeoutSeconds ?? 8) * 1_000_000_000)
             guard !Task.isCancelled else { return }
             guard let self else { return }
@@ -561,7 +563,8 @@ final class BLEManager: NSObject {
         // Auto-stop scanning after a fixed window so the UI never sits on
         // "Looking for devices…" indefinitely.
         scanTimeoutTask?.cancel()
-        scanTimeoutTask = Task { @MainActor [weak self] in
+        // Task inherits @MainActor isolation — avoids redundant executor hop
+        scanTimeoutTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: (self?.scanTimeoutSeconds ?? 12) * 1_000_000_000)
             guard !Task.isCancelled else { return }
             guard let self, self.isScanning else { return }
@@ -749,7 +752,8 @@ final class BLEManager: NSObject {
     /// Start periodic RSSI monitoring for connected peripherals
     private func startRSSIMonitoring() {
         rssiMonitorTask?.cancel()
-        rssiMonitorTask = Task { @MainActor [weak self] in
+        // Task inherits @MainActor isolation — readRSSI() is async but MainActor-isolated
+        rssiMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
                 guard !Task.isCancelled else { break }

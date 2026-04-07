@@ -49,14 +49,15 @@ extension PlanDay {
         switch dayType {
         case .rest, .event, .race:
             return 0
-        case .workout, .ftpTest:
+        case .workout, .ftpTest, .optionalWorkout, .commute:
             break
         }
         if !intervals.isEmpty {
             return intervals.reduce(0) { $0 + $1.estimatedTSSContribution(ftp: ftp) }
         }
         let sec = durationMinutes * 60
-        let ifac = zone.approximateIntensityFactor
+        let ifac: Double =
+            dayType == .commute ? TrainingZoneTarget.z2.approximateIntensityFactor : zone.approximateIntensityFactor
         return Double(sec) * ifac * ifac / 36.0
     }
 }
@@ -103,9 +104,13 @@ struct TrainingPlanCompliance {
         for day in plan.allDays {
             let d = progress.calendarDate(for: day)
             guard d >= range.start, d < range.end else { continue }
-            guard day.dayType == .workout || day.dayType == .ftpTest else { continue }
+            let countsTowardVolume =
+                day.dayType == .workout || day.dayType == .ftpTest || day.dayType == .optionalWorkout
+                || day.dayType == .commute
+            guard countsTowardVolume else { continue }
             planned += day.estimatedPlannedTSS(ftp: ftp)
-            if day.isKeyWorkout {
+            let mandatoryKey = day.isKeyWorkout && day.dayType != .optionalWorkout
+            if mandatoryKey {
                 keyPlanned += 1
                 if progress.isCompleted(day.id) { keyDone += 1 }
             }

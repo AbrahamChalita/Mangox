@@ -6,7 +6,6 @@ struct RidePowerChart: View {
     let samples: [WorkoutSample]
 
     @State private var selectedSample: WorkoutSample?
-    @State private var chartWidth: CGFloat = 0
 
     private var normalizedSamples: [(x: CGFloat, y: CGFloat, power: Int, elapsed: Int)] {
         guard !samples.isEmpty else { return [] }
@@ -120,7 +119,6 @@ struct RidePowerChart: View {
                 }
             }
             .frame(height: 140)
-            .onAppear { chartWidth = 0 }
         }
         .padding(14)
         .cardStyle()

@@ -1,8 +1,8 @@
-import SwiftUI
+import CoreBluetooth
 import MapKit
 import SwiftData
+import SwiftUI
 import UniformTypeIdentifiers
-import CoreBluetooth
 
 /// Full-screen outdoor cycling dashboard — bike computer replacement.
 ///
@@ -135,10 +135,11 @@ struct OutdoorDashboardView: View {
                 locationPermissionState
             } else if showSetupPhase {
                 outdoorSetupView
-                    .transition(.asymmetric(
-                        insertion: .opacity,
-                        removal: .move(edge: .leading).combined(with: .opacity)
-                    ))
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity,
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        ))
             } else if showOutdoorLoadingShell {
                 outdoorBootstrapView
             } else if hSizeClass == .compact {
@@ -149,59 +150,59 @@ struct OutdoorDashboardView: View {
 
             endDiscardOverlays
 
-        // Full-screen destination search (setup navigate mode)
-        if showDestinationSearch {
-            DestinationSearchOverlay(
-                completer: searchCompleter,
-                onSelect: { item in
-                    selectedDestination = item
-                    showDestinationSearch = false
-                },
-                onDismiss: {
-                    // Clear stale destination if user dismisses without a new selection
-                    // so the setup card doesn't show a stale "To: ..." subtitle.
-                    showDestinationSearch = false
-                },
-                searchMapBias: destinationSearchMapBias,
-                searchBiasCoordinate: locationManager.destinationSearchBiasCoordinate
-            )
-            .zIndex(150)
-            .transition(.move(edge: .trailing))
+            // Full-screen destination search (setup navigate mode)
+            if showDestinationSearch {
+                DestinationSearchOverlay(
+                    completer: searchCompleter,
+                    onSelect: { item in
+                        selectedDestination = item
+                        showDestinationSearch = false
+                    },
+                    onDismiss: {
+                        // Clear stale destination if user dismisses without a new selection
+                        // so the setup card doesn't show a stale "To: ..." subtitle.
+                        showDestinationSearch = false
+                    },
+                    searchMapBias: destinationSearchMapBias,
+                    searchBiasCoordinate: locationManager.destinationSearchBiasCoordinate
+                )
+                .zIndex(150)
+                .transition(.move(edge: .trailing))
+            }
         }
-    }
         .animation(.easeInOut(duration: 0.22), value: showDestinationSearch)
         .onAppear {
-                locationManager.setup()
-                locationManager.lapIntervalMeters = prefs.outdoorAutoLapIntervalMeters
-                // Defer GPX sync to the next run loop so the first frame paints the setup UI immediately.
-                Task { @MainActor in
-                    if routeManager.hasRoute, navigationService.mode == .freeRide {
-                        navigationService.followGPXRoute(
-                            points: routeManager.points,
-                            name: routeManager.routeName,
-                            segmentBreakIndices: routeManager.segmentBreakIndices
-                        )
-                    }
-                }
-                // Auto-reconnect to previously paired HR / speed / cadence sensors.
-                if bleManager.bluetoothState == .poweredOn {
-                    bleManager.reconnectOrScan()
+            locationManager.setup()
+            locationManager.lapIntervalMeters = prefs.outdoorAutoLapIntervalMeters
+            // Defer GPX sync to the next run loop so the first frame paints the setup UI immediately.
+            Task { @MainActor in
+                if routeManager.hasRoute, navigationService.mode == .freeRide {
+                    navigationService.followGPXRoute(
+                        points: routeManager.points,
+                        name: routeManager.routeName,
+                        segmentBreakIndices: routeManager.segmentBreakIndices
+                    )
                 }
             }
-            .task {
-                // Defer the hidden Map until the navigation push eases (~280ms). Slightly earlier than
-                // before: MapKit tile init still avoids the heaviest part of the transition.
-                try? await Task.sleep(for: .milliseconds(280))
-                mapKitPreWarmActive = true
-                searchCompleter.warmUp()
+            // Auto-reconnect to previously paired HR / speed / cadence sensors.
+            if bleManager.bluetoothState == .poweredOn {
+                bleManager.reconnectOrScan()
             }
-            .onChange(of: setupMode) { _, mode in
-                // Don't start GPS just from tapping the Navigate card — wait for destination search to open.
-                guard locationManager.isAuthorized, showSetupPhase else { return }
-                if mode == .freeRide || mode == .gpx {
-                    locationManager.stopOutdoorLocationPreviewIfIdle()
-                }
+        }
+        .task {
+            // Defer the hidden Map until the navigation push eases (~280ms). Slightly earlier than
+            // before: MapKit tile init still avoids the heaviest part of the transition.
+            try? await Task.sleep(for: .milliseconds(280))
+            mapKitPreWarmActive = true
+            searchCompleter.warmUp()
+        }
+        .onChange(of: setupMode) { _, mode in
+            // Don't start GPS just from tapping the Navigate card — wait for destination search to open.
+            guard locationManager.isAuthorized, showSetupPhase else { return }
+            if mode == .freeRide || mode == .gpx {
+                locationManager.stopOutdoorLocationPreviewIfIdle()
             }
+        }
         .onChange(of: showSetupPhase) { _, committed in
             guard committed == false else { return }
             // GPS + Map pre-warm only after the user leaves mode selection (silent until then).
@@ -284,9 +285,12 @@ struct OutdoorDashboardView: View {
                 }
             }
         }
-        .sheet(isPresented: $showRouteSheet, onDismiss: {
-            routeSheetPage = .menu
-        }) {
+        .sheet(
+            isPresented: $showRouteSheet,
+            onDismiss: {
+                routeSheetPage = .menu
+            }
+        ) {
             routePlanningSheet
         }
         .fileImporter(
@@ -322,22 +326,32 @@ struct OutdoorDashboardView: View {
                 routeImportError = error.localizedDescription
             }
         }
-        .alert("Route Import Failed", isPresented: Binding(
-            get: { routeImportError != nil },
-            set: { if !$0 { routeImportError = nil } }
-        ), actions: {
-            Button("OK") { routeImportError = nil }
-        }, message: {
-            Text(routeImportError ?? "")
-        })
-        .alert("Couldn’t build route", isPresented: Binding(
-            get: { routeBuildError != nil },
-            set: { if !$0 { routeBuildError = nil } }
-        ), actions: {
-            Button("OK", role: .cancel) { routeBuildError = nil }
-        }, message: {
-            Text(routeBuildError ?? "")
-        })
+        .alert(
+            "Route Import Failed",
+            isPresented: Binding(
+                get: { routeImportError != nil },
+                set: { if !$0 { routeImportError = nil } }
+            ),
+            actions: {
+                Button("OK") { routeImportError = nil }
+            },
+            message: {
+                Text(routeImportError ?? "")
+            }
+        )
+        .alert(
+            "Couldn’t build route",
+            isPresented: Binding(
+                get: { routeBuildError != nil },
+                set: { if !$0 { routeBuildError = nil } }
+            ),
+            actions: {
+                Button("OK", role: .cancel) { routeBuildError = nil }
+            },
+            message: {
+                Text(routeBuildError ?? "")
+            }
+        )
         // Hide the NavigationStack bar — we use a fully custom chrome.
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: prefs.outdoorAutoLapIntervalMeters) {
@@ -384,7 +398,9 @@ struct OutdoorDashboardView: View {
 
                 HStack(spacing: 8) {
                     if navigationService.routeDistance > 0 {
-                        Text("\(AppFormat.distanceString(navigationService.routeDistance, imperial: isImperial)) \(AppFormat.distanceUnit(imperial: isImperial))")
+                        Text(
+                            "\(AppFormat.distanceString(navigationService.routeDistance, imperial: isImperial)) \(AppFormat.distanceUnit(imperial: isImperial))"
+                        )
                     } else {
                         Text("No route loaded")
                     }
@@ -466,7 +482,9 @@ struct OutdoorDashboardView: View {
                         .lineLimit(2)
                     HStack(spacing: 8) {
                         if navigationService.routeDistance > 0 {
-                            Text("\(AppFormat.distanceString(navigationService.routeDistance, imperial: isImperial)) \(AppFormat.distanceUnit(imperial: isImperial))")
+                            Text(
+                                "\(AppFormat.distanceString(navigationService.routeDistance, imperial: isImperial)) \(AppFormat.distanceUnit(imperial: isImperial))"
+                            )
                         }
                         Text("Turn-by-turn")
                     }
@@ -540,11 +558,13 @@ struct OutdoorDashboardView: View {
                     .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(.white)
 
-                Text("Outdoor rides use GPS for speed, distance, elevation, breadcrumbs, and route guidance.")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 28)
+                Text(
+                    "Outdoor rides use GPS for speed, distance, elevation, breadcrumbs, and route guidance."
+                )
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.55))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 28)
             }
 
             VStack(spacing: 12) {
@@ -583,10 +603,10 @@ struct OutdoorDashboardView: View {
     /// Colour for a breadcrumb chunk based on average speed.
     private func speedColor(_ kmh: Double) -> Color {
         switch kmh {
-        case ..<10:  return Color.white.opacity(0.35)  // very slow
-        case 10..<20: return AppColor.mango             // moderate
-        case 20..<30: return AppColor.yellow            // good pace
-        default:      return AppColor.success           // fast
+        case ..<10: return Color.white.opacity(0.35)  // very slow
+        case 10..<20: return AppColor.mango  // moderate
+        case 20..<30: return AppColor.yellow  // good pace
+        default: return AppColor.success  // fast
         }
     }
 
@@ -643,7 +663,9 @@ struct OutdoorDashboardView: View {
             VStack(spacing: 0) {
                 // Compact top bar
                 HStack {
-                    Button { navigationPath.removeLast() } label: {
+                    Button {
+                        navigationPath.removeLast()
+                    } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(.white)
@@ -730,14 +752,18 @@ struct OutdoorDashboardView: View {
         let subtitle: String
         switch mode {
         case .freeRide:
-            icon = "figure.outdoor.cycle"; title = "Free Ride"
+            icon = "figure.outdoor.cycle"
+            title = "Free Ride"
             subtitle = "Just ride and record your path"
         case .gpx:
-            icon = "doc.badge.arrow.up"; title = "Import GPX"
+            icon = "doc.badge.arrow.up"
+            title = "Import GPX"
             subtitle = routeManager.hasRoute ? "Route loaded — ready to go" : "Follow a .gpx file"
         case .navigate:
-            icon = "arrow.triangle.turn.up.right.diamond"; title = "Navigate"
-            subtitle = selectedDestination != nil
+            icon = "arrow.triangle.turn.up.right.diamond"
+            title = "Navigate"
+            subtitle =
+                selectedDestination != nil
                 ? "To: \(selectedDestination!.name ?? "Destination")"
                 : "Apple Maps cycling directions"
         }
@@ -795,7 +821,9 @@ struct OutdoorDashboardView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
-                    if let addr = dest.addressRepresentations?.fullAddress(includingRegion: true, singleLine: true) {
+                    if let addr = dest.addressRepresentations?.fullAddress(
+                        includingRegion: true, singleLine: true)
+                    {
                         Text(addr)
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.4))
@@ -820,7 +848,7 @@ struct OutdoorDashboardView: View {
                     .tint(AppColor.mango)
             }
             .mapStyle(.standard(elevation: .realistic, emphasis: .muted))
-            .mapControls { }
+            .mapControls {}
             .frame(height: 120)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .padding(.horizontal, 12)
@@ -917,17 +945,23 @@ struct OutdoorDashboardView: View {
                             connectOutdoorSensor(peripheral)
                         } label: {
                             HStack(spacing: 10) {
-                                Image(systemName: peripheral.deviceType == .heartRateMonitor ? "heart.fill" : "sensor.fill")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(AppColor.yellow.opacity(0.7))
-                                    .frame(width: 24)
+                                Image(
+                                    systemName: peripheral.deviceType == .heartRateMonitor
+                                        ? "heart.fill" : "sensor.fill"
+                                )
+                                .font(.system(size: 12))
+                                .foregroundStyle(AppColor.yellow.opacity(0.7))
+                                .frame(width: 24)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(peripheral.name)
                                         .font(.system(size: 13, weight: .medium))
                                         .foregroundStyle(.white)
-                                    Text(peripheral.deviceType == .heartRateMonitor ? "Heart Rate Monitor" : "Speed/Cadence Sensor")
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.white.opacity(0.35))
+                                    Text(
+                                        peripheral.deviceType == .heartRateMonitor
+                                            ? "Heart Rate Monitor" : "Speed/Cadence Sensor"
+                                    )
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.white.opacity(0.35))
                                 }
                                 Spacer()
                                 Image(systemName: "plus.circle.fill")
@@ -945,8 +979,11 @@ struct OutdoorDashboardView: View {
                             withAnimation(.easeInOut(duration: 0.2)) { showAllSensors.toggle() }
                         } label: {
                             HStack(spacing: 4) {
-                                Text(showAllSensors ? "Show less" : "Show \(sensorResults.count - 3) more")
-                                    .font(.system(size: 11, weight: .semibold))
+                                Text(
+                                    showAllSensors
+                                        ? "Show less" : "Show \(sensorResults.count - 3) more"
+                                )
+                                .font(.system(size: 11, weight: .semibold))
                                 Image(systemName: showAllSensors ? "chevron.up" : "chevron.down")
                                     .font(.system(size: 9, weight: .bold))
                             }
@@ -960,8 +997,10 @@ struct OutdoorDashboardView: View {
             }
 
             // Hint when nothing connected
-            if !bleManager.hrConnectionState.isConnected && !bleManager.cscConnectionState.isConnected
-                && sensorResults.isEmpty && !bleManager.isScanningForDevices {
+            if !bleManager.hrConnectionState.isConnected
+                && !bleManager.cscConnectionState.isConnected
+                && sensorResults.isEmpty && !bleManager.isScanningForDevices
+            {
                 Text("Tap Scan to find nearby HR & speed/cadence sensors")
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.3))
@@ -978,7 +1017,9 @@ struct OutdoorDashboardView: View {
         )
     }
 
-    private func outdoorSensorRow(icon: String, label: String, state: BLEConnectionState, color: Color) -> some View {
+    private func outdoorSensorRow(
+        icon: String, label: String, state: BLEConnectionState, color: Color
+    ) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 13))
@@ -1041,19 +1082,25 @@ struct OutdoorDashboardView: View {
     private var setupCTAButton: some View {
         switch setupMode {
         case .freeRide:
-            Button { withAnimation(.easeInOut(duration: 0.35)) { showSetupPhase = false } } label: {
+            Button {
+                withAnimation(.easeInOut(duration: 0.35)) { showSetupPhase = false }
+            } label: {
                 ctaLabel("Start Free Ride")
             }
             .buttonStyle(MangoxPressStyle())
 
         case .gpx:
             if routeManager.hasRoute {
-                Button { withAnimation(.easeInOut(duration: 0.35)) { showSetupPhase = false } } label: {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.35)) { showSetupPhase = false }
+                } label: {
                     ctaLabel("Start Route")
                 }
                 .buttonStyle(MangoxPressStyle())
             } else {
-                Button { showRouteImporter = true } label: {
+                Button {
+                    showRouteImporter = true
+                } label: {
                     ctaLabel("Import GPX File", secondary: true)
                 }
                 .buttonStyle(MangoxPressStyle())
@@ -1061,7 +1108,9 @@ struct OutdoorDashboardView: View {
 
         case .navigate:
             if selectedDestination != nil {
-                Button { startNavigation() } label: {
+                Button {
+                    startNavigation()
+                } label: {
                     if navigationService.isCalculating {
                         HStack(spacing: 10) {
                             ProgressView()
@@ -1101,7 +1150,9 @@ struct OutdoorDashboardView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(secondary ? Color.white.opacity(0.15) : Color.clear, lineWidth: secondary ? 1 : 0)
+                    .strokeBorder(
+                        secondary ? Color.white.opacity(0.15) : Color.clear,
+                        lineWidth: secondary ? 1 : 0)
             )
     }
 
@@ -1141,7 +1192,9 @@ struct OutdoorDashboardView: View {
     private func chromeIcon(_ surface: OutdoorChromeSurface) -> Color { .white }
     private func chromeMuted(_ surface: OutdoorChromeSurface) -> Color { .white.opacity(0.6) }
     private func chromeNavPrimary(_ surface: OutdoorChromeSurface) -> Color { .white }
-    private func chromeNavSecondary(_ surface: OutdoorChromeSurface) -> Color { .white.opacity(0.6) }
+    private func chromeNavSecondary(_ surface: OutdoorChromeSurface) -> Color {
+        .white.opacity(0.6)
+    }
 
     /// Frosted glass on the map vs flat cards on the mapless bike-computer sheet.
     private enum CompactNavChromeStyle {
@@ -1209,10 +1262,11 @@ struct OutdoorDashboardView: View {
                 }
                 if bikeComputer {
                     compactBikeComputerStatsLayer(safeBottomInset: geo.safeAreaInsets.bottom)
-                        .transition(.asymmetric(
-                            insertion: .opacity.combined(with: .move(edge: .bottom)),
-                            removal: .opacity.combined(with: .move(edge: .bottom))
-                        ))
+                        .transition(
+                            .asymmetric(
+                                insertion: .opacity.combined(with: .move(edge: .bottom)),
+                                removal: .opacity.combined(with: .move(edge: .bottom))
+                            ))
                 }
             }
             .animation(.spring(response: 0.42, dampingFraction: 0.86), value: bikeComputer)
@@ -1253,7 +1307,10 @@ struct OutdoorDashboardView: View {
                                 .padding(.vertical, 9)
                                 .background(AppColor.yellow.opacity(0.08))
                                 .clipShape(Capsule())
-                                .overlay(Capsule().strokeBorder(AppColor.yellow.opacity(0.25), lineWidth: 1))
+                                .overlay(
+                                    Capsule().strokeBorder(
+                                        AppColor.yellow.opacity(0.25), lineWidth: 1)
+                                )
                                 .frame(maxWidth: .infinity)
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
@@ -1286,11 +1343,14 @@ struct OutdoorDashboardView: View {
         let labelMuted = Color.white.opacity(0.38)
         let tileFont: CGFloat = 28
         let recording = locationManager.isRecording
-        let timePrimary: String = recording
+        let timePrimary: String =
+            recording
             ? AppFormat.duration(locationManager.rideDuration)
             : "0:00"
-        let distPrimary: String = AppFormat.distanceString(locationManager.totalDistance, imperial: isImperial)
-        let elevPrimary = AppFormat.elevationString(locationManager.totalElevationGain, imperial: isImperial)
+        let distPrimary: String = AppFormat.distanceString(
+            locationManager.totalDistance, imperial: isImperial)
+        let elevPrimary = AppFormat.elevationString(
+            locationManager.totalElevationGain, imperial: isImperial)
         let avgPrimary = AppFormat.speedString(locationManager.averageSpeed, imperial: isImperial)
         let navPriority = maplessNavPriorityActive
 
@@ -1434,7 +1494,9 @@ struct OutdoorDashboardView: View {
         .background(canvas)
     }
 
-    private func bikeComputerSpeedHero(speedFontSize: CGFloat, labelMuted: Color, isImperial: Bool) -> some View {
+    private func bikeComputerSpeedHero(speedFontSize: CGFloat, labelMuted: Color, isImperial: Bool)
+        -> some View
+    {
         VStack(spacing: 8) {
             Text("SPEED")
                 .font(.system(size: 11, weight: .bold))
@@ -1513,7 +1575,7 @@ struct OutdoorDashboardView: View {
         if showHR || showCad || showPow {
             HStack(spacing: 16) {
                 if showHR {
-                    HStack(spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Image(systemName: "heart.fill")
                             .font(.system(size: 12))
                             .foregroundStyle(AppColor.heartRate.opacity(0.9))
@@ -1526,7 +1588,7 @@ struct OutdoorDashboardView: View {
                     }
                 }
                 if showCad {
-                    HStack(spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
                             .font(.system(size: 12))
                             .foregroundStyle(AppColor.blue.opacity(0.85))
@@ -1539,7 +1601,7 @@ struct OutdoorDashboardView: View {
                     }
                 }
                 if showPow {
-                    HStack(spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Image(systemName: "bolt.fill")
                             .font(.system(size: 12))
                             .foregroundStyle(AppColor.mango.opacity(0.9))
@@ -1606,7 +1668,9 @@ struct OutdoorDashboardView: View {
     /// Right-side action buttons float independently so the nav card stays near the top.
     /// `safeTopInset` must be supplied so the chrome clears the Dynamic Island /
     /// notch — the overlay inherits the map's ignoresSafeArea coordinate space.
-    private func compactTopChrome(safeTopInset: CGFloat = 0, surface: OutdoorChromeSurface = .mapOverlay) -> some View {
+    private func compactTopChrome(
+        safeTopInset: CGFloat = 0, surface: OutdoorChromeSurface = .mapOverlay
+    ) -> some View {
         ZStack(alignment: .topTrailing) {
             // Left column: back button + nav card stacked tight at the top
             VStack(alignment: .leading, spacing: 4) {
@@ -1621,7 +1685,7 @@ struct OutdoorDashboardView: View {
                     // Weak GPS: shown inside the nav card row (`navCardGpsLine`) so it matches card width and alignment.
                 }
             }
-            .padding(.trailing, 48) // Leave room for right-side action buttons
+            .padding(.trailing, 48)  // Leave room for right-side action buttons
             .frame(maxWidth: .infinity, alignment: .topLeading)
 
             // Right column: action buttons float independently
@@ -1694,7 +1758,9 @@ struct OutdoorDashboardView: View {
                 } label: {
                     Image(systemName: showMapInCompact ? "map.fill" : "map")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(showMapInCompact ? AppColor.mango : chromeIcon(surface).opacity(0.7))
+                        .foregroundStyle(
+                            showMapInCompact ? AppColor.mango : chromeIcon(surface).opacity(0.7)
+                        )
                         .frame(width: 40, height: 40)
                 }
                 .buttonStyle(MangoxPressStyle())
@@ -1773,7 +1839,8 @@ struct OutdoorDashboardView: View {
                 metricsGrid
                 if bleManager.trainerConnectionState.isConnected
                     || bleManager.hrConnectionState.isConnected
-                    || bleManager.cscConnectionState.isConnected {
+                    || bleManager.cscConnectionState.isConnected
+                {
                     sensorRow
                 }
             }
@@ -1845,7 +1912,8 @@ struct OutdoorDashboardView: View {
 
                                 if bleManager.trainerConnectionState.isConnected
                                     || bleManager.hrConnectionState.isConnected
-                                    || bleManager.cscConnectionState.isConnected {
+                                    || bleManager.cscConnectionState.isConnected
+                                {
                                     sensorMetrics
                                 }
 
@@ -1896,7 +1964,9 @@ struct OutdoorDashboardView: View {
         climbBanner
         if navigationService.mode == .turnByTurn, let turn = navigationService.nextTurn {
             combinedTurnByTurnCard(turn)
-        } else if navigationService.mode == .followRoute, let hint = navigationService.followRouteHint {
+        } else if navigationService.mode == .followRoute,
+            let hint = navigationService.followRouteHint
+        {
             combinedFollowRouteCard(hint: hint)
         } else if hasActiveRoute {
             routeStatusCard
@@ -1907,139 +1977,145 @@ struct OutdoorDashboardView: View {
 
     @ViewBuilder
     private var mapView: some View {
-        Map(position: Binding(
-            get: { locationManager.mapCameraPosition },
-            set: { newPos in
-                locationManager.mapCameraPosition = newPos
-                locationManager.isFollowingUser = false
+        Map(
+            position: Binding(
+                get: { locationManager.mapCameraPosition },
+                set: { newPos in
+                    locationManager.mapCameraPosition = newPos
+                    locationManager.isFollowingUser = false
+                }
+            )
+        ) {
+            // Frozen breadcrumb chunks — colour-coded by average speed
+            ForEach(locationManager.frozenBreadcrumbChunks) { chunk in
+                let crumbs = chunk.coords.sanitizedForMapPolyline()
+                if crumbs.count > 1 {
+                    MapPolyline(coordinates: crumbs)
+                        .stroke(speedColor(chunk.avgSpeed), lineWidth: 4)
+                }
             }
-        )) {
-                // Frozen breadcrumb chunks — colour-coded by average speed
-                ForEach(locationManager.frozenBreadcrumbChunks) { chunk in
-                    let crumbs = chunk.coords.sanitizedForMapPolyline()
-                    if crumbs.count > 1 {
-                        MapPolyline(coordinates: crumbs)
-                            .stroke(speedColor(chunk.avgSpeed), lineWidth: 4)
-                    }
-                }
 
-                // Live tail — always mango coloured
-                let tail = locationManager.liveBreadcrumbTail.sanitizedForMapPolyline()
-                if tail.count > 1 {
-                    MapPolyline(coordinates: tail)
-                        .stroke(AppColor.mango, lineWidth: 4)
-                }
+            // Live tail — always mango coloured
+            let tail = locationManager.liveBreadcrumbTail.sanitizedForMapPolyline()
+            if tail.count > 1 {
+                MapPolyline(coordinates: tail)
+                    .stroke(AppColor.mango, lineWidth: 4)
+            }
 
-                // Route overlay — traversed (grey) vs remaining (yellow)
-                ForEach(navigationService.completedRoutePolylines.indices, id: \.self) { i in
-                    let done = navigationService.completedRoutePolylines[i].sanitizedForMapPolyline()
-                    if done.count > 1 {
-                        MapPolyline(coordinates: done)
-                            .stroke(Color.white.opacity(0.35), lineWidth: 5)
-                    }
+            // Route overlay — traversed (grey) vs remaining (yellow)
+            ForEach(navigationService.completedRoutePolylines.indices, id: \.self) { i in
+                let done = navigationService.completedRoutePolylines[i].sanitizedForMapPolyline()
+                if done.count > 1 {
+                    MapPolyline(coordinates: done)
+                        .stroke(Color.white.opacity(0.35), lineWidth: 5)
                 }
-                ForEach(navigationService.remainingRoutePolylines.indices, id: \.self) { i in
-                    let left = navigationService.remainingRoutePolylines[i].sanitizedForMapPolyline()
-                    if left.count > 1 {
-                        MapPolyline(coordinates: left)
-                            .stroke(AppColor.yellow, lineWidth: 5)
-                    }
+            }
+            ForEach(navigationService.remainingRoutePolylines.indices, id: \.self) { i in
+                let left = navigationService.remainingRoutePolylines[i].sanitizedForMapPolyline()
+                if left.count > 1 {
+                    MapPolyline(coordinates: left)
+                        .stroke(AppColor.yellow, lineWidth: 5)
                 }
+            }
 
-                // Lookahead ghost — dashed white, 300m ahead on remaining route
-                ForEach(navigationService.lookaheadPolylines.indices, id: \.self) { i in
-                    let lookahead = navigationService.lookaheadPolylines[i].sanitizedForMapPolyline()
-                    if lookahead.count > 1 {
-                        MapPolyline(coordinates: lookahead)
-                            .stroke(
-                                Color.white.opacity(0.45),
-                                style: StrokeStyle(lineWidth: 3, dash: [8, 6])
-                            )
-                    }
-                }
-
-                // Off-course snap-back line — dashed red line to nearest route point
-                let snapBack = navigationService.snapBackPolyline
-                if snapBack.count == 2 {
-                    MapPolyline(coordinates: snapBack)
+            // Lookahead ghost — dashed white, 300m ahead on remaining route
+            ForEach(navigationService.lookaheadPolylines.indices, id: \.self) { i in
+                let lookahead = navigationService.lookaheadPolylines[i].sanitizedForMapPolyline()
+                if lookahead.count > 1 {
+                    MapPolyline(coordinates: lookahead)
                         .stroke(
-                            AppColor.red.opacity(0.75),
-                            style: StrokeStyle(lineWidth: 2, dash: [5, 5])
+                            Color.white.opacity(0.45),
+                            style: StrokeStyle(lineWidth: 3, dash: [8, 6])
                         )
                 }
+            }
 
-                // Pause gap markers
-                ForEach(locationManager.pauseGapCoordinates.indices, id: \.self) { i in
-                    let coord = locationManager.pauseGapCoordinates[i]
-                    Annotation("", coordinate: coord) {
-                        Circle()
-                            .fill(AppColor.yellow.opacity(0.85))
-                            .frame(width: 10, height: 10)
-                            .overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
-                    }
+            // Off-course snap-back line — dashed red line to nearest route point
+            let snapBack = navigationService.snapBackPolyline
+            if snapBack.count == 2 {
+                MapPolyline(coordinates: snapBack)
+                    .stroke(
+                        AppColor.red.opacity(0.75),
+                        style: StrokeStyle(lineWidth: 2, dash: [5, 5])
+                    )
+            }
+
+            // Pause gap markers
+            ForEach(locationManager.pauseGapCoordinates.indices, id: \.self) { i in
+                let coord = locationManager.pauseGapCoordinates[i]
+                Annotation("", coordinate: coord) {
+                    Circle()
+                        .fill(AppColor.yellow.opacity(0.85))
+                        .frame(width: 10, height: 10)
+                        .overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
                 }
+            }
 
-                // Rider position — solid circle dot
-                if let loc = locationManager.currentLocation {
-                    Annotation("", coordinate: loc.coordinate) {
-                        Circle()
-                            .fill(AppColor.mango)
-                            .frame(width: 18, height: 18)
-                            .overlay(Circle().strokeBorder(.white, lineWidth: 3))
-                            .shadow(color: .black.opacity(0.35), radius: 3)
-                    }
+            // Rider position — solid circle dot (smoothed when follow mode matches the camera).
+            if let loc = locationManager.currentLocation {
+                let riderCoord = locationManager.isFollowingUser
+                    ? locationManager.smoothedRiderCoordinate
+                    : loc.coordinate
+                Annotation("", coordinate: riderCoord) {
+                    Circle()
+                        .fill(AppColor.mango)
+                        .frame(width: 18, height: 18)
+                        .overlay(Circle().strokeBorder(.white, lineWidth: 3))
+                        .shadow(color: .black.opacity(0.35), radius: 3)
                 }
+            }
 
-                // Destination pin
-                if let dest = navigationService.destination {
-                    Marker(dest.name ?? "Destination", coordinate: dest.location.coordinate)
-                        .tint(AppColor.red)
-                }
+            // Destination pin
+            if let dest = navigationService.destination {
+                Marker(dest.name ?? "Destination", coordinate: dest.location.coordinate)
+                    .tint(AppColor.red)
+            }
 
-                // User-placed waypoints
-                ForEach(Array(mapWaypoints.enumerated()), id: \.offset) { index, coord in
-                    Annotation("", coordinate: coord) {
-                        VStack(spacing: 2) {
-                            ZStack {
-                                Circle()
-                                    .fill(AppColor.blue)
-                                    .frame(width: 22, height: 22)
-                                Image(systemName: "mappin")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(.white)
-                            }
-                            Text("WP\(index + 1)")
-                                .font(.system(size: 9, weight: .bold))
+            // User-placed waypoints
+            ForEach(Array(mapWaypoints.enumerated()), id: \.offset) { index, coord in
+                Annotation("", coordinate: coord) {
+                    VStack(spacing: 2) {
+                        ZStack {
+                            Circle()
+                                .fill(AppColor.blue)
+                                .frame(width: 22, height: 22)
+                            Image(systemName: "mappin")
+                                .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(.white)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(AppColor.blue.opacity(0.85))
-                                .clipShape(Capsule())
                         }
+                        Text("WP\(index + 1)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(AppColor.blue.opacity(0.85))
+                            .clipShape(Capsule())
                     }
                 }
             }
-            .mapStyle(mapStyle)
-            /// Pinch / pan exits follow mode via `Map` position binding; programmatic camera updates use the same binding.
-            .mapControls { }
-            .safeAreaPadding(.top, 90)
-            // Shift the camera so the rider dot is visible above the stats card,
-            // not hidden behind it. Only active on compact (iPhone); wide layout has
-            // no overlapping card. statsCardHeight is measured live from the card.
-            .safeAreaPadding(.bottom, hSizeClass == .compact ? statsCardHeight : 0)
-            .overlay {
-                if navigationService.isCalculating {
-                    ZStack {
-                        Color.black.opacity(0.35).ignoresSafeArea()
-                        ProgressView("Building route…")
-                            .tint(AppColor.mango)
-                            .padding(20)
-                            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    }
+        }
+        .mapStyle(mapStyle)
+        /// Pinch / pan exits follow mode via `Map` position binding; programmatic camera updates use the same binding.
+        .mapControls {}
+        .safeAreaPadding(.top, 90)
+        // Shift the camera so the rider dot is visible above the stats card,
+        // not hidden behind it. Only active on compact (iPhone); wide layout has
+        // no overlapping card. statsCardHeight is measured live from the card.
+        .safeAreaPadding(.bottom, hSizeClass == .compact ? statsCardHeight : 0)
+        .overlay {
+            if navigationService.isCalculating {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    ProgressView("Building route…")
+                        .tint(AppColor.mango)
+                        .padding(20)
+                        .glassEffect(
+                            .regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
             }
-            .frame(minWidth: 1, minHeight: 1)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(minWidth: 1, minHeight: 1)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - End / discard confirmations (custom — works over drawer; compact vs full)
@@ -2071,10 +2147,12 @@ struct OutdoorDashboardView: View {
                 Text("End & save ride?")
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(.white)
-                Text("We'll open the summary next so you can review distance, power, and route details.")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(
+                    "We'll open the summary next so you can review distance, power, and route details."
+                )
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 12) {
                     Button {
                         showEndConfirmation = false
@@ -2131,10 +2209,12 @@ struct OutdoorDashboardView: View {
                 Text("Discard this ride?")
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(.white)
-                Text("Distance, time, and GPS data from this session will be deleted. This can't be undone.")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(
+                    "Distance, time, and GPS data from this session will be deleted. This can't be undone."
+                )
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 12) {
                     Button {
                         showDiscardConfirmation = false
@@ -2244,7 +2324,9 @@ struct OutdoorDashboardView: View {
                     } label: {
                         Image(systemName: showMapInCompact ? "map.fill" : "map")
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(showMapInCompact ? AppColor.mango : .white.opacity(0.7))
+                            .foregroundStyle(
+                                showMapInCompact ? AppColor.mango : .white.opacity(0.7)
+                            )
                             .frame(width: 40, height: 40)
                     }
                     .buttonStyle(MangoxPressStyle())
@@ -2347,7 +2429,9 @@ struct OutdoorDashboardView: View {
     /// Full-width directions / route card shown below the button row in compact (iPhone) layout.
     /// During recording the GPS badge is merged into the card's top-left corner.
     @ViewBuilder
-    private func compactNavCardRow(surface: OutdoorChromeSurface, chromeStyle: CompactNavChromeStyle = .frostedGlass) -> some View {
+    private func compactNavCardRow(
+        surface: OutdoorChromeSurface, chromeStyle: CompactNavChromeStyle = .frostedGlass
+    ) -> some View {
         if navigationService.mode == .turnByTurn, let turn = navigationService.nextTurn {
             applyCompactNavChrome(style: chromeStyle, shape: .roundedRect) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -2382,7 +2466,9 @@ struct OutdoorDashboardView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
             }
-        } else if navigationService.mode == .followRoute, let hint = navigationService.followRouteHint {
+        } else if navigationService.mode == .followRoute,
+            let hint = navigationService.followRouteHint
+        {
             applyCompactNavChrome(style: chromeStyle, shape: .roundedRect) {
                 VStack(alignment: .leading, spacing: 6) {
                     navCardGpsLine(surface: surface)
@@ -2565,19 +2651,22 @@ struct OutdoorDashboardView: View {
             // Secondary: Distance + Elevation + Avg Speed
             HStack(spacing: 10) {
                 metricCell(
-                    value: AppFormat.distanceString(locationManager.totalDistance, imperial: isImperial),
+                    value: AppFormat.distanceString(
+                        locationManager.totalDistance, imperial: isImperial),
                     unit: AppFormat.distanceUnit(imperial: isImperial),
                     label: "DISTANCE",
                     isPrimary: false
                 )
                 metricCell(
-                    value: AppFormat.elevationString(locationManager.totalElevationGain, imperial: isImperial),
+                    value: AppFormat.elevationString(
+                        locationManager.totalElevationGain, imperial: isImperial),
                     unit: AppFormat.elevationUnit(imperial: isImperial),
                     label: "ELEVATION",
                     isPrimary: false
                 )
                 metricCell(
-                    value: AppFormat.speedString(locationManager.averageSpeed, imperial: isImperial),
+                    value: AppFormat.speedString(
+                        locationManager.averageSpeed, imperial: isImperial),
                     unit: AppFormat.speedUnit(imperial: isImperial),
                     label: "AVG",
                     isPrimary: false
@@ -2593,7 +2682,9 @@ struct OutdoorDashboardView: View {
 
     // MARK: - Metric Cell
 
-    private func metricCell(value: String, unit: String, label: String, isPrimary: Bool) -> some View {
+    private func metricCell(value: String, unit: String, label: String, isPrimary: Bool)
+        -> some View
+    {
         VStack(spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(value)
@@ -2693,7 +2784,9 @@ struct OutdoorDashboardView: View {
         }
     }
 
-    private func compactSensorMetric(icon: String, iconColor: Color, value: String, unit: String, border: Color) -> some View {
+    private func compactSensorMetric(
+        icon: String, iconColor: Color, value: String, unit: String, border: Color
+    ) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 12))
@@ -2750,7 +2843,8 @@ struct OutdoorDashboardView: View {
                     isPrimary: false
                 )
                 metricCell(
-                    value: AppFormat.distanceString(locationManager.totalDistance, imperial: isImperial),
+                    value: AppFormat.distanceString(
+                        locationManager.totalDistance, imperial: isImperial),
                     unit: AppFormat.distanceUnit(imperial: isImperial),
                     label: "DISTANCE",
                     isPrimary: false
@@ -2771,13 +2865,15 @@ struct OutdoorDashboardView: View {
         return VStack(spacing: 12) {
             HStack(spacing: 12) {
                 metricCell(
-                    value: AppFormat.elevationString(locationManager.totalElevationGain, imperial: isImperial),
+                    value: AppFormat.elevationString(
+                        locationManager.totalElevationGain, imperial: isImperial),
                     unit: AppFormat.elevationUnit(imperial: isImperial),
                     label: "ELEVATION",
                     isPrimary: false
                 )
                 metricCell(
-                    value: AppFormat.speedString(locationManager.averageSpeed, imperial: isImperial),
+                    value: AppFormat.speedString(
+                        locationManager.averageSpeed, imperial: isImperial),
                     unit: AppFormat.speedUnit(imperial: isImperial),
                     label: "AVG SPEED",
                     isPrimary: false
@@ -2799,7 +2895,9 @@ struct OutdoorDashboardView: View {
 
     // MARK: - Off Course Banner
 
-    private func weakGpsBanner(surface: OutdoorChromeSurface, chromeStyle: CompactNavChromeStyle = .frostedGlass) -> some View {
+    private func weakGpsBanner(
+        surface: OutdoorChromeSurface, chromeStyle: CompactNavChromeStyle = .frostedGlass
+    ) -> some View {
         let rowContent = HStack(spacing: 8) {
             Image(systemName: "antenna.radiowaves.left.and.right.slash")
                 .font(.system(size: 14))
@@ -2837,7 +2935,9 @@ struct OutdoorDashboardView: View {
         .accessibilityLabel("Weak GPS signal. Live speed may be unavailable.")
     }
 
-    private func offCourseBanner(surface: OutdoorChromeSurface, chromeStyle: CompactNavChromeStyle = .frostedGlass) -> some View {
+    private func offCourseBanner(
+        surface: OutdoorChromeSurface, chromeStyle: CompactNavChromeStyle = .frostedGlass
+    ) -> some View {
         let rowContent = HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 14))
@@ -3059,7 +3159,9 @@ struct OutdoorDashboardView: View {
                             .foregroundStyle(.white)
                     }
                     .padding(24)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(
+                        .ultraThinMaterial,
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
             }
         }
@@ -3068,15 +3170,24 @@ struct OutdoorDashboardView: View {
     private var routeMenuPage: some View {
         ScrollView {
             VStack(spacing: 12) {
-                menuActionButton(title: "Free ride", subtitle: "No route — just ride and record", icon: "figure.outdoor.cycle") {
+                menuActionButton(
+                    title: "Free ride", subtitle: "No route — just ride and record",
+                    icon: "figure.outdoor.cycle"
+                ) {
                     navigationService.clearNavigation()
                     routeManager.clearRoute()
                     showRouteSheet = false
                 }
-                menuActionButton(title: "Import GPX", subtitle: "Load a .gpx file from Files", icon: "doc.badge.arrow.up") {
+                menuActionButton(
+                    title: "Import GPX", subtitle: "Load a .gpx file from Files",
+                    icon: "doc.badge.arrow.up"
+                ) {
                     showRouteImporter = true
                 }
-                menuActionButton(title: "Navigate to destination", subtitle: "Apple Maps cycling directions", icon: "arrow.triangle.turn.up.right.diamond") {
+                menuActionButton(
+                    title: "Navigate to destination", subtitle: "Apple Maps cycling directions",
+                    icon: "arrow.triangle.turn.up.right.diamond"
+                ) {
                     routeSheetPage = .search
                 }
                 Toggle(isOn: $isHybridMapStyle) {
@@ -3121,7 +3232,9 @@ struct OutdoorDashboardView: View {
         }
     }
 
-    private func menuActionButton(title: String, subtitle: String, icon: String, action: @escaping () -> Void) -> some View {
+    private func menuActionButton(
+        title: String, subtitle: String, icon: String, action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             HStack(spacing: 14) {
                 Image(systemName: icon)
@@ -3216,7 +3329,8 @@ struct OutdoorDashboardView: View {
         workout.endDate = .now
         workout.status = .completed
 
-        let planned = navigationService.routeDistance > 0
+        let planned =
+            navigationService.routeDistance > 0
             ? navigationService.routeDistance
             : (routeManager.hasRoute ? routeManager.totalDistance : 0)
         workout.plannedRouteDistanceMeters = planned
@@ -3256,6 +3370,11 @@ struct OutdoorDashboardView: View {
             split.workout = workout
             modelContext.insert(split)
         }
+
+        try? modelContext.save()
+        MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
+
+        Task { await healthKitManager.saveCyclingWorkoutToHealthIfEnabled(workout) }
 
         // Pop outdoor dashboard and push summary — batched so there's no flash.
         let finishedWorkoutID = workout.id

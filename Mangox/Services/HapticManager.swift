@@ -84,6 +84,34 @@ final class HapticManager {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 
+    // MARK: - Coach
+
+    /// Light confirmation when the user sends a coach message.
+    func coachMessageSent() {
+        let gen = UIImpactFeedbackGenerator(style: .light)
+        gen.prepare()
+        gen.impactOccurred()
+    }
+
+    /// Tapping an inline suggested-reply chip under a coach message.
+    func coachQuickReplyTapped() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    // MARK: - Onboarding
+
+    /// Permission or integration step completed during first-launch onboarding.
+    func onboardingStepCompleted() {
+        let gen = UIImpactFeedbackGenerator(style: .medium)
+        gen.prepare()
+        gen.impactOccurred()
+    }
+
+    /// Strava connected or final “Get Started” — slightly stronger than a single impact.
+    func onboardingCelebration() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
     // MARK: - FTP Test
 
     /// Fired when the FTP test protocol finishes.

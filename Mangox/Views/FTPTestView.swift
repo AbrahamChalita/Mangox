@@ -110,7 +110,9 @@ struct FTPTestView: View {
             }
 
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showHistory = true } label: {
+                Button {
+                    showHistory = true
+                } label: {
                     Image(systemName: "clock.arrow.circlepath")
                 }
                 .accessibilityLabel("FTP test history")
@@ -170,9 +172,12 @@ struct FTPTestView: View {
 
             // Target power for this phase
             HStack(spacing: 6) {
-                Image(systemName: manager.currentPhase.ergTargetPercent != nil ? "target" : "flame.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(manager.currentPhase.targetZone?.color ?? AppColor.orange)
+                Image(
+                    systemName: manager.currentPhase.ergTargetPercent != nil
+                        ? "target" : "flame.fill"
+                )
+                .font(.system(size: 10))
+                .foregroundStyle(manager.currentPhase.targetZone?.color ?? AppColor.orange)
                 Text(manager.currentPhase.targetLabel)
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(manager.currentPhase.targetZone?.color ?? AppColor.orange)
@@ -186,11 +191,14 @@ struct FTPTestView: View {
                 .tint(AppColor.mango)
 
             // Target vs current comparison (ERG phases only)
-            if (manager.state == .running || manager.state == .paused),
-               let targetWatts = manager.currentERGTarget {
+            if manager.state == .running || manager.state == .paused,
+                let targetWatts = manager.currentERGTarget
+            {
                 let delta = manager.displayPower - targetWatts
                 let absDelta = abs(delta)
-                let deltaColor: Color = absDelta <= 5 ? AppColor.success
+                let deltaColor: Color =
+                    absDelta <= 5
+                    ? AppColor.success
                     : absDelta <= 15 ? AppColor.yellow : AppColor.orange
 
                 VStack(spacing: 8) {
@@ -267,9 +275,10 @@ struct FTPTestView: View {
             }
 
             // Running FTP estimate & pacing (shown during the 20-min test block)
-            if (manager.state == .running || manager.state == .paused),
-               manager.currentPhase.id == 6,
-               manager.runningTwentyMinAvg > 0 {
+            if manager.state == .running || manager.state == .paused,
+                manager.currentPhase.id == 6,
+                manager.runningTwentyMinAvg > 0
+            {
                 VStack(spacing: 8) {
                     HStack(spacing: 8) {
                         Image(systemName: "bolt.fill")
@@ -291,11 +300,17 @@ struct FTPTestView: View {
                     // Pacing indicator (after first minute of test data)
                     if manager.testBlockProgress > 0.05 {
                         let ratio = Double(manager.displayPower) / manager.runningTwentyMinAvg
-                        let pacingLabel = ratio > 1.08 ? "Above avg — watch pacing"
+                        let pacingLabel =
+                            ratio > 1.08
+                            ? "Above avg — watch pacing"
                             : ratio >= 0.95 ? "Steady pace" : "Below avg — dig deeper"
-                        let pacingColor = ratio > 1.08 ? AppColor.orange
+                        let pacingColor =
+                            ratio > 1.08
+                            ? AppColor.orange
                             : ratio >= 0.95 ? AppColor.success : AppColor.heartRate
-                        let pacingIcon = ratio > 1.08 ? "arrow.up.right"
+                        let pacingIcon =
+                            ratio > 1.08
+                            ? "arrow.up.right"
                             : ratio >= 0.95 ? "arrow.right" : "arrow.down.right"
 
                         HStack(spacing: 6) {
@@ -306,9 +321,11 @@ struct FTPTestView: View {
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(pacingColor)
                             Spacer()
-                            Text("\(manager.displayPower)W vs \(Int(manager.runningTwentyMinAvg.rounded()))W avg")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.3))
+                            Text(
+                                "\(manager.displayPower)W vs \(Int(manager.runningTwentyMinAvg.rounded()))W avg"
+                            )
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.3))
                         }
                     }
                 }
@@ -374,7 +391,10 @@ struct FTPTestView: View {
                                 let zoneFraction = (zone.pctHigh - zone.pctLow) / 1.5
                                 ZStack(alignment: .leading) {
                                     RoundedRectangle(cornerRadius: 2)
-                                        .fill(zone.color.opacity(zone.id == currentZone.id ? 0.5 : 0.15))
+                                        .fill(
+                                            zone.color.opacity(
+                                                zone.id == currentZone.id ? 0.5 : 0.15)
+                                        )
                                         .frame(height: 6)
                                 }
                                 .frame(width: totalWidth * zoneFraction)
@@ -382,7 +402,8 @@ struct FTPTestView: View {
                         }
 
                         // Power position indicator
-                        let pct = min(Double(manager.displayPower) / (Double(PowerZone.ftp) * 1.5), 1.0)
+                        let pct = min(
+                            Double(manager.displayPower) / (Double(PowerZone.ftp) * 1.5), 1.0)
                         Circle()
                             .fill(currentZone.color)
                             .frame(width: 8, height: 8)
@@ -413,6 +434,23 @@ struct FTPTestView: View {
         if let warning = manager.pendingPhaseWarning {
             phaseWarningOverlay(warning: warning)
         }
+
+        if let coachText = manager.dynamicCoachingText, manager.state == .running {
+            Text(coachText)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(AppColor.mango)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
+                .background(AppColor.mango.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(AppColor.mango.opacity(0.3), lineWidth: 1)
+                )
+                .padding(.top, 4)
+        }
     }
 
     private var powerCards: some View {
@@ -430,23 +468,40 @@ struct FTPTestView: View {
                         ? "\(Int(manager.runningTwentyMinAvg.rounded()))"
                         : "—",
                     unit: "W",
-                    subtitle: manager.state == .running && manager.currentPhase.id == 4
+                    subtitle: manager.state == .running && manager.currentPhase.id == 6
                         ? "\(Int(manager.testBlockProgress * 100))% complete"
                         : nil
                 )
             }
 
             HStack(spacing: 10) {
+                let currentFTP = PowerZone.ftp
+                let projected = manager.liveProjectedFTP
+                let projColor =
+                    projected > currentFTP
+                    ? AppColor.success
+                    : (projected < currentFTP ? AppColor.orange : AppColor.yellow)
+
+                let displayFTP = manager.estimatedFTP > 0 ? manager.estimatedFTP : (projected > 0 ? projected : 0)
+                let weight = RidePreferences.shared.riderWeightKg
+                let wkgSubtitle: String = {
+                    if displayFTP > 0, weight > 0 {
+                        return String(format: "%.2f W/kg  ·  Current: %d W", Double(displayFTP) / weight, currentFTP)
+                    }
+                    return "Current FTP: \(currentFTP) W"
+                }()
                 MetricCardView(
-                    label: "ESTIMATED FTP (95%)",
+                    label: manager.state == .running && manager.currentPhase.id == 6
+                        ? "LIVE PROJECTED FTP" : "ESTIMATED FTP (95%)",
                     value: manager.estimatedFTP > 0
                         ? "\(manager.estimatedFTP)"
-                        : manager.runningTwentyMinAvg > 0
-                            ? "~\(Int((manager.runningTwentyMinAvg * 0.95).rounded()))"
+                        : projected > 0
+                            ? "~\(projected)"
                             : "—",
                     unit: "W",
-                    valueColor: AppColor.yellow,
-                    subtitle: "Current FTP: \(PowerZone.ftp) W"
+                    valueColor: manager.estimatedFTP > 0
+                        ? AppColor.yellow : (projected > 0 ? projColor : AppColor.yellow),
+                    subtitle: wkgSubtitle
                 )
                 if manager.testMaxPower > 0 {
                     MetricCardView(
@@ -470,7 +525,8 @@ struct FTPTestView: View {
 
             ForEach(manager.phases) { phase in
                 let phaseIndex = phase.id - 1
-                let isCurrent = manager.state != .completed && manager.currentPhaseIndex == phaseIndex
+                let isCurrent =
+                    manager.state != .completed && manager.currentPhaseIndex == phaseIndex
                 let isDone = manager.currentPhaseIndex > phaseIndex || manager.state == .completed
                 let phaseAvg = manager.phaseAveragePowers[phase.id]
 
@@ -493,7 +549,8 @@ struct FTPTestView: View {
                     if let avg = phaseAvg, isDone {
                         Text("\(Int(avg.rounded()))W")
                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(PowerZone.zone(for: Int(avg.rounded())).color.opacity(0.8))
+                            .foregroundStyle(
+                                PowerZone.zone(for: Int(avg.rounded())).color.opacity(0.8))
                     } else {
                         Text(FTPTestManager.format(seconds: phase.duration))
                             .font(.system(size: 11, design: .monospaced))
@@ -561,13 +618,15 @@ struct FTPTestView: View {
                 Button {
                     showApplyConfirmation = manager.estimatedFTP > 0
                 } label: {
-                    Label("Apply FTP \(manager.estimatedFTP) W", systemImage: "checkmark.circle.fill")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.black)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(AppColor.yellow)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    Label(
+                        "Apply FTP \(manager.estimatedFTP) W", systemImage: "checkmark.circle.fill"
+                    )
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(AppColor.yellow)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .buttonStyle(MangoxPressStyle())
                 .disabled(manager.estimatedFTP == 0)
@@ -599,7 +658,11 @@ struct FTPTestView: View {
         Button(action: action) {
             Label(label, systemImage: systemImage)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(isDestructive ? Color(red: 232/255, green: 68/255, blue: 90/255) : .white.opacity(0.85))
+                .foregroundStyle(
+                    isDestructive
+                        ? Color(red: 232 / 255, green: 68 / 255, blue: 90 / 255)
+                        : .white.opacity(0.85)
+                )
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
                 .background(Color.white.opacity(0.04))

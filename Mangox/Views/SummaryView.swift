@@ -1,5 +1,6 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
+import UIKit
 import os.log
 
 private let summaryLogger = Logger(subsystem: "com.abchalita.Mangox", category: "SummaryView")
@@ -44,7 +45,6 @@ struct SummaryView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.modelContext) private var modelContext
     @Query private var workouts: [Workout]
-    @Query private var allProgress: [TrainingPlanProgress]
 
     @State private var shareItems: [Any] = []
     @State private var lastExportedFileURL: URL?
@@ -62,18 +62,27 @@ struct SummaryView: View {
     @State private var uploadPhotoAfterUpload: Bool = true
     @State private var showDescriptionPreview: Bool = false
     /// When false, generated Strava description omits the duration line (Strava still shows elapsed time on the activity).
-    @AppStorage("stravaUploadDescriptionIncludeDuration") private var stravaIncludeDurationInDescription = true
-    @AppStorage("stravaUploadDescriptionIncludeDistance") private var stravaIncludeDistanceInDescription = true
-    @AppStorage("stravaUploadDescriptionIncludeCalories") private var stravaIncludeCaloriesInDescription = true
+    @AppStorage("stravaUploadDescriptionIncludeDuration") private
+        var stravaIncludeDurationInDescription = true
+    @AppStorage("stravaUploadDescriptionIncludeDistance") private
+        var stravaIncludeDistanceInDescription = true
+    @AppStorage("stravaUploadDescriptionIncludeCalories") private
+        var stravaIncludeCaloriesInDescription = true
     @AppStorage("stravaUploadPreferredGearID") private var stravaPreferredGearID = ""
     @State private var commuteStravaUpload = false
     @State private var heroAppeared = false
     @State private var showStravaCard = false
+    /// When Strava rejects API photo upload, user can share the rendered summary image from here.
+    @State private var showStravaPhotoFallbackDialog = false
+    @State private var stravaPhotoFallbackImage: Any?
+    @State private var isPreparingInstagramStory = false
+    /// Set after saving a free ride as a `CustomWorkoutTemplate` in this session (enables repeat).
+    @State private var customRepeatTemplateID: UUID?
     @Environment(\.horizontalSizeClass) private var hSizeClass
     private var isWide: Bool { hSizeClass != .compact }
 
     // Cached computed data (populated once in .task)
-    @State private var cachedSortedSamples: [WorkoutSample]?
+    @State private var cachedSortedSamples: [WorkoutSampleData]?
     @State private var cachedSortedLaps: [LapSplit]?
     @State private var cachedZoneBuckets: [ZoneBucket]?
     @State private var cachedHRZoneBuckets: [HRZoneBucket]?
@@ -81,6 +90,8 @@ struct SummaryView: View {
     @State private var preparedSignature: SummaryDataSignature?
 
     private let bg = AppColor.bg
+    /// Toolbar size for third-party brand marks (Instagram, Strava) — matches typical bar button metrics.
+    private let toolbarBrandIconSize: CGFloat = 22
 
     init(
         workoutID: UUID,
@@ -89,9 +100,10 @@ struct SummaryView: View {
         self.workoutID = workoutID
         self._navigationPath = navigationPath
         let id = workoutID
-        self._workouts = Query(filter: #Predicate<Workout> { workout in
-            workout.id == id
-        })
+        self._workouts = Query(
+            filter: #Predicate<Workout> { workout in
+                workout.id == id
+            })
     }
 
     private var workout: Workout? {
@@ -103,7 +115,7 @@ struct SummaryView: View {
         return try? modelContext.fetch(descriptor).first
     }
 
-    private var sortedSamples: [WorkoutSample] {
+    private var sortedSamples: [WorkoutSampleData] {
         cachedSortedSamples ?? []
     }
 
@@ -129,7 +141,7 @@ struct SummaryView: View {
             savedRouteName: workout.savedRouteName,
             sampleCount: workout.sampleCount,
             lapCount: workout.laps.count,
-            lastSampleElapsed: workout.sampleCount,
+            lastSampleElapsed: workout.samples.last?.elapsedSeconds ?? 0,
             lastLapNumber: workout.laps.count
         )
     }
@@ -139,8 +151,15 @@ struct SummaryView: View {
         if stravaService.isBusy {
             ProgressView()
                 .tint(.white)
+        } else if lastUploadedActivityID != nil {
+            Image(systemName: "checkmark.circle.fill")
         } else {
-            Image(systemName: lastUploadedActivityID != nil ? "checkmark.circle.fill" : "paperplane.fill")
+            Image("BrandStrava")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: toolbarBrandIconSize, height: toolbarBrandIconSize)
+                .accessibilityHidden(true)
         }
     }
 
@@ -166,6 +185,17 @@ struct SummaryView: View {
         }
         .disabled(stravaService.isBusy)
         .tint(stravaButtonTint)
+        .accessibilityLabel(stravaToolbarAccessibilityLabel)
+    }
+
+    private var stravaToolbarAccessibilityLabel: String {
+        if stravaService.isBusy {
+            return "Uploading to Strava"
+        }
+        if lastUploadedActivityID != nil {
+            return "Open in Strava"
+        }
+        return "Upload to Strava"
     }
 
     private func invalidatePreparedData(resetHero: Bool = false) {
@@ -181,43 +211,87 @@ struct SummaryView: View {
         cachedHRZoneBuckets = nil
     }
 
-    private func prepareData(force: Bool = false) {
+    private func prepareData(force: Bool = false) async {
         guard let workout else {
             invalidatePreparedData(resetHero: true)
             return
         }
         guard let signature = workoutDataSignature else { return }
         guard force || preparedSignature != signature else { return }
-        let samples = workout.samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds }
-        cachedSortedSamples = samples
-        cachedSortedLaps = workout.laps.sorted { $0.lapNumber < $1.lapNumber }
 
-        let totalSamples = max(samples.count, 1)
-        var powerCounts = Dictionary(uniqueKeysWithValues: PowerZone.zones.map { ($0.id, 0) })
-        var hrCounts = Dictionary(uniqueKeysWithValues: HeartRateZone.zones.map { ($0.id, 0) })
-        var hrSampleCount = 0
+        // Keep sorting laps on main actor, as LapSplit is a @Model
+        let sortedLaps = workout.laps.sorted { $0.lapNumber < $1.lapNumber }
+        cachedSortedLaps = sortedLaps
 
-        for sample in samples {
-            let zone = PowerZone.zone(for: sample.power)
-            powerCounts[zone.id, default: 0] += 1
-            if sample.heartRate > 0 {
-                let hrZone = HeartRateZone.zone(for: sample.heartRate)
-                hrCounts[hrZone.id, default: 0] += 1
-                hrSampleCount += 1
+        let modelContainer = modelContext.container
+        let workoutID = workout.persistentModelID
+        let ftp = PowerZone.ftp
+        let hrMax = HeartRateZone.maxHR
+        let hrResting = HeartRateZone.restingHR
+        let hrUsesKarvonen = HeartRateZone.hasRestingHR
+
+        let (sortedSamplesData, pc, hc, hrCount) = await Task.detached(priority: .userInitiated) {
+            let bgContext = ModelContext(modelContainer)
+            guard let bgWorkout = bgContext.model(for: workoutID) as? Workout else {
+                return ([WorkoutSampleData](), [Int: Int](), [Int: Int](), 0)
             }
+
+            // sort samples and convert to Sendable WorkoutSampleData
+            let sortedS = bgWorkout.samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds }
+            let sData = sortedS.map { s in
+                WorkoutSampleData(
+                    timestamp: s.timestamp,
+                    elapsedSeconds: s.elapsedSeconds,
+                    power: s.power,
+                    cadence: s.cadence,
+                    speed: s.speed,
+                    heartRate: s.heartRate
+                )
+            }
+
+            // compute zones
+            var pc = [Int: Int]()
+            var hc = [Int: Int]()
+            var hrCount = 0
+
+            for s in sData {
+                pc[SummaryZoneAggregation.powerZoneId(forWatts: s.power, ftp: ftp), default: 0] += 1
+                if s.heartRate > 0 {
+                    hc[
+                        SummaryZoneAggregation.heartRateZoneId(
+                            forBpm: s.heartRate,
+                            maxHR: hrMax,
+                            restingHR: hrResting,
+                            usesKarvonen: hrUsesKarvonen
+                        ), default: 0
+                    ] += 1
+                    hrCount += 1
+                }
+            }
+
+            return (sData, pc, hc, hrCount)
+        }.value
+
+        // Discard if the workout changed while we were computing
+        guard workoutDataSignature == signature else { return }
+
+        let total = max(sortedSamplesData.count, 1)
+        let computedPowerBuckets = PowerZone.zones.map { zone in
+            let count = pc[zone.id, default: 0]
+            return ZoneBucket(zone: zone, seconds: count, percent: Double(count) / Double(total))
         }
 
-        cachedZoneBuckets = PowerZone.zones.map { zone in
-            let count = powerCounts[zone.id, default: 0]
-            return ZoneBucket(zone: zone, seconds: count, percent: Double(count) / Double(totalSamples))
+        let totalHR = max(hrCount, 1)
+        let computedHRBuckets = HeartRateZone.zones.map { zone in
+            let count = hc[zone.id, default: 0]
+            return HRZoneBucket(
+                zone: zone, seconds: count, percent: Double(count) / Double(totalHR)
+            )
         }
 
-        let totalHR = max(hrSampleCount, 1)
-        cachedHRZoneBuckets = HeartRateZone.zones.map { zone in
-            let count = hrCounts[zone.id, default: 0]
-            return HRZoneBucket(zone: zone, seconds: count, percent: Double(count) / Double(totalHR))
-        }
-
+        cachedSortedSamples = sortedSamplesData
+        cachedZoneBuckets = computedPowerBuckets
+        cachedHRZoneBuckets = computedHRBuckets
         preparedSignature = signature
         dataReady = true
     }
@@ -232,16 +306,26 @@ struct SummaryView: View {
                 if dataReady {
                     SummaryContentView(
                         workout: workout,
+                        linkedPlanDay: PlanLibrary.resolveDay(
+                            planID: workout.planID,
+                            dayID: workout.planDayID,
+                            modelContext: modelContext
+                        ),
                         sortedLaps: sortedLaps,
                         zoneBuckets: zoneBuckets,
                         hrZoneBuckets: hrZoneBuckets,
+                        dominantZone: dominantZone,
                         heroAppeared: heroAppeared,
                         showExportModal: $showExportModal,
                         selectedExportFormat: $selectedExportFormat,
                         lastExportedFileURL: lastExportedFileURL,
-                        onDone: { navigationPath = NavigationPath() },
-                        onDelete: { showDeleteConfirmation = true },
-                        onOpenStravaUploader: { openStravaUploader() }
+                        onDone: popFromSummary,
+                        onDelete: deleteWorkout,
+                        onOpenStravaUploader: openStravaUploader,
+                        onRepeatStructuredWorkout: repeatStructuredWorkout,
+                        customRepeatTemplateID: customRepeatTemplateID,
+                        onSaveAsCustomWorkout: saveWorkoutAsCustomTemplate,
+                        onRepeatSavedCustomWorkout: repeatSavedCustomWorkout
                     )
                     .environment(\.isWideSummary, isWide)
                 } else {
@@ -264,8 +348,25 @@ struct SummaryView: View {
                 Button {
                     shareToInstagramStories()
                 } label: {
-                    Image(systemName: "camera.fill")
+                    if isPreparingInstagramStory {
+                        ProgressView()
+                            .tint(
+                                Color(
+                                    red: 0.88,
+                                    green: 0.19,
+                                    blue: 0.42
+                                )
+                            )
+                    } else {
+                        Image("BrandInstagram")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: toolbarBrandIconSize, height: toolbarBrandIconSize)
+                            .accessibilityHidden(true)
+                    }
                 }
+                .disabled(isPreparingInstagramStory)
                 .tint(
                     Color(
                         red: 0.88,
@@ -273,7 +374,14 @@ struct SummaryView: View {
                         blue: 0.42
                     )
                 )
-                .accessibilityLabel("Share to Instagram Stories")
+                .accessibilityLabel(
+                    isPreparingInstagramStory
+                        ? "Preparing Instagram story" : "Share to Instagram Stories"
+                )
+                .accessibilityAddTraits(
+                    isPreparingInstagramStory
+                        ? AccessibilityTraits.updatesFrequently : AccessibilityTraits()
+                )
             }
 
             ToolbarItem(placement: .topBarTrailing) {
@@ -286,6 +394,27 @@ struct SummaryView: View {
         }
         .sheet(isPresented: $showShareSheet) {
             ShareSheet(activityItems: shareItems)
+        }
+        .confirmationDialog(
+            "Summary image",
+            isPresented: $showStravaPhotoFallbackDialog,
+            titleVisibility: .visible
+        ) {
+            Button("Share image") {
+                if let img = stravaPhotoFallbackImage {
+                    shareItems = [img]
+                    showShareSheet = true
+                }
+                stravaPhotoFallbackImage = nil
+            }
+            Button("Not now", role: .cancel) {
+                stravaPhotoFallbackImage = nil
+            }
+        } message: {
+            Text(
+                "Strava doesn’t allow third-party apps to attach photos to activities automatically. "
+                    + "Share this image to save it to Photos or add it from the Strava app."
+            )
         }
         .sheet(isPresented: $showExportModal) {
             if let workout {
@@ -301,18 +430,23 @@ struct SummaryView: View {
             Button("Delete", role: .destructive) { deleteWorkout() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This ride and all recorded data will be permanently removed. If this was a training plan workout, it will be un-marked as completed.")
+            Text(
+                "This ride and all recorded data will be permanently removed. If this was a training plan workout, it will be un-marked as completed."
+            )
         }
-        .alert("Error", isPresented: Binding(
-            get: { actionError != nil },
-            set: { if !$0 { actionError = nil } }
-        )) {
+        .alert(
+            "Error",
+            isPresented: Binding(
+                get: { actionError != nil },
+                set: { if !$0 { actionError = nil } }
+            )
+        ) {
             Button("OK") { actionError = nil }
         } message: {
             Text(actionError ?? "")
         }
         .task {
-            prepareData()
+            await prepareData()
             withAnimation(.easeOut(duration: 0.6).delay(0.1)) {
                 heroAppeared = true
             }
@@ -322,7 +456,7 @@ struct SummaryView: View {
                 invalidatePreparedData(resetHero: true)
                 return
             }
-            prepareData(force: true)
+            Task { await prepareData(force: true) }
         }
         .onChange(of: workouts) { _, newWorkouts in
             // After deletion the filtered @Query is empty — drop cached graphs so we never
@@ -370,7 +504,8 @@ struct SummaryView: View {
     }
 
     private var hrZoneBuckets: [HRZoneBucket] {
-        cachedHRZoneBuckets ?? HeartRateZone.zones.map { HRZoneBucket(zone: $0, seconds: 0, percent: 0) }
+        cachedHRZoneBuckets
+            ?? HeartRateZone.zones.map { HRZoneBucket(zone: $0, seconds: 0, percent: 0) }
     }
 
     // MARK: - Export Sheet
@@ -429,7 +564,9 @@ struct SummaryView: View {
                         showDescriptionPreview: $showDescriptionPreview,
                         stravaStatus: stravaStatus,
                         lastUploadedActivityID: lastUploadedActivityID,
-                        onResetDescriptionTemplate: { applyStravaDescriptionTemplate(for: workout) },
+                        onResetDescriptionTemplate: {
+                            applyStravaDescriptionTemplate(for: workout)
+                        },
                         onUpload: { uploadToStrava(workout: workout) },
                         onOpenActivity: { openStravaActivity() }
                     )
@@ -488,7 +625,8 @@ struct SummaryView: View {
 
     private func openStravaActivity() {
         guard let activityID = lastUploadedActivityID,
-              let url = URL(string: "https://www.strava.com/activities/\(activityID)") else { return }
+            let url = URL(string: "https://www.strava.com/activities/\(activityID)")
+        else { return }
         openURL(url)
     }
 
@@ -503,7 +641,9 @@ struct SummaryView: View {
     private func stravaPersonalRecordNames(for workout: Workout) -> [String] {
         let samples = sortedSamples
         guard !samples.isEmpty else { return [] }
-        guard let mmp = PersonalRecords.computeMMP(for: samples) else { return [] }
+        guard let mmp = PersonalRecords.computeMMP(for: samples, workoutID: workout.id) else {
+            return []
+        }
         return PersonalRecords.shared.newPRs(for: mmp).map { "\($0.duration.label) @ \($0.watts)W" }
     }
 
@@ -512,7 +652,8 @@ struct SummaryView: View {
         stravaDescriptionInput = StravaPostBuilder.buildDescription(
             workout: workout,
             routeName: workout.savedRouteName ?? routeManager.routeName,
-            totalElevationGain: workout.elevationGain > 0 ? workout.elevationGain : routeManager.totalElevationGain,
+            totalElevationGain: workout.elevationGain > 0
+                ? workout.elevationGain : routeManager.totalElevationGain,
             dominantPowerZone: PowerZone.zone(for: Int(workout.avgPower.rounded())),
             zoneBuckets: zoneBuckets,
             personalRecordNames: stravaPersonalRecordNames(for: workout),
@@ -531,6 +672,64 @@ struct SummaryView: View {
         )
         applyStravaDescriptionTemplate(for: workout)
         stravaDraftWorkoutID = workout.id
+    }
+
+    /// Uploads the summary card JPEG when **Attach summary card** is on. Used after a fresh Strava upload
+    /// and when an existing activity is matched (duplicate check) so both paths get a photo.
+    private func uploadStravaSummaryCardPhoto(
+        activityID: Int,
+        workout: Workout,
+        duplicateRecovery: Bool
+    ) async {
+        guard uploadPhotoAfterUpload else { return }
+
+        let dominantZone = PowerZone.zone(for: Int(workout.avgPower.rounded()))
+        let buckets = zoneBuckets.map { (zone: $0.zone, percent: $0.percent) }
+        let samples = sortedSamples
+        let mmp = PersonalRecords.computeMMP(for: samples, workoutID: workout.id)
+        let prFlags: [NewPRFlag] = mmp.map { PersonalRecords.shared.newPRs(for: $0) } ?? []
+
+        guard
+            let image = StravaPostBuilder.renderSummaryCard(
+                workout: workout,
+                dominantZone: dominantZone,
+                sortedSamples: samples,
+                mmp: mmp,
+                newPRFlags: prFlags,
+                routeName: workout.savedRouteName ?? routeManager.routeName,
+                totalElevationGain: workout.elevationGain > 0
+                    ? workout.elevationGain : routeManager.totalElevationGain,
+                zoneBuckets: buckets
+            )
+        else {
+            summaryLogger.warning("Summary card render returned nil; Strava photo skipped.")
+            return
+        }
+
+        do {
+            _ = try await stravaService.uploadActivityPhoto(activityID: activityID, image: image)
+            stravaStatus =
+                duplicateRecovery
+                ? "Ride was already on Strava — summary card added."
+                : "Uploaded to Strava with summary card! 🎉"
+        } catch {
+            if let stravaErr = error as? StravaService.StravaError,
+                case .photoUploadNotSupportedByAPI = stravaErr
+            {
+                stravaStatus =
+                    duplicateRecovery
+                    ? "Updated on Strava — API won’t attach photos automatically."
+                    : "Uploaded to Strava — API won’t attach photos automatically."
+                stravaPhotoFallbackImage = image
+                showStravaPhotoFallbackDialog = true
+                return
+            }
+            summaryLogger.warning("Photo upload failed (non-fatal): \(error.localizedDescription)")
+            stravaStatus =
+                duplicateRecovery
+                ? "Details updated (photo failed)"
+                : "Uploaded to Strava! 🎉 (photo failed)"
+        }
     }
 
     private func uploadToStrava(workout: Workout) {
@@ -556,9 +755,11 @@ struct SummaryView: View {
                 lastExportedFileURL = fileURL
                 ensureStravaDraft(for: workout)
                 let resolvedTitle = stravaTitleInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                let resolvedDescription = stravaDescriptionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                let resolvedDescription = stravaDescriptionInput.trimmingCharacters(
+                    in: .whitespacesAndNewlines)
                 let prNames = stravaPersonalRecordNames(for: workout)
-                let rideName = resolvedTitle.isEmpty
+                let rideName =
+                    resolvedTitle.isEmpty
                     ? StravaPostBuilder.buildTitle(
                         workout: workout,
                         routeName: workout.savedRouteName ?? routeManager.routeName,
@@ -566,11 +767,13 @@ struct SummaryView: View {
                         personalRecordNames: prNames
                     )
                     : resolvedTitle
-                let rideDescription = resolvedDescription.isEmpty
+                let rideDescription =
+                    resolvedDescription.isEmpty
                     ? StravaPostBuilder.buildDescription(
                         workout: workout,
                         routeName: workout.savedRouteName ?? routeManager.routeName,
-                        totalElevationGain: workout.elevationGain > 0 ? workout.elevationGain : routeManager.totalElevationGain,
+                        totalElevationGain: workout.elevationGain > 0
+                            ? workout.elevationGain : routeManager.totalElevationGain,
                         dominantPowerZone: PowerZone.zone(for: Int(workout.avgPower.rounded())),
                         zoneBuckets: self.zoneBuckets.map { (zone: $0.zone, percent: $0.percent) },
                         personalRecordNames: prNames,
@@ -578,7 +781,8 @@ struct SummaryView: View {
                     )
                     : resolvedDescription
 
-                let sportType = uploadAsVirtualRide
+                let sportType =
+                    uploadAsVirtualRide
                     ? StravaService.SportType.virtualRide
                     : StravaService.SportType.outdoorRide
 
@@ -601,16 +805,58 @@ struct SummaryView: View {
                         commute: commuteStravaUpload,
                         gearID: gearID
                     )
+                    // Same path as a re-tap upload: attach summary card when opted in (was missing before).
+                    await uploadStravaSummaryCardPhoto(
+                        activityID: existingID,
+                        workout: workout,
+                        duplicateRecovery: true
+                    )
                 } else {
                     let stravaExternalID = StravaService.externalIDForWorkout(workoutID: workout.id)
-                    let result = try await stravaService.uploadWorkoutFile(
-                        fileURL: fileURL,
-                        name: rideName,
-                        description: rideDescription,
-                        trainer: uploadAsVirtualRide,
-                        externalID: stravaExternalID,
-                        sportType: sportType
-                    )
+                    let result: StravaService.UploadResult
+                    do {
+                        result = try await stravaService.uploadWorkoutFile(
+                            fileURL: fileURL,
+                            name: rideName,
+                            description: rideDescription,
+                            trainer: uploadAsVirtualRide,
+                            externalID: stravaExternalID,
+                            sportType: sportType
+                        )
+                    } catch {
+                        if case StravaService.StravaError.uploadTimedOut = error {
+                            if let recoveredId = await stravaService.checkForDuplicate(
+                                startDate: workout.startDate,
+                                elapsedSeconds: Int(workout.duration)
+                            ) {
+                                lastUploadedActivityID = recoveredId
+                                do {
+                                    try await stravaService.updateActivity(
+                                        activityID: recoveredId,
+                                        name: rideName,
+                                        description: rideDescription,
+                                        sportType: sportType,
+                                        trainer: uploadAsVirtualRide,
+                                        commute: commuteStravaUpload,
+                                        gearID: gearID
+                                    )
+                                    stravaStatus =
+                                        "Strava was slow — activity found on your profile."
+                                    await uploadStravaSummaryCardPhoto(
+                                        activityID: recoveredId,
+                                        workout: workout,
+                                        duplicateRecovery: true
+                                    )
+                                } catch {
+                                    actionError =
+                                        (error as? LocalizedError)?.errorDescription
+                                        ?? error.localizedDescription
+                                }
+                                return
+                            }
+                        }
+                        throw error
+                    }
                     if let activityID = result.activityID {
                         lastUploadedActivityID = activityID
 
@@ -631,74 +877,58 @@ struct SummaryView: View {
                             stravaStatus = "Uploaded to Strava! 🎉"
                         }
 
-                        // Attach the summary card photo if opted in
-                        if uploadPhotoAfterUpload {
-                            let dominantZone = PowerZone.zone(for: Int(workout.avgPower.rounded()))
-                            let buckets = self.zoneBuckets.map { (zone: $0.zone, percent: $0.percent) }
-                            let samples = self.sortedSamples
-                            let mmp = PersonalRecords.computeMMP(for: samples)
-                            let prFlags: [NewPRFlag] = mmp.map { PersonalRecords.shared.newPRs(for: $0) } ?? []
-                            if let image =  StravaPostBuilder.renderSummaryCard(
-                                workout: workout,
-                                dominantZone: dominantZone,
-                                sortedSamples: samples,
-                                mmp: mmp,
-                                newPRFlags: prFlags,
-                                routeName: workout.savedRouteName ?? routeManager.routeName,
-                                totalElevationGain: workout.elevationGain > 0 ? workout.elevationGain : routeManager.totalElevationGain,
-                                zoneBuckets: buckets
-                            ) {
-                                do {
-                                    _ = try await stravaService.uploadActivityPhoto(
-                                        activityID: activityID,
-                                        image: image
-                                    )
-                                    stravaStatus = result.isDuplicateRecovery
-                                        ? "Ride was already on Strava — summary card added."
-                                        : "Uploaded to Strava with summary card! 🎉"
-                                } catch {
-                                    summaryLogger.warning("Photo upload failed (non-fatal): \(error.localizedDescription)")
-                                    stravaStatus = result.isDuplicateRecovery
-                                        ? "Details updated (photo failed)"
-                                        : "Uploaded to Strava! 🎉 (photo failed)"
-                                }
-                            }
-                        }
+                        await uploadStravaSummaryCardPhoto(
+                            activityID: activityID,
+                            workout: workout,
+                            duplicateRecovery: result.isDuplicateRecovery
+                        )
                     } else {
                         stravaStatus = "Upload queued: \(result.status)"
                     }
                 }
             } catch {
-                actionError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                actionError =
+                    (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
     }
 
-    /// Renders the Strava-style summary card into a 9:16 story image and opens Instagram’s composer (no login).
+    /// Renders the Instagram story card into a 9:16 image and opens Instagram’s composer (no login).
     /// Falls back to the system share sheet if Instagram isn’t installed.
     private func shareToInstagramStories() {
+        guard let workout else { return }
+        guard dataReady else { return }
+        guard !isPreparingInstagramStory else { return }
+
+        isPreparingInstagramStory = true
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
         Task { @MainActor in
-            guard let workout else { return }
-            guard dataReady else { return }
+            await Task.yield()
+            defer { isPreparingInstagramStory = false }
+
             let dominantZone = PowerZone.zone(for: Int(workout.avgPower.rounded()))
-            let buckets = zoneBuckets.map { (zone: $0.zone, percent: $0.percent) }
-            let samples = sortedSamples
-            let mmp = PersonalRecords.computeMMP(for: samples)
-            let prFlags: [NewPRFlag] = mmp.map { PersonalRecords.shared.newPRs(for: $0) } ?? []
-            guard let storyImage = InstagramStoryShare.renderWorkoutStory(
+            let storyImage = InstagramStoryShare.renderWorkoutStory(
                 workout: workout,
                 dominantZone: dominantZone,
-                sortedSamples: samples,
-                mmp: mmp,
-                newPRFlags: prFlags,
                 routeName: workout.savedRouteName ?? routeManager.routeName,
-                totalElevationGain: workout.elevationGain > 0 ? workout.elevationGain : routeManager.totalElevationGain,
-                zoneBuckets: buckets
-            ) else {
-                actionError = "Couldn’t create a story image for this ride."
+                totalElevationGain: workout.elevationGain > 0
+                    ? workout.elevationGain : routeManager.totalElevationGain
+            )
+
+            if InstagramStoryShare.facebookAppID == nil {
+                actionError =
+                    "Instagram Stories needs a Meta/Facebook App ID. Set FACEBOOK_APP_ID in Xcode build settings (see Meta: Sharing to Stories)."
                 return
             }
-            if InstagramStoryShare.presentStories(with: storyImage) {
+
+            let pngData = await Task.detached(priority: .userInitiated) {
+                storyImage.pngData()
+            }.value
+
+            guard let pngData else { return }
+
+            if InstagramStoryShare.presentStories(withPNGData: pngData) {
                 return
             }
             shareItems = [storyImage]
@@ -707,6 +937,26 @@ struct SummaryView: View {
     }
 
     // MARK: - Delete & Navigation
+
+    private func saveWorkoutAsCustomTemplate() {
+        guard let w = workout else { return }
+        guard w.planDayID == nil else { return }
+        guard let tpl = WorkoutCustomTemplateBuilder.makeTemplate(from: w) else { return }
+        modelContext.insert(tpl)
+        do {
+            try modelContext.save()
+            customRepeatTemplateID = tpl.id
+            HapticManager.shared.onboardingStepCompleted()
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func repeatSavedCustomWorkout() {
+        guard let id = customRepeatTemplateID else { return }
+        navigationPath = NavigationPath()
+        navigationPath.append(AppRoute.customWorkoutRide(templateID: id))
+    }
 
     private func deleteWorkout() {
         guard let workout else { return }
@@ -717,10 +967,26 @@ struct SummaryView: View {
         modelContext.delete(workout)
         do {
             try modelContext.save()
+            MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
             navigationPath = NavigationPath()
         } catch {
             actionError = error.localizedDescription
         }
+    }
+
+    private func repeatStructuredWorkout() {
+        guard let w = workout else { return }
+        guard let did = w.planDayID else { return }
+        if did.hasPrefix("custom-") {
+            let rest = String(did.dropFirst("custom-".count))
+            guard let tid = UUID(uuidString: rest) else { return }
+            navigationPath = NavigationPath()
+            navigationPath.append(AppRoute.customWorkoutRide(templateID: tid))
+            return
+        }
+        guard let pid = w.planID else { return }
+        navigationPath = NavigationPath()
+        navigationPath.append(AppRoute.connectionForPlan(planID: pid, dayID: did))
     }
 
     private func popFromSummary() {
@@ -734,52 +1000,212 @@ struct SummaryView: View {
 
 // MARK: - Summary Content View
 
+// MARK: - Summary Content View
+
 private struct SummaryContentView: View {
     let workout: Workout
+    let linkedPlanDay: PlanDay?
     let sortedLaps: [LapSplit]
     let zoneBuckets: [ZoneBucket]
     let hrZoneBuckets: [HRZoneBucket]
+    let dominantZone: PowerZone
     let heroAppeared: Bool
+
     @Binding var showExportModal: Bool
     @Binding var selectedExportFormat: ExportFormat
     let lastExportedFileURL: URL?
     @Environment(StravaService.self) private var stravaService
+    @Environment(HealthKitManager.self) private var healthKitManager
     @Environment(RouteManager.self) private var routeManager
     let onDone: () -> Void
     let onDelete: () -> Void
     let onOpenStravaUploader: () -> Void
+    let onRepeatStructuredWorkout: () -> Void
+    let customRepeatTemplateID: UUID?
+    let onSaveAsCustomWorkout: () -> Void
+    let onRepeatSavedCustomWorkout: () -> Void
 
     @Environment(\.isWideSummary) private var isWide
+
+    // RPE Slider State
+    @State private var rpeRating: Int = 5
 
     private var hPad: CGFloat { isWide ? 40 : 20 }
     private var cardGap: CGFloat { isWide ? 16 : 12 }
 
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                if !workout.isValid {
-                    SummaryInvalidBanner()
-                        .padding(.horizontal, hPad)
-                        .padding(.top, 16)
+    private var isOutdoor: Bool {
+        return workout.savedRouteName != nil || workout.elevationGain > 0
+    }
+
+    private func plannedVsActualCard(plan: PlanDay) -> some View {
+        let ftp = PowerZone.ftp
+        let plannedTSS = plan.estimatedPlannedTSS(ftp: ftp)
+        let plannedMin = plan.durationMinutes
+        let actualTSS = workout.tss
+        let actualMin = max(1, Int(workout.duration / 60))
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("PLANNED VS ACTUAL")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white.opacity(0.35))
+                .tracking(1.1)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Plan")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.4))
+                    Text(plan.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(2)
+                    Text(
+                        plannedMin > 0
+                            ? "\(plannedMin) min · est. TSS \(Int(plannedTSS))"
+                            : "Est. TSS \(Int(plannedTSS))"
+                    )
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.45))
                 }
-
-                SummaryHeroHeader(
-                    workout: workout,
-                    heroAppeared: heroAppeared,
-                    onDone: onDone,
-                    onDelete: onDelete
-                )
-                .padding(.horizontal, hPad)
-                .padding(.top, isWide ? 28 : 20)
-
-                if isWide {
-                    wideBody
-                } else {
-                    compactBody
+                Spacer(minLength: 12)
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("This ride")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.4))
+                    Text("\(actualMin) min")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(AppColor.mango)
+                    Text("TSS \(Int(actualTSS))")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.5))
                 }
             }
-            .frame(maxWidth: isWide ? 1100 : .infinity)
-            .frame(maxWidth: .infinity)
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private func appleHealthSyncWarningBanner(message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "heart.text.square.fill")
+                .font(.system(size: 18))
+                .foregroundStyle(Color.orange.opacity(0.95))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Apple Health sync")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text(message)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Color.orange.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.25), lineWidth: 1)
+        )
+    }
+
+    var body: some View {
+        ZStack {
+            ScrollView {
+                VStack(spacing: 0) {
+                    if !workout.isValid {
+                        SummaryInvalidBanner()
+                            .padding(.horizontal, hPad)
+                            .padding(.top, 16)
+                    }
+
+                    if healthKitManager.syncWorkoutsToAppleHealth,
+                        let hkErr = healthKitManager.workoutSyncToHealthLastError
+                    {
+                        appleHealthSyncWarningBanner(message: hkErr)
+                            .padding(.horizontal, hPad)
+                            .padding(.top, 12)
+                    }
+
+                    SummaryHeroHeader(
+                        workout: workout,
+                        heroAppeared: heroAppeared,
+                        onDone: onDone,
+                        onDelete: onDelete
+                    )
+                    .padding(.horizontal, hPad)
+                    .padding(.top, isWide ? 28 : 20)
+
+                    if let plan = linkedPlanDay {
+                        plannedVsActualCard(plan: plan)
+                            .padding(.horizontal, hPad)
+                            .padding(.top, 12)
+                    }
+
+                    if workout.planDayID == nil, workout.status == .completed, workout.isValid {
+                        VStack(spacing: 10) {
+                            Button(action: onSaveAsCustomWorkout) {
+                                Label("Save as custom workout", systemImage: "square.and.arrow.down.on.square")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.9))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(Color.white.opacity(0.08))
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+
+                            if customRepeatTemplateID != nil {
+                                Button(action: onRepeatSavedCustomWorkout) {
+                                    Label("Repeat saved workout", systemImage: "arrow.clockwise.circle.fill")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(.black)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(AppColor.mango)
+                                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, hPad)
+                        .padding(.top, 12)
+                    }
+
+                    if workout.planDayID != nil {
+                        Button(action: onRepeatStructuredWorkout) {
+                            Label("Repeat this session", systemImage: "arrow.clockwise.circle.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.black)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(AppColor.mango)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, hPad)
+                        .padding(.top, 12)
+                    }
+
+                    if isWide {
+                        wideBody
+                    } else {
+                        compactBody
+                    }
+
+                    // RPE Rating Section
+                    rpeSliderSection
+                        .padding(.horizontal, hPad)
+                        .padding(.vertical, 24)
+                }
+                .frame(maxWidth: isWide ? 1100 : .infinity)
+                .frame(maxWidth: .infinity)
+            }
         }
     }
 
@@ -808,7 +1234,7 @@ private struct SummaryContentView: View {
             }
             .padding(.horizontal, hPad)
             .padding(.top, 24)
-            .padding(.bottom, 40)
+            .padding(.bottom, 20)
         }
     }
 
@@ -828,8 +1254,14 @@ private struct SummaryContentView: View {
                         SummaryBodyMetrics(workout: workout)
                     }
                 }
-                SummaryMetricCard(title: "MOVEMENT", icon: "figure.indoor.cycle") {
-                    SummaryMovementMetrics(workout: workout)
+                if isOutdoor {
+                    SummaryMetricCard(title: "ENVIRONMENT", icon: "leaf.fill") {
+                        SummaryEnvironmentMetrics(workout: workout)
+                    }
+                } else {
+                    SummaryMetricCard(title: "MOVEMENT", icon: "figure.indoor.cycle") {
+                        SummaryMovementMetrics(workout: workout)
+                    }
                 }
             }
             .padding(.horizontal, hPad)
@@ -850,8 +1282,6 @@ private struct SummaryContentView: View {
                     .padding(.horizontal, hPad)
                     .padding(.top, 16)
             }
-
-            Spacer().frame(height: 40)
         }
     }
 
@@ -874,13 +1304,54 @@ private struct SummaryContentView: View {
                     SummaryBodyMetrics(workout: workout)
                 }
             }
-            SummaryMetricCard(title: "MOVEMENT", icon: "figure.indoor.cycle") {
-                SummaryMovementMetrics(workout: workout)
+            if isOutdoor {
+                SummaryMetricCard(title: "ENVIRONMENT", icon: "leaf.fill") {
+                    SummaryEnvironmentMetrics(workout: workout)
+                }
+            } else {
+                SummaryMetricCard(title: "MOVEMENT", icon: "figure.indoor.cycle") {
+                    SummaryMovementMetrics(workout: workout)
+                }
             }
             if workout.avgHR <= 0 {
                 Color.clear.frame(maxWidth: .infinity)
             }
         }
+    }
+
+    // MARK: RPE Slider Section
+
+    private var rpeSliderSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SummarySectionHeader(title: "RATE OF PERCEIVED EXERTION", icon: "brain")
+
+            HStack {
+                Text("Easy")
+                    .font(.caption.bold())
+                    .foregroundStyle(.white.opacity(0.5))
+
+                Slider(
+                    value: Binding(
+                        get: { Double(rpeRating) },
+                        set: { rpeRating = Int($0) }
+                    ),
+                    in: 1...10,
+                    step: 1
+                )
+                .tint(Color.accentColor)
+
+                Text("Max")
+                    .font(.caption.bold())
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+
+            Text("Score: \(rpeRating) / 10")
+                .font(.system(.subheadline, design: .monospaced, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(isWide ? 20 : 14)
+        .cardStyle(cornerRadius: isWide ? 20 : 16)
     }
 }
 
@@ -924,10 +1395,33 @@ private struct SummaryHeroHeader: View {
 
     @Environment(\.isWideSummary) private var isWide
 
+    private var oneSentenceInsight: String {
+        if workout.duration > 3600 {
+            return "Epic session! You burned \(Int(estimateCalories)) kcal."
+        } else if workout.avgPower > 200 {
+            return "Intense session! Way to push those watts."
+        } else {
+            return "Great job getting it done today!"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: isWide ? 18 : 14) {
-            planDayBadge
-            savedOutdoorRouteBadge
+            HStack {
+                planDayBadge
+                savedOutdoorRouteBadge
+
+                // Optional PR Badge
+                if workout.avgPower > 250 {  // Adjust your condition for Personal Record
+                    Text("🏆 PR")
+                        .font(.system(size: isWide ? 13 : 11, weight: .bold))
+                        .padding(.horizontal, isWide ? 12 : 8)
+                        .padding(.vertical, isWide ? 6 : 4)
+                        .background(AppColor.yellow.opacity(0.1))
+                        .foregroundStyle(AppColor.yellow)
+                        .clipShape(Capsule())
+                }
+            }
 
             HStack(spacing: 8) {
                 Text(workout.startDate, format: .dateTime.weekday(.wide).month(.wide).day())
@@ -945,6 +1439,8 @@ private struct SummaryHeroHeader: View {
                 Text(AppFormat.duration(workout.duration))
                     .font(.system(size: isWide ? 64 : 48, weight: .heavy, design: .monospaced))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
 
                 Spacer()
 
@@ -974,6 +1470,14 @@ private struct SummaryHeroHeader: View {
             .offset(y: heroAppeared ? 0 : 12)
 
             heroStatsRow
+
+            // Humanized insight
+            Text(oneSentenceInsight)
+                .font(.system(size: isWide ? 16 : 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.8))
+                .padding(.top, 4)
+                .opacity(heroAppeared ? 1 : 0)
+                .offset(y: heroAppeared ? 0 : 8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1033,9 +1537,12 @@ private struct SummaryHeroHeader: View {
 
     private var heroStatsRow: some View {
         HStack(spacing: 0) {
-            heroStat(value: String(format: "%.1f", workout.distance / 1000), unit: "km", icon: "road.lanes")
+            heroStat(
+                value: String(format: "%.1f", workout.distance / 1000), unit: "km",
+                icon: "road.lanes")
             Spacer()
-            heroStat(value: String(format: "%.0f", estimateCalories), unit: "kcal", icon: "flame.fill")
+            heroStat(
+                value: String(format: "%.0f", estimateCalories), unit: "kcal", icon: "flame.fill")
             Spacer()
             heroStat(value: "\(Int(workout.avgPower))", unit: "W", icon: "bolt.fill")
             if workout.avgHR > 0 {
@@ -1056,6 +1563,8 @@ private struct SummaryHeroHeader: View {
                 Text(value)
                     .font(.system(size: isWide ? 22 : 17, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
                 Text(unit)
                     .font(.system(size: isWide ? 11 : 9))
                     .foregroundStyle(.white.opacity(0.3))
@@ -1064,7 +1573,9 @@ private struct SummaryHeroHeader: View {
     }
 
     private var estimateCalories: Double {
-        Double(WorkoutExportService.estimateCalories(avgPower: workout.avgPower, durationSeconds: workout.duration))
+        Double(
+            WorkoutExportService.estimateCalories(
+                avgPower: workout.avgPower, durationSeconds: workout.duration))
     }
 }
 
@@ -1089,7 +1600,7 @@ private struct SummarySectionHeader: View {
     }
 }
 
-// MARK: - Metric Card Container
+// MARK: - Metric Card Container (Glassmorphic)
 
 private struct SummaryMetricCard<Content: View>: View {
     let title: String
@@ -1127,7 +1638,7 @@ private struct MetricValueView: View {
                 .minimumScaleFactor(0.6)
             if !unit.isEmpty {
                 Text(unit)
-                    .font(.system(size: size * 0.5))
+                    .font(.system(size: size * 0.5, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.25))
             }
         }
@@ -1170,7 +1681,9 @@ private struct SummaryPowerMetrics: View {
 
         VStack(spacing: isWide ? 14 : 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                MetricValueView(value: "\(Int(workout.avgPower))", unit: "W", color: avgZone.color, size: primarySize)
+                MetricValueView(
+                    value: "\(Int(workout.avgPower))", unit: "W", color: avgZone.color,
+                    size: primarySize)
                 Text(avgZone.name)
                     .font(.system(size: isWide ? 13 : 11, weight: .semibold))
                     .foregroundStyle(avgZone.color.opacity(0.7))
@@ -1183,11 +1696,15 @@ private struct SummaryPowerMetrics: View {
             }
 
             HStack(spacing: 0) {
-                MetricCellView(label: "MAX", value: "\(workout.maxPower)", unit: "W", color: maxZone.color)
+                MetricCellView(
+                    label: "MAX", value: "\(workout.maxPower)", unit: "W", color: maxZone.color)
                 Spacer()
-                MetricCellView(label: "NP", value: "\(Int(workout.normalizedPower))", unit: "W", color: AppColor.yellow)
+                MetricCellView(
+                    label: "NP", value: "\(Int(workout.normalizedPower))", unit: "W",
+                    color: AppColor.yellow)
                 Spacer()
-                MetricCellView(label: "ZONE", value: "Z\(avgZone.id)", unit: "", color: avgZone.color)
+                MetricCellView(
+                    label: "ZONE", value: "Z\(avgZone.id)", unit: "", color: avgZone.color)
             }
         }
     }
@@ -1208,22 +1725,32 @@ private struct SummaryEffortMetrics: View {
 
         VStack(spacing: isWide ? 14 : 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                MetricValueView(value: String(format: "%.0f", workout.tss), unit: "TSS", color: tColor, size: primarySize)
+                MetricValueView(
+                    value: String(format: "%.0f", workout.tss), unit: "TSS", color: tColor,
+                    size: primarySize)
                 Spacer()
             }
 
             HStack(spacing: 0) {
-                MetricCellView(label: "IF", value: String(format: "%.2f", workout.intensityFactor), unit: "", color: ifColor)
+                MetricCellView(
+                    label: "IF", value: String(format: "%.2f", workout.intensityFactor), unit: "",
+                    color: ifColor)
                 Spacer()
-                MetricCellView(label: "KCAL", value: String(format: "%.0f", estimateCalories), unit: "", color: AppColor.orange)
+                MetricCellView(
+                    label: "KCAL", value: String(format: "%.0f", estimateCalories), unit: "",
+                    color: AppColor.orange)
                 Spacer()
-                MetricCellView(label: "VI", value: String(format: "%.2f", vi), unit: "", color: .white.opacity(0.7))
+                MetricCellView(
+                    label: "VI", value: String(format: "%.2f", vi), unit: "",
+                    color: .white.opacity(0.7))
             }
         }
     }
 
     private var estimateCalories: Double {
-        Double(WorkoutExportService.estimateCalories(avgPower: workout.avgPower, durationSeconds: workout.duration))
+        Double(
+            WorkoutExportService.estimateCalories(
+                avgPower: workout.avgPower, durationSeconds: workout.duration))
     }
 
     private func intensityColor(_ ifValue: Double) -> Color {
@@ -1254,7 +1781,9 @@ private struct SummaryBodyMetrics: View {
 
         VStack(spacing: isWide ? 14 : 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                MetricValueView(value: "\(Int(workout.avgHR))", unit: "bpm", color: AppColor.heartRate, size: primarySize)
+                MetricValueView(
+                    value: "\(Int(workout.avgHR))", unit: "bpm", color: AppColor.heartRate,
+                    size: primarySize)
                 Text(hrZone.name)
                     .font(.system(size: isWide ? 13 : 11, weight: .semibold))
                     .foregroundStyle(hrZone.color.opacity(0.7))
@@ -1267,11 +1796,15 @@ private struct SummaryBodyMetrics: View {
             }
 
             HStack(spacing: 0) {
-                MetricCellView(label: "MAX HR", value: "\(workout.maxHR)", unit: "bpm", color: AppColor.red)
+                MetricCellView(
+                    label: "MAX HR", value: "\(workout.maxHR)", unit: "bpm", color: AppColor.red)
                 Spacer()
-                MetricCellView(label: "HR ZONE", value: "Z\(hrZone.id)", unit: "", color: hrZone.color)
+                MetricCellView(
+                    label: "HR ZONE", value: "Z\(hrZone.id)", unit: "", color: hrZone.color)
                 Spacer()
-                MetricCellView(label: "RANGE", value: "\(workout.maxHR - Int(workout.avgHR))", unit: "Δ", color: .white.opacity(0.5))
+                MetricCellView(
+                    label: "RANGE", value: "\(workout.maxHR - Int(workout.avgHR))", unit: "Δ",
+                    color: .white.opacity(0.5))
             }
         }
     }
@@ -1305,7 +1838,10 @@ private struct SummaryMovementMetrics: View {
                                 .font(.system(size: isWide ? 10 : 8))
                                 .foregroundStyle(AppColor.success.opacity(0.8))
                             Text("+\(Int(workout.elevationGain.rounded())) m")
-                                .font(.system(size: isWide ? 16 : 13, weight: .bold, design: .monospaced))
+                                .font(
+                                    .system(
+                                        size: isWide ? 16 : 13, weight: .bold, design: .monospaced)
+                                )
                                 .foregroundStyle(AppColor.success)
                         }
                         Text("elevation")
@@ -1316,9 +1852,13 @@ private struct SummaryMovementMetrics: View {
             }
 
             HStack(spacing: 0) {
-                MetricCellView(label: "CADENCE", value: "\(Int(workout.avgCadence))", unit: "rpm", color: AppColor.blue)
+                MetricCellView(
+                    label: "CADENCE", value: "\(Int(workout.avgCadence))", unit: "rpm",
+                    color: AppColor.blue)
                 Spacer()
-                MetricCellView(label: "SPEED", value: String(format: "%.1f", workout.avgSpeed), unit: "km/h", color: .white.opacity(0.7))
+                MetricCellView(
+                    label: "SPEED", value: String(format: "%.1f", workout.displayAverageSpeedKmh),
+                    unit: "km/h", color: .white.opacity(0.7))
             }
         }
     }
@@ -1497,18 +2037,26 @@ private struct SummaryLapTable: View {
         return VStack(spacing: 0) {
             HStack(spacing: 0) {
                 lapText("\(lap.lapNumber)", width: colNum, alignment: .leading, isHeader: false)
-                lapText(AppFormat.duration(lap.duration), width: colDur, alignment: .leading, isHeader: false)
+                lapText(
+                    AppFormat.duration(lap.duration), width: colDur, alignment: .leading,
+                    isHeader: false)
                 Text("\(Int(lap.avgPower))W")
                     .font(.system(size: isWide ? 13 : 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(lapZone.color)
                     .frame(width: colAvg, alignment: .trailing)
                 lapText("\(lap.maxPower)W", width: colMax, alignment: .trailing, isHeader: false)
                 if hasHR {
-                    lapText(lap.avgHR > 0 ? "\(Int(lap.avgHR))" : "—", width: colHR, alignment: .trailing, isHeader: false)
+                    lapText(
+                        lap.avgHR > 0 ? "\(Int(lap.avgHR))" : "—", width: colHR,
+                        alignment: .trailing, isHeader: false)
                 }
-                lapText(String(format: "%.2fkm", lap.distance / 1000), width: colDist, alignment: .trailing, isHeader: false)
+                lapText(
+                    String(format: "%.2fkm", lap.distance / 1000), width: colDist,
+                    alignment: .trailing, isHeader: false)
                 if isWide {
-                    lapText(lap.avgCadence > 0 ? "\(Int(lap.avgCadence))" : "—", width: colCad, alignment: .trailing, isHeader: false)
+                    lapText(
+                        lap.avgCadence > 0 ? "\(Int(lap.avgCadence))" : "—", width: colCad,
+                        alignment: .trailing, isHeader: false)
                 }
                 Spacer(minLength: 0)
             }
@@ -1522,9 +2070,15 @@ private struct SummaryLapTable: View {
         }
     }
 
-    private func lapText(_ text: String, width: CGFloat, alignment: Alignment, isHeader: Bool) -> some View {
+    private func lapText(_ text: String, width: CGFloat, alignment: Alignment, isHeader: Bool)
+        -> some View
+    {
         Text(text)
-            .font(.system(size: isHeader ? (isWide ? 10 : 9) : (isWide ? 13 : 11), weight: isHeader ? .bold : .regular, design: .monospaced))
+            .font(
+                .system(
+                    size: isHeader ? (isWide ? 10 : 9) : (isWide ? 13 : 11),
+                    weight: isHeader ? .bold : .regular, design: .monospaced)
+            )
             .foregroundStyle(isHeader ? .white.opacity(0.3) : .white.opacity(0.75))
             .frame(width: width, alignment: alignment)
             .lineLimit(1)
@@ -1565,6 +2119,27 @@ private struct ExportSheetContent: View {
             }
             .foregroundStyle(.white.opacity(0.3))
 
+            if selectedExportFormat == .gpx, routeManager.hasRoute,
+                RidePreferences.shared.gpxPrivacyTrimStartMeters > 0
+                    || RidePreferences.shared.gpxPrivacyTrimEndMeters > 0
+            {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "lock.shield.lefthalf.filled")
+                        .font(.system(size: 12))
+                        .foregroundStyle(AppColor.success.opacity(0.85))
+                    Text(
+                        "Privacy trim is on in Settings → Data, privacy & alerts. The GPX shortens the start and end of the track."
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.42))
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.white.opacity(0.04))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
             // Export button
             exportActionButton
 
@@ -1584,15 +2159,21 @@ private struct ExportSheetContent: View {
     }
 
     private func formatButton(for format: ExportFormat) -> some View {
-        let canExport = WorkoutExportService.canExport(format: format, hasRoute: routeManager.hasRoute)
+        let canExport = WorkoutExportService.canExport(
+            format: format, hasRoute: routeManager.hasRoute)
         let isSelected = selectedExportFormat == format
-        let titleColor: Color = isSelected ? .white : (canExport ? .white.opacity(0.5) : .white.opacity(0.2))
+        let titleColor: Color =
+            isSelected ? .white : (canExport ? .white.opacity(0.5) : .white.opacity(0.2))
         let subtitleColor: Color = isSelected ? .white.opacity(0.5) : .white.opacity(0.2)
         let bgColor: Color = isSelected ? AppColor.orange.opacity(0.12) : Color.white.opacity(0.02)
-        let borderColor: Color = isSelected ? AppColor.orange.opacity(0.3) : Color.white.opacity(0.05)
-        let subtitleText: String = format == .tcx ? "Indoor" : (routeManager.hasRoute ? "Route loaded" : "Needs route")
+        let borderColor: Color =
+            isSelected ? AppColor.orange.opacity(0.3) : Color.white.opacity(0.05)
+        let subtitleText: String =
+            format == .tcx ? "Indoor" : (routeManager.hasRoute ? "Route loaded" : "Needs route")
 
-        return Button { selectedExportFormat = format } label: {
+        return Button {
+            selectedExportFormat = format
+        } label: {
             VStack(spacing: 3) {
                 HStack(spacing: 4) {
                     Image(systemName: format == .tcx ? "doc.text" : "map")
@@ -1620,12 +2201,15 @@ private struct ExportSheetContent: View {
     }
 
     private var exportActionButton: some View {
-        let canExportSelected = WorkoutExportService.canExport(format: selectedExportFormat, hasRoute: routeManager.hasRoute)
+        let canExportSelected = WorkoutExportService.canExport(
+            format: selectedExportFormat, hasRoute: routeManager.hasRoute)
         let fgColor: Color = canExportSelected ? .white : .white.opacity(0.3)
         let bgOpacity: Double = canExportSelected ? 0.12 : 0.04
         let borderOpacity: Double = canExportSelected ? 0.3 : 0.1
 
-        return Button { onExport(selectedExportFormat) } label: {
+        return Button {
+            onExport(selectedExportFormat)
+        } label: {
             HStack(spacing: 6) {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 13))
@@ -1760,11 +2344,14 @@ private struct StravaSheetContentView: View {
                             .padding(.bottom, 8)
 
                         ScrollView {
-                            Text(stravaDescriptionInput.isEmpty ? "No description" : stravaDescriptionInput)
-                                .font(.system(size: 14))
-                                .foregroundStyle(.white.opacity(0.8))
-                                .lineSpacing(4)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(
+                                stravaDescriptionInput.isEmpty
+                                    ? "No description" : stravaDescriptionInput
+                            )
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .lineSpacing(4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .frame(minHeight: 72, maxHeight: 220)
                     }
@@ -1812,13 +2399,17 @@ private struct StravaSheetContentView: View {
                             .foregroundStyle(.white.opacity(0.4))
                     }
                 } else if stravaBikesLoadFailed {
-                    Text("Could not load bikes. Disconnect and connect Strava again to grant profile access.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.35))
+                    Text(
+                        "Could not load bikes. Disconnect and connect Strava again to grant profile access."
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.35))
                 } else if stravaBikes.isEmpty {
-                    Text("No bikes on your Strava profile. Add a bike on strava.com to link activities.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.35))
+                    Text(
+                        "No bikes on your Strava profile. Add a bike on strava.com to link activities."
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.35))
                 } else {
                     Picker("Bike", selection: $preferredGearID) {
                         Text("None").tag("")
@@ -1921,7 +2512,9 @@ private struct StravaSheetContentView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "photo.fill")
                         .font(.system(size: 12))
-                        .foregroundStyle(uploadPhotoAfterUpload ? AppColor.mango.opacity(0.7) : .white.opacity(0.3))
+                        .foregroundStyle(
+                            uploadPhotoAfterUpload
+                                ? AppColor.mango.opacity(0.7) : .white.opacity(0.3))
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Attach summary card")
                             .font(.system(size: 12))
@@ -1943,7 +2536,9 @@ private struct StravaSheetContentView: View {
         statusMessages
     }
 
-    private func fieldBlock<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
+    private func fieldBlock<Content: View>(label: String, @ViewBuilder content: () -> Content)
+        -> some View
+    {
         VStack(alignment: .leading, spacing: 5) {
             Text(label)
                 .font(.system(size: 8, weight: .heavy))
@@ -2046,5 +2641,24 @@ private struct HRZoneBucket: Identifiable {
         workoutID: UUID(),
         navigationPath: .constant(NavigationPath())
     )
-    .modelContainer(for: [Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self], inMemory: true)
+    .modelContainer(
+        for: [Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self],
+        inMemory: true)
+}
+
+private struct SummaryEnvironmentMetrics: View {
+    let workout: Workout
+    @Environment(\.isWideSummary) private var isWide
+
+    var body: some View {
+        HStack {
+            MetricCellView(
+                label: "ELEVATION",
+                value: String(format: "%.0f", workout.elevationGain),
+                unit: "m",
+                color: .orange
+            )
+            Spacer()
+        }
+    }
 }

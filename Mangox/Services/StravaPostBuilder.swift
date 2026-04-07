@@ -138,7 +138,9 @@ enum StravaPostBuilder {
 
         var auxParts: [String] = []
         if workout.avgCadence > 0 { auxParts.append("\(Int(workout.avgCadence.rounded())) rpm avg cadence") }
-        if workout.avgSpeed > 0 { auxParts.append(String(format: "%.1f km/h avg speed", workout.avgSpeed)) }
+        if workout.displayAverageSpeedKmh > 0 {
+            auxParts.append(String(format: "%.1f km/h avg speed", workout.displayAverageSpeedKmh))
+        }
         if workout.avgHR > 0 { auxParts.append("HR \(Int(workout.avgHR.rounded())) / \(workout.maxHR) bpm") }
         if totalElevationGain > 0 { auxParts.append("+\(Int(totalElevationGain.rounded())) m elevation") }
         if !auxParts.isEmpty {
@@ -165,6 +167,19 @@ enum StravaPostBuilder {
         if !personalRecordNames.isEmpty {
             let prList = personalRecordNames.map { "• \($0)" }.joined(separator: "\n")
             sections.append("Personal records:\n\(prList)")
+        }
+
+        let outdoorish =
+            (workout.savedRouteName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            || workout.elevationGain > 1
+        let outdoorBike = RidePreferences.shared.primaryOutdoorBikeName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let indoorBike = RidePreferences.shared.primaryIndoorBikeName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if outdoorish, !outdoorBike.isEmpty {
+            sections.append("Bike: \(outdoorBike)")
+        } else if !outdoorish, !indoorBike.isEmpty {
+            sections.append("Trainer / bike: \(indoorBike)")
         }
 
         var footerParts: [String] = []
@@ -200,7 +215,7 @@ enum StravaPostBuilder {
     static func renderSummaryCard(
         workout: Workout,
         dominantZone: PowerZone,
-        sortedSamples: [WorkoutSample] = [],
+        sortedSamples: [WorkoutSampleData] = [],
         mmp: WorkoutMMP? = nil,
         newPRFlags: [NewPRFlag] = [],
         routeName: String? = nil,
@@ -389,7 +404,7 @@ private extension StravaPostBuilder {
         size: CGSize,
         workout: Workout,
         dominantZone: PowerZone,
-        sortedSamples: [WorkoutSample],
+        sortedSamples: [WorkoutSampleData],
         mmp: WorkoutMMP?,
         newPRFlags: [NewPRFlag],
         routeName: String?,
@@ -637,7 +652,7 @@ private extension StravaPostBuilder {
     /// Draws a filled area power trace. Each segment is filled with the zone
     /// color corresponding to that power value, creating a natural zone-colored gradient effect.
     static func drawPowerSparkline(
-        samples: [WorkoutSample],
+        samples: [WorkoutSampleData],
         ftp: Int,
         in rect: CGRect,
         cgCtx: CGContext
@@ -748,7 +763,7 @@ private extension StravaPostBuilder {
     }
 
     static func drawSparklineAxisLabels(
-        samples: [WorkoutSample],
+        samples: [WorkoutSampleData],
         avgPower: Double,
         in rect: CGRect
     ) {

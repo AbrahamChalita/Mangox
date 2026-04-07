@@ -58,9 +58,9 @@ final class WorkoutManager {
     // MARK: - Public State
 
     var state: RecordingState = .idle
-    var elapsedSeconds: Int = 0               // active time only
+    var elapsedSeconds: Int = 0  // active time only
     var currentLapNumber: Int = 1
-    var powerHistory: [PowerSample] = []      // last 60 points for chart
+    var powerHistory: [PowerSample] = []  // last 60 points for chart
 
     // MARK: - Goal Progress (updated every second, read by DashboardView)
 
@@ -91,13 +91,13 @@ final class WorkoutManager {
     var displayPower: Int = 0
 
     // Live performance metrics (updated every second)
-    var liveNP: Double = 0                   // Normalized Power (W)
-    var liveIF: Double = 0                   // Intensity Factor (NP / FTP)
-    var liveTSS: Double = 0                  // Training Stress Score (running)
-    var kilojoules: Double = 0               // Cumulative energy output (kJ)
-    var efficiencyFactor: Double = 0         // Watts per heartbeat (W/bpm)
-    var variabilityIndex: Double = 0         // NP / avg power (1.0 = perfectly steady)
-    var averagePower: Double = 0             // Session average power (W)
+    var liveNP: Double = 0  // Normalized Power (W)
+    var liveIF: Double = 0  // Intensity Factor (NP / FTP)
+    var liveTSS: Double = 0  // Training Stress Score (running)
+    var kilojoules: Double = 0  // Cumulative energy output (kJ)
+    var efficiencyFactor: Double = 0  // Watts per heartbeat (W/bpm)
+    var variabilityIndex: Double = 0  // NP / avg power (1.0 = perfectly steady)
+    var averagePower: Double = 0  // Session average power (W)
 
     // MARK: - Pre-formatted strings (updated once per second, avoids String(format:) in view body)
 
@@ -109,8 +109,8 @@ final class WorkoutManager {
     /// Current speed in km/h (raw, not formatted). Used by Live Activity.
     var metricsSpeed: Double = 0
     var formattedCadence: String = "0"
-    var formattedDistanceKm: String = "0.00"       // 2 dp — phone compact grid
-    var formattedDistanceKm1dp: String = "0.0"     // 1 dp — iPad metrics grid
+    var formattedDistanceKm: String = "0.00"  // 2 dp — phone compact grid
+    var formattedDistanceKm1dp: String = "0.0"  // 1 dp — iPad metrics grid
     var formattedEnergyKJ: String = "0"
     var formattedLiveNP: String = "0"
     var formattedLiveIF: String = "0.00"
@@ -137,8 +137,27 @@ final class WorkoutManager {
     private var peakBuffers: [Int: RingBuffer<Int>] = [:]
     /// Best average seen so far for each window.
     private var peakBests: [Int: (watts: Int, atElapsed: Int)] = [:]
-    var currentGrade: Double = 0             // current road grade % from GPX
-    var currentElevation: Double?            // current elevation in meters from GPX
+    var currentGrade: Double = 0  // current road grade % from GPX
+    var currentElevation: Double?  // current elevation in meters from GPX
+
+    // MARK: - Modifiers
+
+    /// Scales the ERG target power mid-ride (e.g., 0.90 for 90%).
+    var intensityMultiplier: Double = 1.0 {
+        didSet {
+            if let base = baseErgTarget, case .erg = trainerMode {
+                setERGMode(watts: base)
+            }
+        }
+    }
+
+    /// Scales the simulated route grade (Zwift "Trainer Difficulty", default 0.5 = 50%).
+    var routeDifficultyScale: Double = 0.5 {
+        didSet {
+            // Force a grade update on the next tick to apply the new difficulty immediately
+            lastSentGrade = nil
+        }
+    }
 
     /// Called every second with (elapsedSeconds, displayPower).
     /// Used by `GuidedSessionManager` to drive interval tracking.
@@ -154,7 +173,7 @@ final class WorkoutManager {
     var currentLapAvgPower: Double = 0
     var previousLapAvgPower: Double = 0
     var previousLapDuration: TimeInterval = 0
-    var activeDistance: Double = 0            // meters since workout start
+    var activeDistance: Double = 0  // meters since workout start
 
     // Workout reference
     var workout: Workout?
@@ -164,7 +183,7 @@ final class WorkoutManager {
     private var timer: Timer?
 
     // Goal tracking (previous-tick values for edge detection)
-    private var prevGoalDistance: Double = 0   // km
+    private var prevGoalDistance: Double = 0  // km
     private var prevGoalMinutes: Double = 0
     private var prevGoalKJ: Double = 0
     private var prevGoalTSS: Double = 0
@@ -238,6 +257,9 @@ final class WorkoutManager {
     private var pendingSamples: [PendingWorkoutSample] = []
     private let sampleBatchSize = 5
 
+    /// Base unscaled ERG target.
+    private var baseErgTarget: Int?
+
     /// Active ERG target (if set externally, e.g. by a training plan or manual control).
     private var ergTarget: Int?
 
@@ -255,7 +277,9 @@ final class WorkoutManager {
 
     // MARK: - Lifecycle
 
-    func configure(bleManager: BLEManager, modelContext: ModelContext, dataSource: DataSourceCoordinator? = nil) {
+    func configure(
+        bleManager: BLEManager, modelContext: ModelContext, dataSource: DataSourceCoordinator? = nil
+    ) {
         self.bleManager = bleManager
         self.modelContext = modelContext
         self.dataSource = dataSource
@@ -286,10 +310,12 @@ final class WorkoutManager {
     /// Enable ERG mode — trainer locks to a fixed wattage.
     func setERGMode(watts: Int) {
         guard let bleManager else { return }
-        ergTarget = watts
+        baseErgTarget = watts
+        let scaledWatts = Int(Double(watts) * intensityMultiplier)
+        ergTarget = scaledWatts
         Task { @MainActor in
             do {
-                try await bleManager.ftmsControl.setTargetPower(watts: watts)
+                try await bleManager.ftmsControl.setTargetPower(watts: scaledWatts)
                 self.trainerMode = bleManager.ftmsControl.activeMode
                 workoutLogger.info("ERG mode set: \(watts)W")
             } catch FTMSControlError.superseded {
@@ -304,6 +330,7 @@ final class WorkoutManager {
     /// Enable simulation mode with a specific grade (manual override, not from GPX).
     func setSimulationMode(grade: Double) {
         guard let bleManager else { return }
+        baseErgTarget = nil
         ergTarget = nil
         Task { @MainActor in
             do {
@@ -324,6 +351,7 @@ final class WorkoutManager {
     /// Enable resistance mode — raw resistance level (0.0–1.0).
     func setResistanceMode(level: Double) {
         guard let bleManager else { return }
+        baseErgTarget = nil
         ergTarget = nil
         Task { @MainActor in
             do {
@@ -342,6 +370,7 @@ final class WorkoutManager {
     /// Return to free ride — release trainer control.
     func releaseTrainerControl() {
         guard let bleManager else { return }
+        baseErgTarget = nil
         ergTarget = nil
         lastSentGrade = nil
         Task { @MainActor in
@@ -362,10 +391,12 @@ final class WorkoutManager {
             workoutLogger.warning("Trainer does not support simulation mode")
             return
         }
+        baseErgTarget = nil
         ergTarget = nil
         // The first grade update will be sent on the next tick
         lastSentGrade = nil
-        workoutLogger.info("Route simulation enabled — grade updates every \(self.gradeUpdateInterval)s")
+        workoutLogger.info(
+            "Route simulation enabled — grade updates every \(self.gradeUpdateInterval)s")
     }
 
     /// Stop route simulation without releasing control entirely.
@@ -411,8 +442,9 @@ final class WorkoutManager {
         // Route simulation is only auto-started on free rides (no guided session).
         // Guided sessions control the trainer mode themselves step-by-step.
         if onTick == nil,
-           routeManager?.hasRoute == true,
-           bleManager?.ftmsControl.supportsSimulation == true {
+            routeManager?.hasRoute == true,
+            bleManager?.ftmsControl.supportsSimulation == true
+        {
             startRouteSimulation()
         }
     }
@@ -454,18 +486,50 @@ final class WorkoutManager {
     func endWorkout() {
         stopTimer()
         flushPendingSamples()
-        do { try modelContext?.save() } catch { workoutLogger.error("endWorkout pre-summary save failed: \(error)") }
+        do { try modelContext?.save() } catch {
+            workoutLogger.error("endWorkout pre-summary save failed: \(error)")
+        }
         finishCurrentLap()
         calculateSummary()
+        detectNewFTP()
 
-        workout?.endDate = .now
-        workout?.status = .completed
         state = .finished
+        workout?.status = .completed
+        workout?.endDate = Date()
 
         // Release trainer control on workout end
         releaseTrainerControl()
 
-        do { try modelContext?.save() } catch { workoutLogger.error("endWorkout final save failed: \(error)") }
+        do {
+            try modelContext?.save()
+            MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
+        } catch {
+            workoutLogger.error("endWorkout final save failed: \(error)")
+        }
+
+        Task { await RideLiveActivityManager.shared.endLiveActivity() }
+    }
+
+    private func detectNewFTP() {
+        let currentFTP = PowerZone.ftp
+        var suggestedFTP: Int?
+
+        // 20-minute peak is the standard measure (95% rule)
+        if let peak20m = peakBests[1200], peak20m.watts > 0 {
+            let est = Int((Double(peak20m.watts) * 0.95).rounded())
+            if est > currentFTP { suggestedFTP = est }
+        }
+        // 5-minute peak fallback (~85% rule)
+        else if let peak5m = peakBests[300], peak5m.watts > 0 {
+            let est = Int((Double(peak5m.watts) * 0.85).rounded())
+            if est > currentFTP { suggestedFTP = est }
+        }
+
+        if let newFTP = suggestedFTP, newFTP > currentFTP {
+            workoutLogger.info("Detected new FTP: \(newFTP)W (was \(currentFTP)W)")
+            PowerZone.ftp = newFTP
+            FTPRefreshTrigger.shared.bump()
+        }
     }
 
     /// Stops the workout without saving — deletes the workout and all related
@@ -478,7 +542,12 @@ final class WorkoutManager {
         // Delete the workout (cascade rule removes samples & laps automatically).
         if let workout {
             modelContext?.delete(workout)
-            do { try modelContext?.save() } catch { workoutLogger.error("discardWorkout save failed: \(error)") }
+            do {
+                try modelContext?.save()
+                MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
+            } catch {
+                workoutLogger.error("discardWorkout save failed: \(error)")
+            }
         }
 
         workout = nil
@@ -486,6 +555,8 @@ final class WorkoutManager {
 
         resetAccumulators()
         resetLapAccumulators()
+
+        Task { await RideLiveActivityManager.shared.endLiveActivity() }
     }
 
     // MARK: - Event-Driven BLE Ingestion
@@ -543,24 +614,32 @@ final class WorkoutManager {
 
     /// Averages all high-rate trainer power samples from the past second into one 1 Hz value,
     /// feeds ring buffers, records to SwiftData, and updates UI-facing state.
+    private var lastSampleDate: Date?
+
     private func processSecondSample() {
         elapsedSeconds += 1
 
-        // Detect BLE dropout: if no packets arrived for 3+ seconds, skip recording
-        // to avoid corrupting NP/TSS/kJ with zero-power samples.
-        let isDataStale: Bool
+        let now = Date()
+        let dt = lastSampleDate.map { now.timeIntervalSince($0) } ?? 1.0
+        lastSampleDate = now
+
+        // Detect BLE dropout: if no packets arrived for > 5 seconds, it's a dropout.
+        // During short gaps (< 5s), carry over the last power.
+        let timeSinceLastPacket: TimeInterval
         if let lastPacket = bleManager?.lastPacketReceived {
-            isDataStale = Date().timeIntervalSince(lastPacket) > 3.0
+            timeSinceLastPacket = Date().timeIntervalSince(lastPacket)
         } else {
-            isDataStale = true
+            timeSinceLastPacket = .infinity
         }
+        let isDropout = timeSinceLastPacket > 5.0
+        let isShortGap = timeSinceLastPacket > 1.0 && timeSinceLastPacket <= 5.0
 
         // Average the accumulated BLE readings for this 1-second window.
         let avgPower: Int
         let maxPowerThisSecond: Int
         if powerAccumulator.isEmpty {
-            avgPower = isDataStale ? lastNonZeroPower : 0
-            maxPowerThisSecond = isDataStale ? lastNonZeroPower : 0
+            avgPower = isShortGap ? lastNonZeroPower : 0
+            maxPowerThisSecond = isShortGap ? lastNonZeroPower : 0
         } else {
             avgPower = TrainerPowerMetrics.meanInt(samples: powerAccumulator)
             maxPowerThisSecond = TrainerPowerMetrics.peakInt(samples: powerAccumulator)
@@ -568,12 +647,11 @@ final class WorkoutManager {
         }
 
         let avgCadence: Double
-        if cadenceAccumulator.isEmpty {
+        let validCadence = cadenceAccumulator.filter { $0 > 0 }
+        if validCadence.isEmpty {
             avgCadence = 0
         } else {
-            var sum = 0.0
-            for v in cadenceAccumulator { sum += v }
-            avgCadence = sum / Double(cadenceAccumulator.count)
+            avgCadence = validCadence.reduce(0.0, +) / Double(validCadence.count)
         }
 
         let avgSpeed: Double
@@ -588,8 +666,9 @@ final class WorkoutManager {
         // When using computed speed source in free ride, derive speed from power
         let effectiveSpeed: Double
         if RidePreferences.shared.indoorSpeedSource == .computed,
-           trainerMode == .none,
-           avgPower > 0 {
+            trainerMode == .none,
+            avgPower > 0
+        {
             effectiveSpeed = PowerToSpeed.speedKmh(
                 fromPower: Double(avgPower),
                 totalMassKg: RidePreferences.shared.totalMassKg,
@@ -601,13 +680,12 @@ final class WorkoutManager {
         }
 
         let avgHR: Int
-        if hrAccumulator.isEmpty {
+        let validHR = hrAccumulator.filter { $0 > 0 }
+        if validHR.isEmpty {
             // Prefer unified coordinator snapshot (WiFi sessions), then BLE.
             avgHR = lastIngestedMetrics?.heartRate ?? bleManager?.metrics.heartRate ?? 0
         } else {
-            var sum = 0
-            for v in hrAccumulator { sum += v }
-            avgHR = sum / hrAccumulator.count
+            avgHR = validHR.reduce(0, +) / validHR.count
         }
 
         // Use latest FTMS distance if reported this window
@@ -623,7 +701,7 @@ final class WorkoutManager {
         latestDistanceInWindow = nil
 
         // Distance: integrate speed as fallback when FTMS omits total distance
-        integratedDistance += max(0, effectiveSpeed) / 3.6 // km/h → m/s at 1 Hz
+        integratedDistance += (max(0, effectiveSpeed) / 3.6) * dt  // km/h → m/s
         let sensorDistance = max(0, lastRecordedDistance - workoutStartDistance)
         activeDistance = max(sensorDistance, integratedDistance)
 
@@ -631,7 +709,8 @@ final class WorkoutManager {
         // Skip until trainerEngageDelay has passed so the trainer doesn't
         // immediately lock resistance before the rider is ready.
         if elapsedSeconds >= trainerEngageDelay,
-           elapsedSeconds % gradeUpdateInterval == 0 {
+            elapsedSeconds % gradeUpdateInterval == 0
+        {
             updateRouteGrade()
         }
 
@@ -651,9 +730,17 @@ final class WorkoutManager {
             displayPower = Int(avg3s.rounded())
         }
 
+        // ERG Visual Smoothing: If in ERG mode and actual power is close to target (±5%), lock display to target.
+        if case .erg = trainerMode, let target = ergTarget {
+            let threshold = max(5.0, Double(target) * 0.05)  // at least 5W or 5%
+            if abs(Double(displayPower) - Double(target)) <= threshold {
+                displayPower = target
+            }
+        }
+
         // Peak power curve: use peak sample within each second so short spikes count toward best 5s/15s/…
         // Skip BLE dropout zeros — they would artificially deflate best-effort averages.
-        if !isDataStale || maxPowerThisSecond > 0 {
+        if !isDropout || maxPowerThisSecond > 0 {
             for (window, var buffer) in peakBuffers {
                 buffer.append(maxPowerThisSecond)
                 peakBuffers[window] = buffer
@@ -669,7 +756,8 @@ final class WorkoutManager {
         // Rebuild peakPowers array from current bests
         peakPowers = Self.peakWindows.compactMap { window in
             guard let best = peakBests[window] else { return nil }
-            return PeakPowerEntry(windowSeconds: window, watts: best.watts, atElapsed: best.atElapsed)
+            return PeakPowerEntry(
+                windowSeconds: window, watts: best.watts, atElapsed: best.atElapsed)
         }
 
         // NP: 30s rolling average → 4th power (direct multiplication avoids libm overhead)
@@ -683,7 +771,7 @@ final class WorkoutManager {
         // --- Live performance metrics ---
         totalPowerSum += Double(avgPower)
         totalPowerSampleCount += 1
-        totalEnergyJoules += Double(avgPower) // 1 watt × 1 second = 1 joule
+        totalEnergyJoules += Double(avgPower)  // 1 watt × 1 second = 1 joule
 
         // Average power
         averagePower = totalPowerSum / Double(totalPowerSampleCount)
@@ -727,20 +815,25 @@ final class WorkoutManager {
         }
         if elapsedSeconds % 30 == 0 {
             flushPendingSamples()
-            try? modelContext?.save()
+            do { try modelContext?.save() } catch {
+                workoutLogger.error("periodic save failed: \(error)")
+            }
         }
 
-        // Power history for chart (keep last 60)
+        // Power history for chart (keep last 60) — use circular buffer approach for O(1) amortized
+        // Instead of removing elements one-by-one (O(n)), we rebuild the array when it grows
+        // past 2x capacity to maintain O(1) amortized time.
         powerHistory.append(PowerSample(elapsed: elapsedSeconds, power: avgPower))
-        if powerHistory.count > 60 {
+        if powerHistory.count > 120 {
+            // Batch compaction: O(n) but only every 60 insertions → amortized O(1)
             powerHistory.removeFirst(powerHistory.count - 60)
         }
         // Update running chart max — no need to scan the array in the view
         let chartPeak = max(avgPower, maxPowerThisSecond)
         if chartPeak > powerHistoryMax {
             powerHistoryMax = chartPeak
-        } else if powerHistory.count < 60 || chartPeak < powerHistoryMax {
-            // Only rescan when old max may have been evicted
+        } else if powerHistory.count == 60 || chartPeak < powerHistoryMax {
+            // Only rescan when at capacity or old max may have been evicted
             // Use max(by:) to avoid allocating an intermediate [Int] array
             powerHistoryMax = max(powerHistory.max(by: { $0.power < $1.power })?.power ?? 100, 100)
         }
@@ -756,12 +849,14 @@ final class WorkoutManager {
         currentLapDuration = TimeInterval(lapElapsedSeconds)
         currentLapAvgPower = lapSampleCount > 0 ? lapPowerSum / Double(lapSampleCount) : 0
 
-        // Auto-pause: trigger after N consecutive seconds of zero averaged power
-        if avgPower == 0 {
+        // Auto-pause: trigger after N consecutive seconds of zero averaged power AND zero speed
+        if avgPower == 0 && effectiveSpeed < 1.0 {
             zeroPowerSeconds += 1
             if zeroPowerSeconds >= autoPauseThreshold {
                 flushPendingSamples()
-                try? modelContext?.save()
+                do { try modelContext?.save() } catch {
+                    workoutLogger.error("auto-pause save failed: \(error)")
+                }
                 state = .autoPaused
                 stopTimer()
                 workout?.status = .paused
@@ -778,16 +873,16 @@ final class WorkoutManager {
         metricsSpeed = effectiveSpeed
         formattedSpeed = String(format: "%.1f", effectiveSpeed)
         formattedCadence = "\(Int(avgCadence.rounded()))"
-        formattedDistanceKm  = String(format: "%.2f", activeDistance / 1000)
+        formattedDistanceKm = String(format: "%.2f", activeDistance / 1000)
         formattedDistanceKm1dp = String(format: "%.1f", activeDistance / 1000)
-        formattedEnergyKJ    = String(format: "%.0f", kilojoules)
-        formattedLiveNP      = String(format: "%.0f", liveNP)
-        formattedLiveIF      = String(format: "%.2f", liveIF)
-        formattedLiveTSS     = String(format: "%.0f", liveTSS)
-        formattedVI          = String(format: "%.2f", variabilityIndex)
-        formattedAvgPower    = String(format: "%.0f", averagePower)
-        formattedEfficiency  = String(format: "%.2f", efficiencyFactor)
-        formattedKJ          = String(format: "%.0f", kilojoules)
+        formattedEnergyKJ = String(format: "%.0f", kilojoules)
+        formattedLiveNP = String(format: "%.0f", liveNP)
+        formattedLiveIF = String(format: "%.2f", liveIF)
+        formattedLiveTSS = String(format: "%.0f", liveTSS)
+        formattedVI = String(format: "%.2f", variabilityIndex)
+        formattedAvgPower = String(format: "%.0f", averagePower)
+        formattedEfficiency = String(format: "%.2f", efficiencyFactor)
+        formattedKJ = String(format: "%.0f", kilojoules)
 
         // --- Ride Goals ---
         updateGoalProgress(avgCadence: avgCadence)
@@ -807,7 +902,7 @@ final class WorkoutManager {
         }
 
         let elapsedMinutes = Double(elapsedSeconds) / 60.0
-        let distanceKm     = activeDistance / 1000.0
+        let distanceKm = activeDistance / 1000.0
 
         var newProgress: [String: Double] = [:]
         var completed: [RideGoal] = []
@@ -823,10 +918,10 @@ final class WorkoutManager {
 
             // Edge detection: did we just cross the finish line this tick?
             let fired = goal.justCompleted(
-                current: distanceKm,     elapsedMinutes: elapsedMinutes,
-                kj: kilojoules,          tss: liveTSS,
+                current: distanceKm, elapsedMinutes: elapsedMinutes,
+                kj: kilojoules, tss: liveTSS,
                 previous: prevGoalDistance, prevMinutes: prevGoalMinutes,
-                prevKj: prevGoalKJ,      prevTss: prevGoalTSS
+                prevKj: prevGoalKJ, prevTss: prevGoalTSS
             )
             if fired {
                 completed.append(goal)
@@ -838,9 +933,9 @@ final class WorkoutManager {
 
         // Advance prev-tick snapshot
         prevGoalDistance = activeDistance / 1000.0
-        prevGoalMinutes  = Double(elapsedSeconds) / 60.0
-        prevGoalKJ       = kilojoules
-        prevGoalTSS      = liveTSS
+        prevGoalMinutes = Double(elapsedSeconds) / 60.0
+        prevGoalKJ = kilojoules
+        prevGoalTSS = liveTSS
     }
 
     private func updateCadenceWarning(avgCadence: Double) {
@@ -897,9 +992,14 @@ final class WorkoutManager {
         currentLap.avgPower = lapSampleCount > 0 ? lapPowerSum / Double(lapSampleCount) : 0
         currentLap.maxPower = lapMaxPower
         currentLap.avgCadence = lapSampleCount > 0 ? lapCadenceSum / Double(lapSampleCount) : 0
-        currentLap.avgSpeed = lapSampleCount > 0 ? lapSpeedSum / Double(lapSampleCount) : 0
         currentLap.avgHR = lapSampleCount > 0 ? lapHRSum / Double(lapSampleCount) : 0
-        currentLap.distance = max(0, activeDistance - lapStartDistance)
+        let lapDist = max(0, activeDistance - lapStartDistance)
+        currentLap.distance = lapDist
+        if currentLap.duration > 0, lapDist > 0 {
+            currentLap.avgSpeed = (lapDist / currentLap.duration) * 3.6
+        } else {
+            currentLap.avgSpeed = 0
+        }
 
         previousLapAvgPower = currentLap.avgPower
         previousLapDuration = currentLap.duration
@@ -925,9 +1025,9 @@ final class WorkoutManager {
         goalProgress = [:]
         justCompletedGoals = []
         prevGoalDistance = 0
-        prevGoalMinutes  = 0
-        prevGoalKJ       = 0
-        prevGoalTSS      = 0
+        prevGoalMinutes = 0
+        prevGoalKJ = 0
+        prevGoalTSS = 0
         lowCadenceSeconds = 0
         showLowCadenceWarning = false
         pendingStepCueLabel = nil
@@ -967,6 +1067,7 @@ final class WorkoutManager {
         currentGrade = 0
         currentElevation = nil
         lastSentGrade = nil
+        baseErgTarget = nil
         ergTarget = nil
 
         // Reset pre-formatted strings
@@ -1014,7 +1115,8 @@ final class WorkoutManager {
         let ftp = Double(PowerZone.ftp)
         let latestDistance = max(
             lastRecordedDistance,
-            lastIngestedMetrics?.totalDistance ?? bleManager?.metrics.totalDistance ?? lastRecordedDistance
+            lastIngestedMetrics?.totalDistance ?? bleManager?.metrics.totalDistance
+                ?? lastRecordedDistance
         )
         let sensorDistance = max(0, latestDistance - workoutStartDistance)
         let workoutDistance = max(sensorDistance, integratedDistance)
@@ -1025,11 +1127,17 @@ final class WorkoutManager {
         workout.avgPower = samples.reduce(0.0) { $0 + Double($1.power) } / count
         workout.maxPower = samples.map(\.power).max() ?? 0
         workout.avgCadence = samples.reduce(0.0) { $0 + $1.cadence } / count
-        workout.avgSpeed = samples.reduce(0.0) { $0 + $1.speed } / count
+        // True average speed (matches Strava / distance÷time), not mean of instantaneous samples.
+        if elapsedSeconds > 0, workoutDistance > 0 {
+            workout.avgSpeed = (workoutDistance / Double(elapsedSeconds)) * 3.6
+        } else {
+            workout.avgSpeed = 0
+        }
 
         let hrSamples = samples.filter { $0.heartRate > 0 }
         if !hrSamples.isEmpty {
-            workout.avgHR = hrSamples.reduce(0.0) { $0 + Double($1.heartRate) } / Double(hrSamples.count)
+            workout.avgHR =
+                hrSamples.reduce(0.0) { $0 + Double($1.heartRate) } / Double(hrSamples.count)
             workout.maxHR = hrSamples.map(\.heartRate).max() ?? 0
         }
 
@@ -1097,7 +1205,8 @@ final class WorkoutManager {
         metrics.power > 0 || metrics.cadence > 0 || metrics.speed > 0
     }
 
-    private static func makeRouteSnapshot(from routeManager: RouteManager?) -> IndoorRouteSnapshot? {
+    private static func makeRouteSnapshot(from routeManager: RouteManager?) -> IndoorRouteSnapshot?
+    {
         guard let routeManager, routeManager.hasRoute else { return nil }
         return IndoorRouteSnapshot(
             routeName: routeManager.routeName,
@@ -1165,7 +1274,7 @@ final class WorkoutManager {
         }
 
         // Clamp to FTMS range
-        let clampedGrade = max(-40.0, min(grade, 40.0))
+        let clampedGrade = max(-40.0, min(grade * routeDifficultyScale, 40.0))
         currentGrade = clampedGrade
 
         // Only send if grade changed by more than 0.5% to avoid BLE spam on flat roads.

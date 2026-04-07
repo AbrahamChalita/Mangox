@@ -4,6 +4,7 @@ import RevenueCat
 struct PaywallView: View {
     @Environment(PurchasesManager.self) private var purchases
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     @State private var selectedPackage: Package?
     @State private var isPurchasing = false
@@ -23,12 +24,22 @@ struct PaywallView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 24) {
-                            heroSection
-                            featuresSection
-                            packageSelector
-                            purchaseButton
-                            restoreButton
-                            footerText
+                            if purchases.isPro {
+                                subscriberHeroSection
+                                if purchases.revenueCatPro, let url = purchases.subscriptionManagementURL {
+                                    manageSubscriptionButton(url: url)
+                                }
+                                if purchases.isProDevUnlockOnly {
+                                    devUnlockNotice
+                                }
+                            } else {
+                                heroSection
+                                featuresSection
+                                packageSelector
+                                purchaseButton
+                                restoreButton
+                                footerText
+                            }
                         }
                         .padding(.horizontal, 20)
                         .padding(.top, 20)
@@ -61,6 +72,63 @@ struct PaywallView: View {
         }
     }
 
+    private var subscriberHeroSection: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(success)
+
+            Text("You're on Mangox Pro")
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(.white)
+
+            Text(subscriberHeroSubtitle)
+                .font(.system(size: 14))
+                .foregroundStyle(.white.opacity(0.5))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+        }
+    }
+
+    private var subscriberHeroSubtitle: String {
+        if purchases.isProDevUnlockOnly {
+            return "Pro is enabled on this development build."
+        }
+        if let plan = purchases.storeProPlanKind, let renewal = purchases.storeProRenewalDescription {
+            return "\(plan) · \(renewal)"
+        }
+        if let renewal = purchases.storeProRenewalDescription {
+            return renewal
+        }
+        if let plan = purchases.storeProPlanKind {
+            return "\(plan) plan"
+        }
+        return "Thanks for subscribing — every feature is unlocked."
+    }
+
+    private func manageSubscriptionButton(url: URL) -> some View {
+        Button {
+            openURL(url)
+        } label: {
+            Text("Manage Subscription")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.black)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(mango)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(MangoxPressStyle())
+    }
+
+    private var devUnlockNotice: some View {
+        Text("Billing and renewals are managed separately for App Store subscribers. This unlock applies only to debug builds.")
+            .font(.system(size: 11))
+            .foregroundStyle(.white.opacity(0.35))
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 8)
+    }
+
     private var heroSection: some View {
         VStack(spacing: 12) {
             Image(systemName: "bolt.circle.fill")
@@ -71,7 +139,9 @@ struct PaywallView: View {
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(.white)
 
-            Text("Advanced analytics, structured training tools, and everything you need to hit your goals.")
+            Text(
+                "Structured training, on-device fitness charts (PMC), and an AI coach to discuss rides and build custom plans."
+            )
                 .font(.system(size: 14))
                 .foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
@@ -81,10 +151,23 @@ struct PaywallView: View {
 
     private var featuresSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            featureRowMango(title: "Structured Training", subtitle: "Follow the Classicissima plan with clear weeks, key workouts, and event prep")
-            featureRow(icon: "sparkles", title: "AI Coaching", subtitle: "Chat with your coach, analyze rides, and get personalized training advice")
-            featureRow(icon: "calendar.badge.plus", title: "AI Plan Generation", subtitle: "Generate multi-week training plans tailored to your event and fitness level")
-            featureRow(icon: "chart.line.uptrend.xyaxis", title: "Advanced Analytics", subtitle: "Deep dive into your training data with PMC charts and trends")
+            featureRowMango(title: "Structured Training", subtitle: "Follow built-in and AI plans with clear weeks, key workouts, and event prep")
+            featureRow(
+                icon: "sparkles",
+                title: "AI Coaching",
+                subtitle:
+                    "Coach replies in chat using your recent rides and plan as context—alongside AI plan generation in the same thread"
+            )
+            featureRow(
+                icon: "calendar.badge.plus",
+                title: "AI plan building",
+                subtitle: "Multi-week plans tailored to your event and fitness level, guided by chat"
+            )
+            featureRow(
+                icon: "chart.line.uptrend.xyaxis",
+                title: "Training load & PMC",
+                subtitle: "CTL, ATL, and TSB from your ride history—computed on your device, not by a model"
+            )
             featureRow(icon: "bolt.heart", title: "Priority Features", subtitle: "Early access to new features and improvements")
         }
         .padding(16)

@@ -4,7 +4,7 @@ import SwiftData
 /// Minimum active seconds for a workout to be considered valid.
 /// Workouts shorter than this are treated as accidental starts and
 /// will not count toward training plan completion.
-let kMinimumValidWorkoutSeconds: Int = 60
+let minimumValidWorkoutSeconds: Int = 60
 
 @Model
 final class Workout {
@@ -16,6 +16,7 @@ final class Workout {
     var avgPower: Double = 0
     var maxPower: Int = 0
     var avgCadence: Double = 0
+    /// Legacy stored average; prefer ``displayAverageSpeedKmh`` for UI (distance ÷ duration, matches Strava).
     var avgSpeed: Double = 0                // km/h
     var avgHR: Double = 0
     var maxHR: Int = 0
@@ -61,7 +62,7 @@ final class Workout {
     /// Whether this workout meets the minimum duration to be considered valid
     /// (not an accidental start/stop).
     var isValid: Bool {
-        Int(duration) >= kMinimumValidWorkoutSeconds
+        Int(duration) >= minimumValidWorkoutSeconds
     }
 
     init(startDate: Date = .now, planDayID: String? = nil, planID: String? = nil) {
@@ -89,5 +90,13 @@ extension Workout {
     var savedRouteKind: SavedRouteKind? {
         get { savedRouteKindRaw.flatMap { SavedRouteKind(rawValue: $0) } }
         set { savedRouteKindRaw = newValue?.rawValue }
+    }
+
+    /// Average speed (km/h) from distance ÷ active duration — aligns with Strava’s speed from moving time.
+    /// Use this in the UI instead of `avgSpeed` alone: older workouts stored `avgSpeed` as the mean of per-second samples,
+    /// which could read ~17 km/h while distance and time implied ~24 km/h.
+    var displayAverageSpeedKmh: Double {
+        guard duration > 0, distance > 0 else { return avgSpeed }
+        return (distance / duration) * 3.6
     }
 }

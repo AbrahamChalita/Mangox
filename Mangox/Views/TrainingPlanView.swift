@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+import os.log
+
+private let planLogger = Logger(subsystem: "com.abchalita.Mangox", category: "TrainingPlan")
 
 struct TrainingPlanView: View {
     @Environment(BLEManager.self) private var bleManager
@@ -9,14 +12,42 @@ struct TrainingPlanView: View {
     @Binding var navigationPath: NavigationPath
 
     @Environment(\.modelContext) private var modelContext
-    @Query private var allProgress: [TrainingPlanProgress]
+
+    private static let planProgressDescriptor: FetchDescriptor<TrainingPlanProgress> = {
+        var d = FetchDescriptor<TrainingPlanProgress>(
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)])
+        d.fetchLimit = 256
+        return d
+    }()
+
+    private static let aiPlansDescriptor: FetchDescriptor<AIGeneratedPlan> = {
+        var d = FetchDescriptor<AIGeneratedPlan>(
+            sortBy: [SortDescriptor(\.generatedAt, order: .reverse)])
+        d.fetchLimit = 256
+        return d
+    }()
+
+    @Query(Self.planProgressDescriptor) private var allProgress: [TrainingPlanProgress]
 
     @State private var selectedWeek: Int = 1
     @State private var showStartPlanSheet = false
     @State private var showResetConfirmation = false
     @State private var showDeleteConfirmation = false
+    @State private var showICSExportShare = false
+    @State private var icsExportURL: URL?
     @State private var planStartDate = Date()
-    @Query private var aiPlans: [AIGeneratedPlan]
+
+    @Query(Self.aiPlansDescriptor) private var aiPlans: [AIGeneratedPlan]
+
+    private static let recentWorkoutsForPlanDescriptor: FetchDescriptor<Workout> = {
+        var d = FetchDescriptor<Workout>(
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        d.fetchLimit = 400
+        return d
+    }()
+
+    @Query(Self.recentWorkoutsForPlanDescriptor) private var recentWorkoutsForPlan: [Workout]
 
     private let plan: TrainingPlan
 
@@ -47,7 +78,10 @@ struct TrainingPlanView: View {
 
     private var overallProgress: Double {
         guard let progress else { return 0 }
-        let totalWorkoutDays = plan.allDays.filter { $0.dayType == .workout || $0.dayType == .ftpTest }.count
+        let totalWorkoutDays = plan.allDays.filter {
+            $0.dayType == .workout || $0.dayType == .ftpTest || $0.dayType == .optionalWorkout
+                || $0.dayType == .commute
+        }.count
         guard totalWorkoutDays > 0 else { return 0 }
         return Double(progress.completedCount) / Double(totalWorkoutDays)
     }
@@ -63,6 +97,14 @@ struct TrainingPlanView: View {
             }
         }
         return nil
+    }
+
+    private func matchingCompletedWorkout(dayID: String) -> Workout? {
+        recentWorkoutsForPlan
+            .filter {
+                $0.planID == plan.id && $0.planDayID == dayID && $0.status == .completed && $0.isValid
+            }
+            .max(by: { $0.startDate < $1.startDate })
     }
 
     var body: some View {
@@ -102,6 +144,11 @@ struct TrainingPlanView: View {
         } message: {
             Text("The plan and all progress will be permanently deleted.")
         }
+        .sheet(isPresented: $showICSExportShare) {
+            if let icsExportURL {
+                ShareSheet(activityItems: [icsExportURL])
+            }
+        }
         .onAppear {
             autoSelectCurrentWeek()
         }
@@ -133,6 +180,11 @@ struct TrainingPlanView: View {
 
             if progress != nil || isAIPlan {
                 Menu {
+                    if let progress {
+                        Button("Export calendar (.ics, timed)") {
+                            exportPlanICS(progress: progress)
+                        }
+                    }
                     if progress != nil {
                         Button("Reset Progress", role: .destructive) {
                             showResetConfirmation = true
@@ -322,6 +374,25 @@ struct TrainingPlanView: View {
                         Text("FTP: \(progress.currentFTP)W")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.35))
+
+                        Text(
+                            "Adaptive ERG: \(Int((progress.adaptiveLoadMultiplier * 100).rounded()))% of plan targets"
+                        )
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.28))
+
+                        if abs(progress.adaptiveLoadMultiplier - 1.0) > 0.009 {
+                            Button {
+                                progress.adaptiveLoadMultiplier = 1.0
+                                try? modelContext.save()
+                            } label: {
+                                Text("Reset adaptive to 100%")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(AppColor.blue.opacity(0.9))
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.top, 2)
+                        }
                     }
                 }
             }
@@ -564,6 +635,12 @@ struct TrainingPlanView: View {
             .padding(.horizontal, 14)
             .padding(.top, 6)
 
+            if status == .completed, let w = matchingCompletedWorkout(dayID: day.id) {
+                planDayPlannedVsActualMini(day: day, workout: w)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 6)
+            }
+
             // Interval preview (collapsed)
             if day.hasStructuredIntervals && status != .completed {
                 intervalPreview(day: day)
@@ -587,6 +664,42 @@ struct TrainingPlanView: View {
                     isToday ? phaseColor(week.phase).opacity(0.25) : Color.white.opacity(0.06),
                     lineWidth: isToday ? 1.5 : 1
                 )
+        )
+    }
+
+    private func planDayPlannedVsActualMini(day: PlanDay, workout: Workout) -> some View {
+        let ftp = PowerZone.ftp
+        let plannedTSS = day.estimatedPlannedTSS(ftp: ftp)
+        let plannedMin = day.durationMinutes
+        let actualTSS = workout.tss
+        let actualMin = max(1, Int(workout.duration / 60))
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("LOGGED VS PLAN")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white.opacity(0.3))
+                .tracking(1)
+            HStack {
+                Text(
+                    plannedMin > 0
+                        ? "Plan \(plannedMin) min · est. TSS \(Int(plannedTSS))"
+                        : "Plan est. TSS \(Int(plannedTSS))"
+                )
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.4))
+                Spacer()
+                Text("\(actualMin) min · TSS \(Int(actualTSS))")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(accentYellow.opacity(0.9))
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.03))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
         )
     }
 
@@ -639,11 +752,11 @@ struct TrainingPlanView: View {
     private func dayActions(day: PlanDay, status: PlanDayStatus) -> some View {
         HStack(spacing: 8) {
             switch day.dayType {
-            case .workout:
+            case .workout, .optionalWorkout, .commute:
                 if status == .completed {
                     Button {
                         progress?.unmark(day.id)
-                        try? modelContext.save()
+                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
                     } label: {
                         Label("Undo", systemImage: "arrow.uturn.backward")
                             .font(.system(size: 11, weight: .medium))
@@ -656,7 +769,7 @@ struct TrainingPlanView: View {
                 } else if status == .skipped {
                     Button {
                         progress?.unmark(day.id)
-                        try? modelContext.save()
+                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
                     } label: {
                         Label("Undo Skip", systemImage: "arrow.uturn.backward")
                             .font(.system(size: 11, weight: .medium))
@@ -681,7 +794,7 @@ struct TrainingPlanView: View {
 
                     Button {
                         progress?.markCompleted(day.id)
-                        try? modelContext.save()
+                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
                     } label: {
                         Label("Done", systemImage: "checkmark")
                             .font(.system(size: 11, weight: .medium))
@@ -698,7 +811,7 @@ struct TrainingPlanView: View {
 
                     Button {
                         progress?.markSkipped(day.id)
-                        try? modelContext.save()
+                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
                     } label: {
                         Label("Skip", systemImage: "forward.fill")
                             .font(.system(size: 11, weight: .medium))
@@ -722,7 +835,7 @@ struct TrainingPlanView: View {
 
                     Button {
                         progress?.unmark(day.id)
-                        try? modelContext.save()
+                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
                     } label: {
                         Label("Undo", systemImage: "arrow.uturn.backward")
                             .font(.system(size: 11, weight: .medium))
@@ -747,7 +860,7 @@ struct TrainingPlanView: View {
 
                     Button {
                         progress?.markCompleted(day.id)
-                        try? modelContext.save()
+                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
                     } label: {
                         Label("Done", systemImage: "checkmark")
                             .font(.system(size: 11, weight: .medium))
@@ -763,7 +876,7 @@ struct TrainingPlanView: View {
                 if status != .completed {
                     Button {
                         progress?.markCompleted(day.id)
-                        try? modelContext.save()
+                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
                     } label: {
                         Label("Rest Day Complete", systemImage: "checkmark.circle")
                             .font(.system(size: 11, weight: .medium))
@@ -787,7 +900,7 @@ struct TrainingPlanView: View {
                 if status != .completed {
                     Button {
                         progress?.markCompleted(day.id)
-                        try? modelContext.save()
+                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
                     } label: {
                         Label("I Finished the Race!", systemImage: "flag.checkered")
                             .font(.system(size: 12, weight: .semibold))
@@ -811,7 +924,7 @@ struct TrainingPlanView: View {
                 if status != .completed {
                     Button {
                         progress?.markCompleted(day.id)
-                        try? modelContext.save()
+                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
                     } label: {
                         Label("Done", systemImage: "checkmark")
                             .font(.system(size: 11, weight: .medium))
@@ -854,7 +967,7 @@ struct TrainingPlanView: View {
                                 .font(.system(size: 20, weight: .bold))
                                 .foregroundStyle(.white)
 
-                            Text("Pick the Monday you want Week 1 to start. The plan will lay out 8 weeks from this date.")
+                            Text("Pick the Monday you want Week 1 to start. Your \(plan.totalWeeks)-week plan maps from this date through each day on the calendar.")
                                 .font(.system(size: 13))
                                 .foregroundStyle(.white.opacity(0.5))
                                 .multilineTextAlignment(.center)
@@ -1036,6 +1149,14 @@ struct TrainingPlanView: View {
                 Image(systemName: "bolt.heart.fill")
                     .font(.system(size: 12))
                     .foregroundStyle(accentOrange)
+            case .optionalWorkout:
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.45))
+            case .commute:
+                Image(systemName: "bicycle.circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(accentBlue.opacity(0.85))
             }
         }
     }
@@ -1103,7 +1224,7 @@ struct TrainingPlanView: View {
             aiPlanTitle: plan.eventName
         )
         modelContext.insert(newProgress)
-        try? modelContext.save()
+        do { try modelContext.save() } catch { planLogger.error("startPlan save failed: \(error)") }
 
         selectedWeek = 1
     }
@@ -1111,21 +1232,28 @@ struct TrainingPlanView: View {
     private func resetPlan() {
         if let existing = progress {
             modelContext.delete(existing)
-            try? modelContext.save()
+            do { try modelContext.save() } catch { planLogger.error("resetPlan save failed: \(error)") }
+        }
+    }
+
+    private func exportPlanICS(progress: TrainingPlanProgress) {
+        let body = PlanICSExport.buildICS(plan: plan, progress: progress)
+        do {
+            icsExportURL = try PlanICSExport.writeTempICSFile(planName: plan.name, icsBody: body)
+            showICSExportShare = true
+        } catch {
+            planLogger.error("ICS export failed: \(error.localizedDescription)")
         }
     }
 
     private func deleteAIPlan() {
-        // Delete progress
         if let existing = progress {
             modelContext.delete(existing)
         }
-        // Delete the AI plan itself
         if let aiPlan = aiPlans.first(where: { $0.id == plan.id }) {
             modelContext.delete(aiPlan)
         }
-        try? modelContext.save()
-        // Navigate back
+        do { try modelContext.save() } catch { planLogger.error("deleteAIPlan save failed: \(error)") }
         navigationPath.removeLast()
     }
 

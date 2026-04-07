@@ -11,6 +11,7 @@ import AppKit
 private let stravaLogger = Logger(subsystem: "com.abchalita.Mangox", category: "StravaService")
 
 @Observable
+@MainActor
 final class StravaService {
     struct UploadResult {
         let uploadID: Int
@@ -158,6 +159,8 @@ final class StravaService {
         case invalidFileType
         case invalidResponse
         case photoUploadFailed(String)
+        /// Strava returns 404 for `POST /activities/{id}/photos` for most OAuth apps — attaching photos is not a documented/supported public API flow.
+        case photoUploadNotSupportedByAPI
 
         var errorDescription: String? {
             switch self {
@@ -187,6 +190,8 @@ final class StravaService {
                 return "Invalid response from Strava."
             case .photoUploadFailed(let message):
                 return "Strava photo upload failed: \(message)"
+            case .photoUploadNotSupportedByAPI:
+                return "Strava does not allow this app to attach activity photos automatically (API limitation)."
             }
         }
     }
@@ -264,9 +269,10 @@ final class StravaService {
     }
 
     /// Uploads a JPEG image as a photo on an already-created Strava activity.
-    /// Strava accepts exactly one photo per POST to `/activities/{id}/photos`.
-    /// Retries on HTTP 404 — Strava often returns an `activity_id` from the upload poll before the
-    /// activity resource accepts photo uploads (eventual consistency).
+    ///
+    /// **Note:** `POST /activities/{id}/photos` is not documented for third-party apps. Strava typically responds with **404**
+    /// (`Record Not Found`) even when the activity exists and `PUT` succeeds — we map that to ``StravaError/photoUploadNotSupportedByAPI``
+    /// instead of retrying (retries only wasted time and log noise).
     func uploadActivityPhoto(
         activityID: Int,
         image: PlatformImage
@@ -278,30 +284,26 @@ final class StravaService {
             throw StravaError.photoUploadFailed("Could not encode image as JPEG.")
         }
 
-        // Brief pause so Strava can finish materializing the activity after FIT processing.
+        // Brief pause so Strava can finish processing a newly created activity before photo POST.
         try await Task.sleep(nanoseconds: 1_200_000_000)
 
-        var lastError: String = ""
-        for attempt in 0..<5 {
-            do {
+        do {
+            return try await postActivityPhotoOnce(activityID: activityID, jpegData: jpegData)
+        } catch StravaError.photoUploadNotSupportedByAPI {
+            throw StravaError.photoUploadNotSupportedByAPI
+        } catch StravaError.photoUploadFailed(let message) {
+            // One retry for possible transient server errors (not 404 — handled inside `postActivityPhotoOnce`).
+            let looksTransient = message.localizedCaseInsensitiveContains("500")
+                || message.localizedCaseInsensitiveContains("502")
+                || message.localizedCaseInsensitiveContains("503")
+                || message.localizedCaseInsensitiveContains("429")
+            if looksTransient {
+                stravaLogger.warning("Strava photo upload retry after transient error")
+                try await Task.sleep(nanoseconds: 2_000_000_000)
                 return try await postActivityPhotoOnce(activityID: activityID, jpegData: jpegData)
-            } catch let StravaError.photoUploadFailed(message) {
-                lastError = message
-                let isRetryable = message.contains("Record Not Found")
-                    || message.contains("\"code\":\"invalid\"")
-                    || message.localizedCaseInsensitiveContains("404")
-                if isRetryable, attempt < 4 {
-                    let backoff = UInt64(1_500_000_000 + UInt64(attempt) * 1_000_000_000)
-                    stravaLogger.warning("Strava photo upload attempt \(attempt + 1) failed (will retry): \(message, privacy: .public)")
-                    try await Task.sleep(nanoseconds: backoff)
-                    continue
-                }
-                throw StravaError.photoUploadFailed(message)
-            } catch {
-                throw error
             }
+            throw StravaError.photoUploadFailed(message)
         }
-        throw StravaError.photoUploadFailed(lastError.isEmpty ? "Photo upload failed after retries." : lastError)
         #else
         throw StravaError.photoUploadFailed("Photo upload requires iOS/iPadOS.")
         #endif
@@ -337,6 +339,10 @@ final class StravaService {
         }
         guard (200..<300).contains(http.statusCode) else {
             let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            if http.statusCode == 404 {
+                stravaLogger.info("Strava photo POST returned 404 — API does not expose photo upload for this app (activity \(activityID) exists for PUT).")
+                throw StravaError.photoUploadNotSupportedByAPI
+            }
             stravaLogger.warning("Photo upload failed with status \(http.statusCode): \(message)")
             throw StravaError.photoUploadFailed(message)
         }
@@ -745,7 +751,8 @@ final class StravaService {
         var lastSeenStatus = initialStatus ?? "Upload queued"
         var sleepNanoseconds: UInt64 = 1_000_000_000 // start at 1s
 
-        for _ in 0..<30 {
+        // Strava can take a long time to attach activity_id for large uploads; keep polling longer than 30s.
+        for _ in 0..<60 {
             let upload = try await fetchUpload(accessToken: accessToken, uploadID: uploadID)
 
             if let activityID = upload.activity_id {
@@ -983,24 +990,37 @@ private struct StravaDetailedAthleteDTO: Codable {
     let bikes: [StravaGearDTO]?
 }
 
+@MainActor
 private final class WebAuthenticationPresentationContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         #if canImport(UIKit)
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else {
-            return ASPresentationAnchor()
+        let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = windowScenes.first(where: { $0.activationState == .foregroundActive }) ?? windowScenes.first
+
+        if let scene {
+            if let keyWindow = scene.keyWindow {
+                return keyWindow
+            }
+            if let keyWindow = scene.windows.first(where: { $0.isKeyWindow }) {
+                return keyWindow
+            }
+            if let anyWindow = scene.windows.first {
+                return anyWindow
+            }
+            // iOS 26+: `UIWindow()` / `init(frame:)` are deprecated — use `init(windowScene:)`.
+            return UIWindow(windowScene: scene)
         }
-        if let keyWindow = scene.windows.first(where: { $0.isKeyWindow }) {
-            return keyWindow
+
+        // No `UIWindowScene` in `connectedScenes` yet (rare): legacy `UIApplicationDelegate.window`.
+        // Avoid `UIApplication.shared.windows` (deprecated iOS 15) and `UIWindow()` without a scene (deprecated iOS 26).
+        if let w = UIApplication.shared.delegate.flatMap({ $0.window }) {
+            return w!
         }
-        if let anyWindow = scene.windows.first {
-            return anyWindow
-        }
-        return UIWindow(windowScene: scene)
+        fatalError("No presentation anchor for Strava OAuth — no UIWindowScene or delegate window")
         #elseif canImport(AppKit)
-        return NSApplication.shared.keyWindow ?? ASPresentationAnchor()
+        return NSApplication.shared.keyWindow ?? NSWindow()
         #else
-        return ASPresentationAnchor()
+        fatalError("Unsupported platform for Strava OAuth")
         #endif
     }
 }

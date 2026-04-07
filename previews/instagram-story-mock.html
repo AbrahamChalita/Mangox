@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mangox Story — improved layout preview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #0a0a0a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: Inter, system-ui, sans-serif;
+      color: #fff;
+      padding: 24px;
+      gap: 16px;
+    }
+    .note {
+      max-width: 520px;
+      text-align: center;
+      font-size: 13px;
+      color: rgba(255,255,255,0.5);
+      font-family: "JetBrains Mono", monospace;
+    }
+    .note code { color: rgba(255,255,255,0.75); }
+
+    /*
+      transform:scale does not shrink layout — use aspect-ratio on the frame and
+      absolutely position the 1080×1920 canvas (see script).
+    */
+    .frame-wrap {
+      width: min(420px, calc(100vw - 32px));
+      aspect-ratio: 1080 / 1920;
+      position: relative;
+      overflow: hidden;
+      border-radius: 20px;
+      background: #050505;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+      --s: 1;
+    }
+    /* Top/bottom padding mirrors app content insets (background would be full-bleed behind this in the export). */
+    .scale-box {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1080px;
+      height: 1920px;
+      transform-origin: top left;
+      transform: scale(var(--s));
+      padding: 156px 88px 168px;
+      display: flex;
+      flex-direction: column;
+      gap: 40px;
+      min-height: 0;
+    }
+
+    .meta {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 33px;
+      color: rgba(255,255,255,0.7);
+      flex: 0 0 auto;
+    }
+
+    .hero {
+      flex: 0 0 auto;
+      height: 300px;
+      border-radius: 40px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04));
+      border: 1px solid rgba(255,255,255,0.12);
+      padding: 24px 28px 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
+    }
+    .hero-lbl {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 28px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.6);
+      letter-spacing: 0.12em;
+      margin-bottom: 8px;
+    }
+    .hero svg {
+      width: 100%;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .primary {
+      flex: 0 0 auto;
+      border-radius: 46px;
+      padding: 22px 38px 24px;
+      border: 1px solid rgba(79,172,254,0.55);
+      background: rgba(255,255,255,0.04);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      min-height: 132px;
+    }
+    .primary .lbl {
+      font-size: 30px;
+      color: rgba(255,255,255,0.7);
+      margin-bottom: 8px;
+    }
+    .primary .val {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 112px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.02em;
+      color: #fff;
+    }
+    .primary .unit {
+      font-size: 34px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.85);
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .primary .dur {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 30px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.75);
+      align-self: flex-start;
+      margin-top: 6px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      flex: 0 0 auto;
+    }
+    .card {
+      border-radius: 36px;
+      padding: 22px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.1);
+      font-size: 32px;
+      color: rgba(255,255,255,0.9);
+      min-height: 128px;
+    }
+    .card .k {
+      font-size: 32px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.55);
+      letter-spacing: 0.04em;
+      margin-bottom: 12px;
+    }
+    .card strong {
+      font-family: "JetBrains Mono", monospace;
+      font-weight: 700;
+      font-size: 48px;
+      color: #fff;
+    }
+    .card.mango strong { color: #ffba32; }
+
+    .bottom {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .bottom .meta {
+      margin-bottom: 20px;
+    }
+    .title-fill {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .poster-title {
+      width: 100%;
+      text-align: left;
+      font-size: clamp(2.2rem, 6vh, 4.5rem);
+      font-weight: 400;
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+      overflow-wrap: normal;
+      word-break: normal;
+      hyphens: none;
+      color: #ffffff;
+    }
+
+    .footer {
+      flex: 0 0 auto;
+      border-top: 1px solid rgba(255,255,255,0.2);
+      padding-top: 28px;
+      margin-top: 16px;
+      font-size: 28px;
+      color: rgba(255,255,255,0.8);
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .footer b {
+      font-weight: 600;
+      letter-spacing: 0.12em;
+    }
+    .footer span:last-child {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 26px;
+      letter-spacing: 0.1em;
+    }
+  </style>
+</head>
+<body>
+  <p class="note">
+    Static <strong>1080×1920</strong> preview aligned with <code>InstagramStoryCardRenderer</code> (improved layout). Open in a browser.
+  </p>
+
+  <div class="frame-wrap" id="frame">
+    <div class="scale-box" id="scaleBox">
+      <div class="meta">APRIL 1 · RIDE</div>
+
+      <div class="hero">
+        <div class="hero-lbl">POWER + HEART RATE</div>
+        <svg viewBox="0 0 300 80" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#ffba32"/>
+              <stop offset="100%" stop-color="#ffe896"/>
+            </linearGradient>
+            <linearGradient id="g2" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#4facfe"/>
+              <stop offset="100%" stop-color="#00f2fe"/>
+            </linearGradient>
+          </defs>
+          <path d="M0,60 Q40,55 80,40 T160,35 T240,20 T300,25" stroke="url(#g1)" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <path d="M0,40 Q40,30 80,50 T160,30 T240,45 T300,35" stroke="url(#g2)" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.9"/>
+        </svg>
+      </div>
+
+      <div class="primary">
+        <div>
+          <div class="lbl">DISTANCE</div>
+          <div><span class="val">21.02</span><span class="unit">km</span></div>
+        </div>
+        <div class="dur">52:16</div>
+      </div>
+
+      <div class="row">
+        <div class="card mango">
+          <div class="k">Avg HR</div>
+          <strong>164 bpm</strong>
+        </div>
+        <div class="card">
+          <div class="k">Speed</div>
+          <strong>24.1 km/h</strong>
+        </div>
+      </div>
+
+      <div class="bottom">
+        <div class="meta">HR 164 / 194 · 74 rpm</div>
+        <div class="title-fill">
+          <div class="poster-title" id="title">Aerobic Maintenance Session With Longer Title</div>
+        </div>
+        <div class="footer">
+          <b>MANGOX</b>
+          <span>RIDE TELEMETRY</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var frame = document.getElementById("frame");
+      var box = document.getElementById("scaleBox");
+      function fit() {
+        var s = frame.clientWidth / 1080;
+        frame.style.setProperty("--s", s);
+      }
+      function fitTitle() {
+        var el = document.getElementById("title");
+        if (!el) return;
+        el.style.fontSize = "";
+        var size = parseFloat(getComputedStyle(el).fontSize) || 48;
+        var min = 28;
+        var guard = 0;
+        while (el.scrollHeight > el.clientHeight + 2 && size > min && guard < 200) {
+          size -= 1;
+          el.style.fontSize = size + "px";
+          guard++;
+        }
+      }
+      fit();
+      fitTitle();
+      window.addEventListener("resize", function () { fit(); fitTitle(); });
+    })();
+  </script>
+</body>
+</html>
