@@ -345,22 +345,6 @@ struct CalendarView: View {
                 )
             }
 
-            // Training plan shortcut
-            Button {
-                navigationPath.append(AppRoute.trainingPlan)
-            } label: {
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(AppColor.mango)
-                    .frame(width: 34, height: 34)
-                    .background(Color.white.opacity(AppOpacity.cardBg))
-                    .clipShape(Circle())
-                    .overlay(
-                        Circle()
-                            .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
-                    )
-            }
-            .accessibilityLabel("Structured training plan")
         }
     }
 

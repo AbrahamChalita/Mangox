@@ -6,14 +6,12 @@ private enum CoachPlansDestructiveAction: Identifiable, Equatable {
     case deleteAIPlan(id: String)
     case resetAIProgress(id: String)
     case resetBuiltinProgress
-    case hideBuiltinTemplate
 
     var id: String {
         switch self {
         case .deleteAIPlan(let id): return "delete-\(id)"
         case .resetAIProgress(let id): return "reset-\(id)"
         case .resetBuiltinProgress: return "reset-builtin"
-        case .hideBuiltinTemplate: return "hide-builtin"
         }
     }
 }
@@ -49,7 +47,6 @@ struct CoachPlansPanel: View {
 
     @State private var destructiveAction: CoachPlansDestructiveAction?
     @State private var showRegenerateInputsMissing = false
-    @State private var builtinPlanHidden: Bool = Self.readBuiltinPlanHiddenFlag()
 
     private var builtinPlanID: String { CachedPlan.shared.id }
 
@@ -66,20 +63,11 @@ struct CoachPlansPanel: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if !aiPlans.isEmpty {
-                sectionHeader("Your plans")
-                ForEach(aiPlans) { aiPlan in
-                    aiPlanCard(aiPlan)
-                }
-            }
-
-            if !builtinPlanHidden {
-                sectionHeader("Classic template")
-                builtinPlanCard
-            }
-
-            if aiPlans.isEmpty && builtinPlanHidden {
-                plansEmptyState
+            sectionHeader("Your plans")
+            standardPlanCard(plan: CachedPlan.shared, originalAIPlan: nil)
+            
+            ForEach(aiPlans) { aiPlan in
+                standardPlanCard(plan: aiPlan.plan, originalAIPlan: aiPlan)
             }
         }
         .padding(.bottom, 16)
@@ -126,14 +114,7 @@ struct CoachPlansPanel: View {
                 confirmIsRed: false,
                 onConfirm: { resetBuiltinProgress() }
             )
-        case .hideBuiltinTemplate:
-            destructiveActionChrome(
-                title: "Remove built-in plan?",
-                message: "Removes the built-in template and clears progress. This can't be undone.",
-                confirmTitle: "Remove from list",
-                confirmIsRed: true,
-                onConfirm: { hideBuiltinPlan() }
-            )
+
         }
     }
 
@@ -262,30 +243,31 @@ struct CoachPlansPanel: View {
 
     // MARK: - AI Plan Card
 
-    private func aiPlanCard(_ aiPlan: AIGeneratedPlan) -> some View {
-        let progress = allPlanProgress.first { $0.planID == aiPlan.id }
-        let resolvedPlan = aiPlan.plan
+    private func standardPlanCard(plan: TrainingPlan?, originalAIPlan: AIGeneratedPlan?) -> some View {
+        guard let resolvedPlan = plan else { return AnyView(EmptyView()) }
+        let planID = originalAIPlan?.id ?? resolvedPlan.id
+        let progress = allPlanProgress.first { $0.planID == planID }
 
-        return VStack(alignment: .leading, spacing: 12) {
+        return AnyView(VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
-                planCardGlyph(systemName: "figure.outdoor.cycle", color: AppColor.mango)
+                planCardGlyph(systemName: "figure.outdoor.cycle", color: originalAIPlan == nil ? AppColor.yellow : AppColor.mango)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(resolvedPlan?.name ?? aiPlan.userPrompt)
+                    Text(resolvedPlan.name)
                         .font(.headline)
                         .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
                         .fixedSize(horizontal: false, vertical: true)
                         .lineLimit(2)
 
-                    if let plan = resolvedPlan, !plan.eventDate.isEmpty || !plan.eventName.isEmpty {
+                    if !resolvedPlan.eventDate.isEmpty || !resolvedPlan.eventName.isEmpty {
                         HStack(spacing: 5) {
                             Image(systemName: "calendar.badge.clock")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
                             Text(
-                                plan.eventName.isEmpty
-                                    ? plan.eventDate
-                                    : (plan.eventDate.isEmpty ? plan.eventName : "\(plan.eventName) · \(plan.eventDate)")
+                                resolvedPlan.eventName.isEmpty
+                                    ? resolvedPlan.eventDate
+                                    : (resolvedPlan.eventDate.isEmpty ? resolvedPlan.eventName : "\(resolvedPlan.eventName) · \(resolvedPlan.eventDate)")
                             )
                             .font(.caption)
                             .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
@@ -293,36 +275,53 @@ struct CoachPlansPanel: View {
                         }
                     }
 
-                    Text("Updated \(aiPlan.generatedAt.formatted(date: .abbreviated, time: .omitted))")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                    if let aip = originalAIPlan {
+                        Text("Updated \(aip.generatedAt.formatted(date: .abbreviated, time: .omitted))")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                    } else {
+                        Text("Curated Evidence-Based Plan")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                    }
                 }
 
                 Spacer(minLength: 6)
 
                 Menu {
-                    Button {
-                        if let data = aiPlan.regenerationInputsJSON,
-                           let inputs = try? JSONDecoder().decode(PlanInputs.self, from: data) {
-                            aiService.planConfirmationDraft = PlanGenerationDraft(
-                                inputs: inputs,
-                                summaryLine: aiPlan.userPrompt
-                            )
-                        } else {
-                            showRegenerateInputsMissing = true
+                    if let aip = originalAIPlan {
+                        Button {
+                            if let data = aip.regenerationInputsJSON,
+                               let inputs = try? JSONDecoder().decode(PlanInputs.self, from: data) {
+                                aiService.planConfirmationDraft = PlanGenerationDraft(
+                                    inputs: inputs,
+                                    summaryLine: aip.userPrompt
+                                )
+                            } else {
+                                showRegenerateInputsMissing = true
+                            }
+                        } label: {
+                            Label("Regenerate similar", systemImage: "arrow.triangle.2.circlepath")
                         }
-                    } label: {
-                        Label("Regenerate similar", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    Button {
-                        destructiveAction = .resetAIProgress(id: aiPlan.id)
-                    } label: {
-                        Label("Reset Progress", systemImage: "arrow.counterclockwise")
-                    }
-                    Button(role: .destructive) {
-                        destructiveAction = .deleteAIPlan(id: aiPlan.id)
-                    } label: {
-                        Label("Delete Plan", systemImage: "trash")
+                        Button {
+                            destructiveAction = .resetAIProgress(id: aip.id)
+                        } label: {
+                            Label("Reset Progress", systemImage: "arrow.counterclockwise")
+                        }
+                        Button(role: .destructive) {
+                            destructiveAction = .deleteAIPlan(id: aip.id)
+                        } label: {
+                            Label("Delete Plan", systemImage: "trash")
+                        }
+                    } else {
+                        if progress != nil {
+                            Button {
+                                destructiveAction = .resetBuiltinProgress
+                            } label: {
+                                Label("Reset Progress", systemImage: "arrow.counterclockwise")
+                            }
+                        }
+
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle.fill")
@@ -332,49 +331,51 @@ struct CoachPlansPanel: View {
                 }
             }
 
-            if let plan = resolvedPlan {
-                HStack(spacing: 6) {
-                    planStatPill(icon: "calendar", text: "\(plan.totalWeeks) wks")
-                    if !plan.distance.isEmpty {
-                        planStatPill(icon: "map.fill", text: plan.distance)
-                    }
-                    if let p = progress, p.completedCount > 0 {
-                        planStatPill(icon: "checkmark.circle.fill", text: "\(p.completedCount) done")
-                    }
+            HStack(spacing: 6) {
+                planStatPill(icon: "calendar", text: "\(resolvedPlan.totalWeeks) wks")
+                if !resolvedPlan.distance.isEmpty {
+                    planStatPill(icon: "map.fill", text: resolvedPlan.distance)
                 }
-
                 if let p = progress, p.completedCount > 0 {
-                    let totalWorkouts = plan.allDays
-                        .filter { $0.dayType == .workout || $0.dayType == .ftpTest }.count
-                    let pct = totalWorkouts > 0 ? Double(p.completedCount) / Double(totalWorkouts) : 0
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("Progress")
-                                .font(.system(size: 10, weight: .heavy))
-                                .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                                .tracking(0.6)
-                            Spacer()
-                            Text("\(Int((pct * 100).rounded()))%")
-                                .font(.system(size: 10, weight: .bold, design: .rounded))
-                                .foregroundStyle(AppColor.mango.opacity(0.9))
-                        }
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule()
-                                    .fill(Color.white.opacity(0.07))
-                                    .frame(height: 6)
-                                Capsule()
-                                    .fill(AppColor.mango)
-                                    .frame(width: max(6, geo.size.width * pct), height: 6)
-                            }
-                        }
-                        .frame(height: 6)
+                    planStatPill(icon: "checkmark.circle.fill", text: "\(p.completedCount) done")
+                }
+            }
+
+            if let p = progress, p.completedCount > 0 {
+                let totalWorkouts = resolvedPlan.allDays
+                    .filter { $0.dayType == .workout || $0.dayType == .ftpTest }.count
+                let pct = totalWorkouts > 0 ? Double(p.completedCount) / Double(totalWorkouts) : 0
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Progress")
+                            .font(.system(size: 10, weight: .heavy))
+                            .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                            .tracking(0.6)
+                        Spacer()
+                        Text("\(Int((pct * 100).rounded()))%")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(AppColor.mango.opacity(0.9))
                     }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.white.opacity(0.07))
+                                .frame(height: 6)
+                            Capsule()
+                                .fill(AppColor.mango)
+                                .frame(width: max(6, geo.size.width * pct), height: 6)
+                        }
+                    }
+                    .frame(height: 6)
                 }
             }
 
             Button {
-                navigationPath.append(AppRoute.aiPlan(planID: aiPlan.id))
+                if originalAIPlan != nil {
+                    navigationPath.append(AppRoute.aiPlan(planID: planID))
+                } else {
+                    navigationPath.append(AppRoute.trainingPlan)
+                }
                 dismissParentChatIfNeeded()
             } label: {
                 HStack(spacing: 8) {
@@ -386,87 +387,13 @@ struct CoachPlansPanel: View {
                 .foregroundStyle(AppColor.bg)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 13)
-                .background(AppColor.mango)
+                .background(originalAIPlan == nil ? AppColor.yellow : AppColor.mango)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(MangoxPressStyle())
         }
         .padding(16)
-        .cardStyle(cornerRadius: 14)
-    }
-
-    // MARK: - Built-in Plan Card
-
-    private var builtinPlanCard: some View {
-        let progress = builtinProgress
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                planCardGlyph(systemName: "flag.checkered.2.crossed", color: AppColor.yellow)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(CachedPlan.shared.eventName)
-                        .font(.headline)
-                        .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(progress == nil ? "Ready when you are — structured weeks toward your event." : "You're on the road — pick up where you left off.")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 6)
-
-                statusOrb(
-                    text: progress == nil ? "New" : "Live",
-                    tint: progress == nil ? AppColor.blue : AppColor.success
-                )
-
-                Menu {
-                    if progress != nil {
-                        Button("Reset Progress", role: .destructive) {
-                            destructiveAction = .resetBuiltinProgress
-                        }
-                    }
-                    Button("Remove from List", role: .destructive) {
-                        destructiveAction = .hideBuiltinTemplate
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle.fill")
-                        .font(.system(size: 22))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                }
-            }
-
-            HStack(spacing: 6) {
-                planStatPill(icon: "calendar", text: "8 wks")
-                planStatPill(icon: "map.fill", text: CachedPlan.shared.distance)
-                if let progress {
-                    planStatPill(icon: "checkmark.circle.fill", text: "\(progress.completedCount) done")
-                }
-            }
-
-            Button {
-                navigationPath.append(AppRoute.trainingPlan)
-                dismissParentChatIfNeeded()
-            } label: {
-                HStack(spacing: 8) {
-                    Text(progress == nil ? "Start template" : "Resume training")
-                        .font(.system(size: 15, weight: .bold))
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 13, weight: .bold))
-                }
-                .foregroundStyle(AppColor.bg)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 13)
-                .background(AppColor.yellow)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(MangoxPressStyle())
-        }
-        .padding(16)
-        .cardStyle(cornerRadius: 14)
+        .cardStyle(cornerRadius: 14))
     }
 
     // MARK: - Card Helpers
@@ -516,26 +443,7 @@ struct CoachPlansPanel: View {
         try? modelContext.save()
     }
 
-    private func hideBuiltinPlan() {
-        if let p = builtinProgress {
-            modelContext.delete(p)
-            try? modelContext.save()
-        }
-        UserDefaults.standard.set(true, forKey: Self.builtinPlanHiddenKey)
-        UserDefaults.standard.removeObject(forKey: Self.legacyBuiltinPlanHiddenKey)
-        builtinPlanHidden = true
-    }
 
-    private static let legacyBuiltinPlanHiddenKey = "classicissima_hidden"
-    private static let builtinPlanHiddenKey = "builtin_event_plan_hidden"
-
-    private static func readBuiltinPlanHiddenFlag() -> Bool {
-        let d = UserDefaults.standard
-        if d.object(forKey: builtinPlanHiddenKey) != nil {
-            return d.bool(forKey: builtinPlanHiddenKey)
-        }
-        return d.bool(forKey: legacyBuiltinPlanHiddenKey)
-    }
 
     private func resetAIPlanProgress(planID: String) {
         guard let p = allPlanProgress.first(where: { $0.planID == planID }) else { return }

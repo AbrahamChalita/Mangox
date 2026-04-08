@@ -570,7 +570,16 @@ struct TrainingPlanView: View {
         }
     }
 
+
+    private func dynamicDayLabel(for day: PlanDay, calendarDate: Date?) -> String {
+        guard let calendarDate else { return day.dayLabel }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE" // Short weekday, e.g. Mon, Tue, Wed
+        return formatter.string(from: calendarDate)
+    }
+
     // MARK: - Day Card
+
 
     private func dayCard(day: PlanDay, week: PlanWeek) -> some View {
         let status = progress?.status(for: day.id) ?? .upcoming
@@ -580,8 +589,8 @@ struct TrainingPlanView: View {
         return VStack(alignment: .leading, spacing: 0) {
             // Top row: day label, date, status
             HStack(spacing: 8) {
-                // Day of week
-                Text(day.dayLabel.uppercased())
+                // Day of week (computed from real start date if active)
+                Text(dynamicDayLabel(for: day, calendarDate: calendarDate).uppercased())
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.white.opacity(0.4))
                     .tracking(1)
@@ -1252,11 +1261,8 @@ struct TrainingPlanView: View {
         let calendar = Calendar.current
         var start = planStartDate
         let weekday = calendar.component(.weekday, from: start)
-        // weekday: 1=Sun, 2=Mon, ... 7=Sat
-        if weekday != 2 {
-            let daysToMonday = (2 - weekday + 7) % 7
-            start = calendar.date(byAdding: .day, value: daysToMonday == 0 ? 7 : daysToMonday, to: start) ?? start
-        }
+        // Plan now strictly starts on the chosen day without forcing Monday.
+        // The first day (Day 1) will be mapped to the `startDate`.
         start = calendar.startOfDay(for: start)
 
         let newProgress = TrainingPlanProgress(

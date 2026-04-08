@@ -1303,7 +1303,6 @@ private enum StoryCardDrawing {
         brand.draw(at: CGPoint(x: sidePad, y: bottomY - 32), withAttributes: ba)
 
         // Cycling icon + version
-        let icon = "\u{1F6B2}"  // Bicycle emoji
         let sub = "\u{1F6B2}  TELEMETRY"
         let sa: [NSAttributedString.Key: Any] = [
             .font: UIFont.monospacedDigitSystemFont(ofSize: 14, weight: .medium),

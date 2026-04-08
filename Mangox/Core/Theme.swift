@@ -304,9 +304,9 @@ extension Color {
 
 // MARK: - Cached Training Plan
 
-/// Avoids calling `ClassicissimaPlan.create()` in computed properties
+/// Avoids calling `WeddingWeightLossPlan.create()` in computed properties
 /// (which rebuilds the full 8-week plan struct on every SwiftUI body evaluation).
 /// Access via `CachedPlan.shared` instead.
 enum CachedPlan {
-    static let shared: TrainingPlan = ClassicissimaPlan.create()
+    static let shared: TrainingPlan = WeddingWeightLossPlan.create()
 }
