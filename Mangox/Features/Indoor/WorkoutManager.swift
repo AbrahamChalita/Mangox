@@ -74,6 +74,8 @@ final class WorkoutManager {
 
     /// True when cadence has been below threshold for > 30 consecutive seconds while recording.
     var showLowCadenceWarning: Bool = false
+    /// Mirrors ``lowCadenceSeconds`` for ride-tip logic (consecutive seconds below threshold while pedaling).
+    private(set) var lowCadenceStreakSeconds: Int = 0
 
     // MARK: - Step Audio Cue
 
@@ -109,6 +111,8 @@ final class WorkoutManager {
     /// Current speed in km/h (raw, not formatted). Used by Live Activity.
     var metricsSpeed: Double = 0
     var formattedCadence: String = "0"
+    /// Last completed second’s mean cadence (rpm); 0 when no valid samples.
+    private(set) var displayCadenceRpm: Double = 0
     var formattedDistanceKm: String = "0.00"  // 2 dp — phone compact grid
     var formattedDistanceKm1dp: String = "0.0"  // 1 dp — iPad metrics grid
     var formattedEnergyKJ: String = "0"
@@ -527,8 +531,7 @@ final class WorkoutManager {
 
         if let newFTP = suggestedFTP, newFTP > currentFTP {
             workoutLogger.info("Detected new FTP: \(newFTP)W (was \(currentFTP)W)")
-            PowerZone.ftp = newFTP
-            FTPRefreshTrigger.shared.bump()
+            PowerZone.setFTP(newFTP)
         }
     }
 
@@ -873,6 +876,7 @@ final class WorkoutManager {
         metricsSpeed = effectiveSpeed
         formattedSpeed = String(format: "%.1f", effectiveSpeed)
         formattedCadence = "\(Int(avgCadence.rounded()))"
+        displayCadenceRpm = avgCadence
         formattedDistanceKm = String(format: "%.2f", activeDistance / 1000)
         formattedDistanceKm1dp = String(format: "%.1f", activeDistance / 1000)
         formattedEnergyKJ = String(format: "%.0f", kilojoules)
@@ -943,6 +947,7 @@ final class WorkoutManager {
         guard prefs.lowCadenceWarningEnabled else {
             showLowCadenceWarning = false
             lowCadenceSeconds = 0
+            lowCadenceStreakSeconds = 0
             return
         }
 
@@ -959,6 +964,7 @@ final class WorkoutManager {
         if lowCadenceSeconds >= 30 {
             showLowCadenceWarning = true
         }
+        lowCadenceStreakSeconds = lowCadenceSeconds
     }
 
     /// Drains `pendingSamples` into SwiftData. Call before summary / pause / end, and on batch boundaries.
@@ -1030,6 +1036,7 @@ final class WorkoutManager {
         prevGoalTSS = 0
         lowCadenceSeconds = 0
         showLowCadenceWarning = false
+        lowCadenceStreakSeconds = 0
         pendingStepCueLabel = nil
 
         ring3s.reset()
@@ -1074,6 +1081,7 @@ final class WorkoutManager {
         powerHistoryMax = 100
         formattedSpeed = "0.0"
         formattedCadence = "0"
+        displayCadenceRpm = 0
         formattedDistanceKm = "0.00"
         formattedDistanceKm1dp = "0.0"
         formattedEnergyKJ = "0"

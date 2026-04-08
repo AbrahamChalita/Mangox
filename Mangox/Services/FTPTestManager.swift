@@ -348,7 +348,7 @@ final class FTPTestManager {
 
     func applyEstimatedFTP() {
         guard estimatedFTP > 0 else { return }
-        PowerZone.ftp = estimatedFTP
+        PowerZone.setFTP(estimatedFTP)
         if let id = lastResultID {
             FTPTestHistory.markApplied(id: id)
         }

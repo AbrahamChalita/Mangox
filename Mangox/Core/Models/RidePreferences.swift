@@ -200,6 +200,10 @@ final class RidePreferences {
         static let lowCadenceThreshold   = "ride_pref_low_cadence_threshold"
         static let stepAudioCue          = "ride_pref_step_audio_cue"
         static let navigationTurnCues    = "ride_pref_navigation_turn_cues"
+        static let rideTipsEnabled       = "ride_pref_ride_tips_v1"
+        static let rideTipsAudio        = "ride_pref_ride_tips_audio_v1"
+        static let rideTipsSpacing      = "ride_pref_ride_tips_spacing_v1"
+        static let rideTipsIndoorHeat   = "ride_pref_ride_tips_indoor_heat_v1"
         static let unitSystem            = "ride_pref_unit_system"
         static let outdoorAutoLapMeters  = "ride_pref_outdoor_auto_lap_meters"
         static let prioritizeNavMapless  = "ride_pref_prioritize_nav_mapless_v1"
@@ -262,9 +266,31 @@ final class RidePreferences {
         didSet { UserDefaults.standard.set(stepAudioCueEnabled, forKey: Key.stepAudioCue) }
     }
 
-    /// Spoken + haptic cues for outdoor turn-by-turn navigation.
+    /// Haptic cues for outdoor turn-by-turn navigation and GPX route bends.
     var navigationTurnCuesEnabled: Bool {
         didSet { UserDefaults.standard.set(navigationTurnCuesEnabled, forKey: Key.navigationTurnCues) }
+    }
+
+    // MARK: - Ride tips (in-ride coaching nudges)
+
+    /// Short contextual tips during rides (fueling, cadence, posture). **Off** until the rider opts in.
+    var rideTipsEnabled: Bool {
+        didSet { UserDefaults.standard.set(rideTipsEnabled, forKey: Key.rideTipsEnabled) }
+    }
+
+    /// Spoken versions of ride tips (separate from guided step / navigation audio).
+    var rideTipsAudioEnabled: Bool {
+        didSet { UserDefaults.standard.set(rideTipsAudioEnabled, forKey: Key.rideTipsAudio) }
+    }
+
+    /// Minimum spacing between tips scales with this preset.
+    var rideTipsSpacing: RideNudgeSpacing {
+        didSet { UserDefaults.standard.set(rideTipsSpacing.rawValue, forKey: Key.rideTipsSpacing) }
+    }
+
+    /// Unlocks indoor heat / fluid reminders (still obeys global spacing).
+    var rideTipsIndoorHeatAwareness: Bool {
+        didSet { UserDefaults.standard.set(rideTipsIndoorHeatAwareness, forKey: Key.rideTipsIndoorHeat) }
     }
 
     // MARK: - Unit System
@@ -430,6 +456,29 @@ final class RidePreferences {
             self.navigationTurnCuesEnabled = UserDefaults.standard.bool(forKey: Key.navigationTurnCues)
         } else {
             self.navigationTurnCuesEnabled = true
+        }
+
+        // Ride tips — default off
+        if UserDefaults.standard.object(forKey: Key.rideTipsEnabled) != nil {
+            self.rideTipsEnabled = UserDefaults.standard.bool(forKey: Key.rideTipsEnabled)
+        } else {
+            self.rideTipsEnabled = false
+        }
+        if UserDefaults.standard.object(forKey: Key.rideTipsAudio) != nil {
+            self.rideTipsAudioEnabled = UserDefaults.standard.bool(forKey: Key.rideTipsAudio)
+        } else {
+            self.rideTipsAudioEnabled = false
+        }
+        if let raw = UserDefaults.standard.string(forKey: Key.rideTipsSpacing),
+           let spacing = RideNudgeSpacing(rawValue: raw) {
+            self.rideTipsSpacing = spacing
+        } else {
+            self.rideTipsSpacing = .normal
+        }
+        if UserDefaults.standard.object(forKey: Key.rideTipsIndoorHeat) != nil {
+            self.rideTipsIndoorHeatAwareness = UserDefaults.standard.bool(forKey: Key.rideTipsIndoorHeat)
+        } else {
+            self.rideTipsIndoorHeatAwareness = false
         }
 
         // Unit system — default metric

@@ -42,9 +42,6 @@ final class AudioCueManager: NSObject, AVSpeechSynthesizerDelegate {
     private var lastSpokenAt: ContinuousClock.Instant = .now
     private let minimumInterval: Duration = .seconds(1.5)
 
-    private var lastNavigationSpokenAt: ContinuousClock.Instant = .now
-    private let navigationMinimumInterval: Duration = .milliseconds(1200)
-
     func speak(_ text: String) {
         guard isEnabled else { return }
         let now = ContinuousClock.now
@@ -58,37 +55,6 @@ final class AudioCueManager: NSObject, AVSpeechSynthesizerDelegate {
         utterance.volume = 0.8
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         synth.speak(utterance)
-    }
-
-    // MARK: - Outdoor navigation (separate from indoor step cues)
-
-    private func speakNavigation(_ text: String, minInterval: Duration? = nil) {
-        guard RidePreferences.shared.navigationTurnCuesEnabled else { return }
-        let interval = minInterval ?? navigationMinimumInterval
-        let now = ContinuousClock.now
-        if now - lastNavigationSpokenAt < interval { return }
-        lastNavigationSpokenAt = now
-        configureAudioSessionIfNeeded()
-
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.rate = 0.52
-        utterance.pitchMultiplier = 1.0
-        utterance.volume = 0.85
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        synth.speak(utterance)
-    }
-
-    func speakNavigationTurnPrimary(_ instruction: String) {
-        speakNavigation(instruction, minInterval: .milliseconds(800))
-    }
-
-    func speakNavigationTurnDistance(meters: Int, instruction: String) {
-        let text = "In \(meters) meters, \(instruction.lowercased())"
-        speakNavigation(text)
-    }
-
-    func speakNavigationTurnNow(_ instruction: String) {
-        speakNavigation("Now, \(instruction.lowercased())", minInterval: .milliseconds(600))
     }
 
     /// Play a short system chime (ascending tone).
@@ -123,11 +89,20 @@ final class AudioCueManager: NSObject, AVSpeechSynthesizerDelegate {
         else if seconds <= 3 && seconds >= 1 { speak("\(seconds)") }
     }
 
-    func announceMilestone(distance km: Double) {
-        let rounded = (km * 2).rounded() / 2 // round to nearest 0.5 km
-        if rounded > 0, rounded.truncatingRemainder(dividingBy: 5) == 0 {
-            speak("\(Int(rounded)) kilometers done")
-        }
+    /// Short coaching line; independent of step / navigation cue toggles.
+    func announceRideTip(script: String) {
+        guard RidePreferences.shared.rideTipsAudioEnabled else { return }
+        let now = ContinuousClock.now
+        if now - lastSpokenAt < minimumInterval { return }
+        lastSpokenAt = now
+        configureAudioSessionIfNeeded()
+
+        let utterance = AVSpeechUtterance(string: script)
+        utterance.rate = 0.52
+        utterance.pitchMultiplier = 1.0
+        utterance.volume = 0.78
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        synth.speak(utterance)
     }
 
     func announceWorkoutComplete() {

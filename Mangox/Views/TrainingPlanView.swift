@@ -7,6 +7,7 @@ private let planLogger = Logger(subsystem: "com.abchalita.Mangox", category: "Tr
 struct TrainingPlanView: View {
     @Environment(BLEManager.self) private var bleManager
     @Environment(HealthKitManager.self) private var healthKitManager
+    @Environment(WhoopService.self) private var whoopService
     @Environment(PurchasesManager.self) private var purchases
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Binding var navigationPath: NavigationPath
@@ -114,7 +115,13 @@ struct TrainingPlanView: View {
 
                 VStack(spacing: 0) {
                     header
-                        .padding(.bottom, 4)
+                        .padding(.bottom, whoopService.isConnected ? 2 : 4)
+
+                    if whoopService.isConnected, whoopService.isConfigured {
+                        whoopPlanBanner
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 8)
+                    }
 
                     if progress == nil {
                         noPlanActiveView
@@ -152,6 +159,41 @@ struct TrainingPlanView: View {
         .onAppear {
             autoSelectCurrentWeek()
         }
+        .task {
+            await whoopService.refreshLinkedDataIfStale()
+        }
+    }
+
+    // MARK: - WHOOP
+
+    private var whoopPlanBanner: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "waveform.path.ecg")
+                    .foregroundStyle(AppColor.whoop)
+                if let pct = whoopService.latestRecoveryScore {
+                    Text(String(format: "Recovery %.0f%%", pct))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(whoopService.readinessAccentColor)
+                } else {
+                    Text("WHOOP linked")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+                Spacer()
+            }
+            Text(whoopService.readinessTrainingHint)
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.42))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .background(AppColor.whoop.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(AppColor.whoop.opacity(0.28), lineWidth: 1)
+        )
     }
 
     // MARK: - Header
@@ -1282,6 +1324,10 @@ struct TrainingPlanView: View {
     )
     .modelContainer(for: [
         Workout.self, WorkoutSample.self, LapSplit.self,
-        TrainingPlanProgress.self
+        TrainingPlanProgress.self, WorkoutRAGChunk.self,
     ], inMemory: true)
+    .environment(BLEManager())
+    .environment(HealthKitManager())
+    .environment(WhoopService())
+    .environment(PurchasesManager.shared)
 }

@@ -10,6 +10,7 @@
 		005AA5F52F7B62320013DB45 /* FitDataProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = AABB00022F56648D004200FC /* FitDataProtocol */; };
 		005AA79A2F7B73A70013DB45 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 005AA7992F7B73A70013DB45 /* RevenueCat */; };
 		005AA79C2F7B73A70013DB45 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 005AA79B2F7B73A70013DB45 /* RevenueCatUI */; };
+		00FM00012F56648D004200FC /* FoundationModels.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00FM00022F56648D004200FC /* FoundationModels.framework */; };
 		0B1A00092F56648D004200FC /* MangoxLiveActivityExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0B1A00012F56648D004200FC /* MangoxLiveActivityExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -55,6 +56,7 @@
 		000345162F56648C004200FC /* Mangox.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mangox.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		000345252F56648D004200FC /* MangoxTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MangoxTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0003452F2F56648D004200FC /* MangoxUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MangoxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		00FM00022F56648D004200FC /* FoundationModels.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = FoundationModels.framework; path = System/Library/Frameworks/FoundationModels.framework; sourceTree = SDKROOT; };
 		0B1A00012F56648D004200FC /* MangoxLiveActivityExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MangoxLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -109,6 +111,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				00FM00012F56648D004200FC /* FoundationModels.framework in Frameworks */,
 				005AA79A2F7B73A70013DB45 /* RevenueCat in Frameworks */,
 				005AA5F52F7B62320013DB45 /* FitDataProtocol in Frameworks */,
 				005AA79C2F7B73A70013DB45 /* RevenueCatUI in Frameworks */,
@@ -147,6 +150,7 @@
 				000345282F56648D004200FC /* MangoxTests */,
 				000345322F56648D004200FC /* MangoxUITests */,
 				000345172F56648C004200FC /* Products */,
+				005050FE2F85CC52002A0529 /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};
@@ -159,6 +163,14 @@
 				0003452F2F56648D004200FC /* MangoxUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		005050FE2F85CC52002A0529 /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				00FM00022F56648D004200FC /* FoundationModels.framework */,
+			);
+			name = "Recovered References";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -550,6 +562,9 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_WHOOP_CLIENT_ID = "$(WHOOP_CLIENT_ID)";
+				INFOPLIST_KEY_WHOOP_CLIENT_SECRET = "$(WHOOP_CLIENT_SECRET)";
+				INFOPLIST_KEY_WHOOP_REDIRECT_URI = "$(WHOOP_REDIRECT_URI)";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
@@ -572,6 +587,9 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
+				WHOOP_CLIENT_ID = "8c9a9d3d-4c73-466e-8494-671b85bb2446";
+				WHOOP_CLIENT_SECRET = 03902822b9e745d14c8088ceb97bbc0db6360d8497ad99210baa701c01926086;
+				WHOOP_REDIRECT_URI = "mangox://localhost/whoop-auth";
 				XROS_DEPLOYMENT_TARGET = 26.2;
 			};
 			name = Debug;
@@ -612,6 +630,9 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_WHOOP_CLIENT_ID = "$(WHOOP_CLIENT_ID)";
+				INFOPLIST_KEY_WHOOP_CLIENT_SECRET = "$(WHOOP_CLIENT_SECRET)";
+				INFOPLIST_KEY_WHOOP_REDIRECT_URI = "$(WHOOP_REDIRECT_URI)";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
@@ -633,6 +654,9 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
+				WHOOP_CLIENT_ID = "8c9a9d3d-4c73-466e-8494-671b85bb2446";
+				WHOOP_CLIENT_SECRET = 03902822b9e745d14c8088ceb97bbc0db6360d8497ad99210baa701c01926086;
+				WHOOP_REDIRECT_URI = "mangox://localhost/whoop-auth";
 				XROS_DEPLOYMENT_TARGET = 26.2;
 			};
 			name = Release;

@@ -18,8 +18,25 @@ enum InstagramStoryCardRenderer {
         workout: Workout,
         dominantZone: PowerZone,
         routeName: String?,
-        totalElevationGain: Double
+        totalElevationGain: Double,
+        personalRecordNames: [String] = [],
+        options: InstagramStoryCardOptions? = nil,
+        whoopStrain: Double? = nil,
+        whoopRecovery: Double? = nil,
+        aiTitle: String? = nil
     ) -> UIImage {
+        let opts =
+            options
+            ?? InstagramStoryCardOptions(
+                accent: .dominantZone,
+                layeredShare: false,
+                showPowerHRChart: true,
+                showHeartRateLineOnChart: true,
+                showMetaLine: true,
+                showFooterBranding: true,
+                showElevation: true,
+                showNPAndTSS: true
+            )
         let renderer = UIGraphicsImageRenderer(size: cardSize)
         return renderer.image { ctx in
             StoryCardDrawing.draw(
@@ -28,8 +45,68 @@ enum InstagramStoryCardRenderer {
                 workout: workout,
                 dominantZone: dominantZone,
                 routeName: routeName,
-                totalElevationGain: totalElevationGain
+                totalElevationGain: totalElevationGain,
+                personalRecordNames: personalRecordNames,
+                options: opts,
+                whoopStrain: whoopStrain,
+                whoopRecovery: whoopRecovery,
+                aiTitle: aiTitle
             )
+        }
+    }
+
+    /// Atmospheric gradient only — used as the Instagram **background** layer when ``InstagramStoryCardOptions/layeredShare`` is on.
+    @MainActor
+    static func renderAtmosphericBackgroundOnly(
+        dominantZone: PowerZone,
+        options: InstagramStoryCardOptions
+    ) -> UIImage {
+        let renderer = UIGraphicsImageRenderer(size: cardSize)
+        return renderer.image { ctx in
+            StoryCardDrawing.drawAtmosphericBackground(
+                in: cardSize,
+                dominantZone: dominantZone,
+                accent: options.accent,
+                cg: ctx.cgContext
+            )
+        }
+    }
+
+    /// Rounded, scaled copy of the full card for Instagram’s **sticker** layer (transparent outside the card).
+    @MainActor
+    static func renderStickerLayer(
+        fullCard: UIImage,
+        scale: CGFloat = 0.84,
+        cornerRadius: CGFloat = 52
+    ) -> UIImage {
+        let W = cardSize.width
+        let H = cardSize.height
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: W, height: H), format: format)
+        return renderer.image { ctx in
+            let cg = ctx.cgContext
+            cg.clear(CGRect(x: 0, y: 0, width: W, height: H))
+            let tw = W * scale
+            let th = H * scale
+            let rect = CGRect(x: (W - tw) / 2, y: (H - th) / 2, width: tw, height: th)
+            cg.saveGState()
+            let path = UIBezierPath(roundedRect: rect, cornerRadius: cornerRadius)
+
+            cg.addPath(path.cgPath)
+            cg.setFillColor(UIColor.black.withAlphaComponent(0.4).cgColor)
+            cg.fillPath()
+
+            cg.addPath(path.cgPath)
+            cg.setStrokeColor(UIColor.white.withAlphaComponent(0.1).cgColor)
+            cg.setLineWidth(2.0)
+            cg.strokePath()
+
+            cg.addPath(path.cgPath)
+            cg.clip()
+            fullCard.draw(in: rect)
+            cg.restoreGState()
         }
     }
 }
@@ -48,8 +125,10 @@ private enum StoryCardDrawing {
 
     /// Matches ``AppColor.mango`` — primary brand accent (mango yellow-orange).
     private static let brandMango = UIColor(red: 1, green: 186 / 255, blue: 50 / 255, alpha: 1)
-    private static let brandMangoSoft = UIColor(red: 1, green: 186 / 255, blue: 50 / 255, alpha: 0.45)
-    private static let brandMangoLight = UIColor(red: 1, green: 235 / 255, blue: 150 / 255, alpha: 1)
+    private static let brandMangoSoft = UIColor(
+        red: 1, green: 186 / 255, blue: 50 / 255, alpha: 0.45)
+    private static let brandMangoLight = UIColor(
+        red: 1, green: 235 / 255, blue: 150 / 255, alpha: 1)
     private static let neonCyan = UIColor(red: 0.31, green: 0.675, blue: 0.996, alpha: 1)
     private static let neonCyanEnd = UIColor(red: 0, green: 0.949, blue: 0.996, alpha: 1)
 
@@ -59,7 +138,12 @@ private enum StoryCardDrawing {
         workout: Workout,
         dominantZone: PowerZone,
         routeName: String?,
-        totalElevationGain: Double
+        totalElevationGain: Double,
+        personalRecordNames: [String],
+        options: InstagramStoryCardOptions,
+        whoopStrain: Double? = nil,
+        whoopRecovery: Double? = nil,
+        aiTitle: String? = nil
     ) {
         let W = size.width
         let H = size.height
@@ -67,87 +151,86 @@ private enum StoryCardDrawing {
         UIGraphicsPushContext(cgCtx)
         defer { UIGraphicsPopContext() }
 
-        drawAtmosphericBackground(in: size, dominantZone: dominantZone, cg: cgCtx)
-
-        let title = StravaPostBuilder.buildTitle(
+        // Use AI-generated title if available, otherwise fall back to static builder
+        let title = aiTitle ?? StravaPostBuilder.buildTitle(
             workout: workout,
             routeName: routeName,
             dominantPowerZone: dominantZone,
-            personalRecordNames: []
+            personalRecordNames: personalRecordNames
         )
+
+        drawAtmosphericBackground(
+            in: size, dominantZone: dominantZone, accent: options.accent, cg: cgCtx)
+
         var y = topSafe
 
+        // === 1. TOP META: "APRIL 7 · RIDE" ===
         drawTopMetaLine(date: workout.startDate, width: W, y: y)
-        y += 40
+        y += 56
 
-        y += sectionGap
-
-        let heroH: CGFloat = 300
-        let heroRect = CGRect(x: sidePad, y: y, width: W - sidePad * 2, height: heroH)
-        drawHeroPanel(workout: workout, in: heroRect, cg: cgCtx)
-        y += heroH + sectionGap
-
-        let distKm = workout.distance / 1000
-        let heroValue = String(format: "%.2f", distKm)
-        let speed = workout.displayAverageSpeedKmh
-        let avgHR = workout.avgHR
-        let calories = WorkoutExportService.estimateCalories(
-            avgPower: workout.avgPower,
-            durationSeconds: workout.duration
-        )
-
-        let primaryH: CGFloat = 158
-        drawPrimaryDistanceDurationRow(
-            distanceValue: heroValue,
-            duration: AppFormat.duration(workout.duration),
-            in: CGRect(x: sidePad, y: y, width: W - sidePad * 2, height: primaryH),
-            cg: cgCtx
-        )
-        y += primaryH + sectionGap
-
-        let colGap: CGFloat = 24
-        let halfW = (W - sidePad * 2 - colGap) / 2
-        let rowH: CGFloat = 128
-        let hrAccent = avgHR > 0 ? brandMango : nil
-        drawSecondaryCard(
-            label: avgHR > 0 ? "Avg HR" : "Energy",
-            value: avgHR > 0 ? "\(Int(avgHR.rounded()))" : "\(calories)",
-            unit: avgHR > 0 ? "bpm" : "kcal",
-            accent: hrAccent,
-            in: CGRect(x: sidePad, y: y, width: halfW, height: rowH),
-            cornerRadius: 36,
-            elevated: true
-        )
-        drawSecondaryCard(
-            label: "Speed",
-            value: speed > 0 ? String(format: "%.1f", speed) : "—",
-            unit: speed > 0 ? "km/h" : nil,
-            accent: nil,
-            in: CGRect(x: sidePad + halfW + colGap, y: y, width: halfW, height: rowH),
-            cornerRadius: 36,
-            elevated: true
-        )
-        y += rowH + sectionGap
-
-        var meta: [String] = []
-        if workout.avgHR > 0 { meta.append("HR \(Int(workout.avgHR.rounded())) / \(workout.maxHR)") }
-        if workout.avgCadence > 0 { meta.append("\(Int(workout.avgCadence.rounded())) rpm") }
-        if let r = routeName, !r.isEmpty { meta.append(r) }
-        var metaBottomY = y
-        if !meta.isEmpty {
-            let metaStr = meta.joined(separator: "  ·  ")
-            let a: [NSAttributedString.Key: Any] = [
-                .font: UIFont.monospacedDigitSystemFont(ofSize: 33, weight: .regular),
-                .foregroundColor: UIColor(white: 1, alpha: 0.7),
-                .kern: 0.1,
-            ]
-            let metaSz = metaStr.size(withAttributes: a)
-            metaStr.draw(at: CGPoint(x: sidePad, y: y), withAttributes: a)
-            metaBottomY = y + metaSz.height
+        // === 2. CHART PANEL ===
+        let heroH: CGFloat = 340
+        if options.showPowerHRChart {
+            let heroRect = CGRect(x: sidePad, y: y, width: W - sidePad * 2, height: heroH)
+            drawHeroPanel(
+                workout: workout,
+                in: heroRect,
+                cg: cgCtx,
+                showHeartRateLine: options.showHeartRateLineOnChart
+            )
+            y += heroH + sectionGap
         }
 
+        // === 3. TWO METRIC CARDS SIDE BY SIDE (square) ===
+        let bentoGap: CGFloat = 20
+        let bentoW = W - sidePad * 2
+        let halfW = (bentoW - bentoGap) / 2
+        let cardH: CGFloat = halfW  // Square aspect ratio
+
+        // Left: Distance
+        drawMetricCard(
+            label: "Distance",
+            value: String(format: "%.1f", workout.distance / 1000),
+            unit: "km",
+            accent: brandMangoLight,
+            in: CGRect(x: sidePad, y: y, width: halfW, height: cardH),
+            cg: cgCtx
+        )
+
+        // Right: Avg Power
+        drawMetricCard(
+            label: "Avg Power",
+            value: workout.avgPower > 0 ? "\(Int(workout.avgPower))" : "—",
+            unit: "W",
+            accent: neonCyan,
+            in: CGRect(x: sidePad + halfW + bentoGap, y: y, width: halfW, height: cardH),
+            cg: cgCtx
+        )
+        y += cardH + 20
+
+        // === 4. STATS PILL ===
+        let pillH: CGFloat = 56
+        let pillRect = CGRect(x: sidePad, y: y, width: bentoW, height: pillH)
+
+        var segments: [(value: String, label: String)] = []
+        let durationStr = AppFormat.duration(workout.duration)
+        segments.append((value: durationStr, label: ""))
+        if options.showElevation {
+            segments.append((value: "\(Int(totalElevationGain))m", label: "↑"))
+        }
+        if options.showNPAndTSS && workout.normalizedPower > 0 {
+            segments.append((value: "NP \(Int(workout.normalizedPower))W", label: ""))
+        }
+        if options.showNPAndTSS && workout.tss > 0 {
+            segments.append((value: "TSS \(Int(workout.tss))", label: ""))
+        }
+
+        drawStatsPill(segments: segments, in: pillRect, cg: cgCtx)
+        y += pillH + 20
+
+        // === 5. HERO TITLE ===
         let footerLineY = H - bottomSafe - 48
-        let titleRegionTop = metaBottomY + (meta.isEmpty ? 16 : 20)
+        let titleRegionTop = y + 10
         drawBottomTitlePoster(
             title: title,
             route: routeName,
@@ -157,27 +240,133 @@ private enum StoryCardDrawing {
             footerLineY: footerLineY
         )
 
-        drawFooterBranding(width: W, bottomY: H - bottomSafe)
+        // === 6. FOOTER ===
+        if options.showFooterBranding {
+            drawFooterBranding(width: W, bottomY: H - bottomSafe)
+        }
+    }
+
+    // MARK: - New Metric Card (matches reference image)
+
+    private static func drawMetricCard(
+        label: String,
+        value: String,
+        unit: String?,
+        accent: UIColor,
+        in rect: CGRect,
+        cg: CGContext
+    ) {
+        let corner: CGFloat = 14  // Mangox standard
+        let path = UIBezierPath(roundedRect: rect, cornerRadius: corner)
+
+        // Mangox card style: white @ 4% fill
+        UIColor(white: 1, alpha: 0.04).setFill()
+        path.fill()
+
+        // Border: white @ 8%
+        UIColor(white: 1, alpha: 0.08).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+
+        let inset: CGFloat = 24
+
+        // Label: small, bold, white @ 35%, tracked
+        let labelAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 20, weight: .bold),
+            .foregroundColor: UIColor(white: 1, alpha: 0.35),
+            .kern: 2,
+        ]
+        label.draw(at: CGPoint(x: rect.minX + inset, y: rect.minY + inset), withAttributes: labelAttrs)
+
+        // Value: large, bold, monospaced, colored
+        let valueFont = UIFont.monospacedSystemFont(ofSize: 96, weight: .bold)
+        let valueAttrs: [NSAttributedString.Key: Any] = [
+            .font: valueFont,
+            .foregroundColor: accent,
+        ]
+        let valueSize = value.size(withAttributes: valueAttrs)
+
+        let valueY = rect.maxY - inset - valueSize.height
+        value.draw(at: CGPoint(x: rect.minX + inset, y: valueY), withAttributes: valueAttrs)
+
+        // Unit: white @ 60%
+        if let unit = unit {
+            let unitAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 24, weight: .medium),
+                .foregroundColor: UIColor(white: 1, alpha: 0.6),
+            ]
+            let unitX = rect.minX + inset + valueSize.width + 6
+            let unitY = valueY + valueSize.height - 34
+            unit.draw(at: CGPoint(x: unitX, y: unitY), withAttributes: unitAttrs)
+        }
+    }
+
+    // MARK: - Stats Pill (compact, inline format)
+
+    private static func drawStatsPill(
+        segments: [(value: String, label: String)],
+        in rect: CGRect,
+        cg: CGContext
+    ) {
+        let corner: CGFloat = 14  // Mangox standard
+        let path = UIBezierPath(roundedRect: rect, cornerRadius: corner)
+
+        // Mangox card style: white @ 4% fill
+        UIColor(white: 1, alpha: 0.04).setFill()
+        path.fill()
+
+        // Border: white @ 8%
+        UIColor(white: 1, alpha: 0.08).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+
+        // Build combined string with · separators
+        var parts: [String] = []
+        for seg in segments {
+            if seg.label.isEmpty {
+                parts.append(seg.value)
+            } else {
+                parts.append("\(seg.value) \(seg.label)")
+            }
+        }
+        let combined = parts.joined(separator: "  ·  ")
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.monospacedSystemFont(ofSize: 26, weight: .semibold),
+            .foregroundColor: UIColor(white: 1, alpha: 0.9),
+            .kern: 1,
+        ]
+        let size = combined.size(withAttributes: attrs)
+        let x = rect.midX - size.width / 2
+        let y = rect.midY - size.height / 2
+        combined.draw(at: CGPoint(x: x, y: y), withAttributes: attrs)
     }
 
     // MARK: Background
 
-    private static func drawAtmosphericBackground(in size: CGSize, dominantZone: PowerZone, cg: CGContext) {
-        UIColor(red: 0.02, green: 0.02, blue: 0.02, alpha: 1).setFill()
+    static func drawAtmosphericBackground(
+        in size: CGSize,
+        dominantZone: PowerZone,
+        accent: InstagramStoryCardOptions.Accent,
+        cg: CGContext
+    ) {
+        // Mangox bg: near-black rgb(8, 10, 15)
+        UIColor(red: 0.03, green: 0.04, blue: 0.06, alpha: 1).setFill()
         UIRectFill(CGRect(origin: .zero, size: size))
 
-        let zc = UIColor(dominantZone.color)
-        let zr = zc.cgColor.components?[0] ?? 0.3
-        let zg = zc.cgColor.components?[1] ?? 0.3
-        let zb = zc.cgColor.components?[2] ?? 0.4
-
-        func orb(_ center: CGPoint, radius: CGFloat, r: CGFloat, g: CGFloat, b: CGFloat, alpha: CGFloat) {
+        func orb(
+            _ center: CGPoint, radius: CGFloat, color: UIColor, alpha: CGFloat
+        ) {
             let cs = CGColorSpaceCreateDeviceRGB()
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            color.getRed(&r, green: &g, blue: &b, alpha: &a)
             let colors = [
                 UIColor(red: r, green: g, blue: b, alpha: alpha).cgColor,
                 UIColor(red: r, green: g, blue: b, alpha: 0).cgColor,
             ] as CFArray
-            guard let grad = CGGradient(colorsSpace: cs, colors: colors, locations: [0, 1]) else { return }
+            guard let grad = CGGradient(colorsSpace: cs, colors: colors, locations: [0, 1]) else {
+                return
+            }
             cg.drawRadialGradient(
                 grad,
                 startCenter: center,
@@ -191,28 +380,19 @@ private enum StoryCardDrawing {
         cg.saveGState()
         cg.addRect(CGRect(origin: .zero, size: size))
         cg.clip()
-        orb(CGPoint(x: size.width * 0.85, y: size.height * 0.08), radius: 520, r: 1, g: 186 / 255, b: 50 / 255, alpha: 0.48)
-        orb(CGPoint(x: size.width * 0.1, y: size.height * 0.92), radius: 580, r: zr * 0.9, g: zg * 0.9, b: zb, alpha: 0.45)
-        orb(CGPoint(x: size.width * 0.35, y: size.height * 0.42), radius: 380, r: 0.15, g: 0.12, b: 0.22, alpha: 0.55)
+        cg.setBlendMode(.screen)
+
+        // Mango glow top-right
+        orb(
+            CGPoint(x: size.width * 0.85, y: size.height * 0.08), radius: 500,
+            color: brandMango, alpha: 0.12)
+
+        // Subtle mango glow bottom-left
+        orb(
+            CGPoint(x: size.width * 0.15, y: size.height * 0.85), radius: 450,
+            color: brandMango, alpha: 0.08)
+
         cg.restoreGState()
-
-        let cs2 = CGColorSpaceCreateDeviceRGB()
-        let overlay = CGGradient(
-            colorsSpace: cs2,
-            colors: [
-                UIColor(red: zr * 0.25, green: zg * 0.25, blue: zb * 0.35, alpha: 0.35).cgColor,
-                UIColor(red: 0.02, green: 0.02, blue: 0.04, alpha: 0.2).cgColor,
-            ] as CFArray,
-            locations: [0, 1]
-        )!
-        cg.drawLinearGradient(
-            overlay,
-            start: .zero,
-            end: CGPoint(x: size.width, y: size.height),
-            options: []
-        )
-
-        drawSubtleNoise(in: CGRect(origin: .zero, size: size), cg: cg)
     }
 
     private static func drawSubtleNoise(in rect: CGRect, cg: CGContext) {
@@ -220,12 +400,12 @@ private enum StoryCardDrawing {
         cg.setBlendMode(.overlay)
         cg.setAlpha(0.12)
         let step: CGFloat = 6
-        var seed: UInt64 = 0x9E3779B97F4A7C15
+        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
         var x: CGFloat = 0
         while x < rect.width {
             var y: CGFloat = 0
             while y < rect.height {
-                seed &+= 0xC6BC279692B5C323
+                seed &+= 0xC6BC_2796_92B5_C323
                 let g = CGFloat(seed % 1000) / 1000.0 * 0.08 + 0.04
                 UIColor(white: g, alpha: 1).setFill()
                 cg.fill(CGRect(x: x, y: y, width: step, height: step))
@@ -243,12 +423,53 @@ private enum StoryCardDrawing {
         f.dateFormat = "MMMM d"
         let dayPart = f.string(from: date).uppercased()
         let line = "\(dayPart) · RIDE"
+        // Match reference: text-[10px] text-zinc-400 uppercase tracking-[0.2em]
         let a: [NSAttributedString.Key: Any] = [
-            .font: UIFont.monospacedDigitSystemFont(ofSize: 33, weight: .regular),
-            .foregroundColor: UIColor(white: 1, alpha: 0.7),
-            .kern: 0.15,
+            .font: UIFont.systemFont(ofSize: 18, weight: .medium),
+            .foregroundColor: UIColor(white: 0.63, alpha: 1),  // zinc-400
+            .kern: 3.5,  // tracking-[0.2em]
         ]
         line.draw(at: CGPoint(x: sidePad, y: y), withAttributes: a)
+    }
+
+    /// Returns extra vertical space consumed below `y`.
+    @discardableResult
+    private static func drawZoneFocusBanner(zone: PowerZone, width: CGFloat, y: CGFloat) -> CGFloat
+    {
+        let zc = UIColor(zone.color)
+        let line = "Z\(zone.id) · \(zone.name.uppercased())"
+        let a: [NSAttributedString.Key: Any] = [
+            .font: UIFont.monospacedDigitSystemFont(ofSize: 36, weight: .bold),
+            .foregroundColor: zc,
+            .kern: 2.2,
+        ]
+        let sz = line.size(withAttributes: a)
+        line.draw(at: CGPoint(x: sidePad, y: y), withAttributes: a)
+        return sz.height + 8
+    }
+
+    /// Returns vertical space used (including bottom gap).
+    private static func drawNPAndTSSLine(workout: Workout, width: CGFloat, y: CGFloat) -> CGFloat {
+        var parts: [String] = []
+        if workout.normalizedPower > 0 {
+            parts.append("NP \(Int(workout.normalizedPower.rounded()))W")
+        }
+        if workout.tss > 0 {
+            parts.append(String(format: "TSS %.0f", workout.tss))
+        }
+        if workout.intensityFactor > 0 {
+            parts.append(String(format: "IF %.2f", workout.intensityFactor))
+        }
+        guard !parts.isEmpty else { return 0 }
+        let line = parts.joined(separator: "  ·  ")
+        let a: [NSAttributedString.Key: Any] = [
+            .font: UIFont.monospacedDigitSystemFont(ofSize: 30, weight: .medium),
+            .foregroundColor: UIColor(white: 1, alpha: 0.78),
+            .kern: 0.12,
+        ]
+        let sz = line.size(withAttributes: a)
+        line.draw(at: CGPoint(x: sidePad, y: y), withAttributes: a)
+        return sz.height + 12
     }
 
     /// Story title: neutral **regular** weight, left-aligned (matches improved HTML).
@@ -276,7 +497,9 @@ private enum StoryCardDrawing {
     }
 
     /// Inserts newlines only at spaces so Core Text never breaks inside a word.
-    private static func wordWrappedTitle(_ title: String, maxWidth: CGFloat, fontSize: CGFloat) -> String {
+    private static func wordWrappedTitle(_ title: String, maxWidth: CGFloat, fontSize: CGFloat)
+        -> String
+    {
         let font = posterTitleFont(size: fontSize)
         let kern = -0.02 * fontSize
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .kern: kern]
@@ -345,11 +568,12 @@ private enum StoryCardDrawing {
         var routeH: CGFloat = 0
         if let route, !route.isEmpty {
             let rStr = NSAttributedString(string: route, attributes: routeAttrsBase)
-            routeH = ceil(rStr.boundingRect(
-                with: CGSize(width: maxW, height: 160),
-                options: [.usesLineFragmentOrigin],
-                context: nil
-            ).height)
+            routeH = ceil(
+                rStr.boundingRect(
+                    with: CGSize(width: maxW, height: 160),
+                    options: [.usesLineFragmentOrigin],
+                    context: nil
+                ).height)
         }
         let routeBlock = routeH > 0 ? routeGap + routeH : CGFloat(0)
 
@@ -372,7 +596,9 @@ private enum StoryCardDrawing {
         let minTitleFont: CGFloat = 14
 
         var fontSize = CGFloat(best)
-        while fontSize > minTitleFont && measuredTitleHeight(title, fontSize: fontSize, maxWidth: maxW) > titleMaxH {
+        while fontSize > minTitleFont
+            && measuredTitleHeight(title, fontSize: fontSize, maxWidth: maxW) > titleMaxH
+        {
             fontSize -= 1
         }
 
@@ -392,63 +618,122 @@ private enum StoryCardDrawing {
         let blockH = titleH + routeBlock
         let blockStartY = regionTop + max(0, (availableH - blockH) / 2)
 
+        let isHolo = displayTitle.contains("PR") || displayTitle.contains("🏆")
         let titleAttrs: [NSAttributedString.Key: Any] = [
             .font: titleFont,
-            .foregroundColor: UIColor(white: 1, alpha: 1),
+            .foregroundColor: isHolo ? UIColor.black : UIColor(white: 1, alpha: 1),
             .paragraphStyle: titlePara,
             .kern: -0.02 * fontSize,
         ]
         let titleAttrStr = NSAttributedString(string: displayTitle, attributes: titleAttrs)
-        titleAttrStr.draw(in: CGRect(x: sidePad, y: blockStartY, width: maxW, height: titleH))
+        let textRect = CGRect(x: sidePad, y: blockStartY, width: maxW, height: titleH)
+
+        if isHolo {
+            cg.saveGState()
+            cg.beginTransparencyLayer(auxiliaryInfo: nil)
+
+            titleAttrStr.draw(in: textRect)
+            cg.setBlendMode(.sourceIn)
+
+            // Gradient: teal-300 → indigo-400 → pink-400 (from reference)
+            let holoColors =
+                [
+                    UIColor(red: 94/255, green: 234/255, blue: 212/255, alpha: 1).cgColor,   // teal-300
+                    UIColor(red: 129/255, green: 140/255, blue: 248/255, alpha: 1).cgColor,  // indigo-400
+                    UIColor(red: 244/255, green: 114/255, blue: 182/255, alpha: 1).cgColor,  // pink-400
+                ] as CFArray
+            let holoGrad = CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: holoColors,
+                locations: [0, 0.5, 1.0])!
+            cg.drawLinearGradient(
+                holoGrad, start: CGPoint(x: textRect.minX, y: textRect.minY),
+                end: CGPoint(x: textRect.maxX, y: textRect.maxY), options: [])
+
+            cg.endTransparencyLayer()
+            cg.restoreGState()
+        } else {
+            titleAttrStr.draw(in: textRect)
+        }
 
         if let route, !route.isEmpty {
             let rStr = NSAttributedString(string: route, attributes: routeAttrsBase)
             let ry = blockStartY + titleH + routeGap
             rStr.draw(in: CGRect(x: sidePad, y: ry, width: maxW, height: routeH))
+
+            cg.saveGState()
+            let path = CGMutablePath()
+            var px = sidePad
+            var py = ry + routeH + 16
+            path.move(to: CGPoint(x: px, y: py))
+            for i in 1...6 {
+                px += 24
+                py += (i % 2 == 0) ? -8 : 8
+                path.addLine(to: CGPoint(x: px, y: py))
+            }
+            cg.setStrokeColor(brandMango.cgColor)
+            cg.setLineWidth(4)
+            cg.setLineCap(.round)
+            cg.setLineJoin(.round)
+            cg.setShadow(offset: .zero, blur: 12, color: brandMango.cgColor)
+            cg.addPath(path)
+            cg.strokePath()
+            cg.restoreGState()
         }
     }
 
     // MARK: Hero chart
 
-    private static func drawHeroPanel(workout: Workout, in rect: CGRect, cg: CGContext) {
-        let corner: CGFloat = 40
+    private static func drawHeroPanel(
+        workout: Workout,
+        in rect: CGRect,
+        cg: CGContext,
+        showHeartRateLine: Bool = true
+    ) {
+        let corner: CGFloat = 14  // Mangox standard
         let bgPath = UIBezierPath(roundedRect: rect, cornerRadius: corner)
-        cg.saveGState()
-        cg.addPath(bgPath.cgPath)
-        cg.clip()
-        let glassGrad = CGGradient(
-            colorsSpace: CGColorSpaceCreateDeviceRGB(),
-            colors: [
-                UIColor(white: 1, alpha: 0.12).cgColor,
-                UIColor(white: 1, alpha: 0.04).cgColor,
-            ] as CFArray,
-            locations: [0, 1]
-        )!
-        cg.drawLinearGradient(glassGrad, start: CGPoint(x: rect.minX, y: rect.minY), end: CGPoint(x: rect.minX, y: rect.maxY), options: [])
-        cg.restoreGState()
 
-        UIColor(white: 1, alpha: 0.12).setStroke()
+        // Mangox card style: white @ 4% fill
+        UIColor(white: 1, alpha: 0.04).setFill()
+        bgPath.fill()
+
+        // Border: white @ 8%
+        UIColor(white: 1, alpha: 0.08).setStroke()
         bgPath.lineWidth = 1
         bgPath.stroke()
 
-        let label = "POWER + HEART RATE"
+        // Label: "POWER + HEART RATE"
+        let label = showHeartRateLine ? "POWER + HEART RATE" : "POWER"
         let la: [NSAttributedString.Key: Any] = [
-            .font: UIFont.monospacedDigitSystemFont(ofSize: 28, weight: .medium),
-            .foregroundColor: UIColor(white: 1, alpha: 0.6),
-            .kern: 1.8,
+            .font: UIFont.systemFont(ofSize: 18, weight: .bold),
+            .foregroundColor: UIColor(white: 1, alpha: 0.35),
+            .kern: 2,
         ]
-        label.draw(at: CGPoint(x: rect.minX + 28, y: rect.minY + 24), withAttributes: la)
+        label.draw(at: CGPoint(x: rect.minX + 24, y: rect.minY + 20), withAttributes: la)
 
-        let chartRect = rect.insetBy(dx: 28, dy: 56)
+        let chartRect = CGRect(
+            x: rect.minX + 16,
+            y: rect.minY + 56,
+            width: rect.width - 32,
+            height: rect.height - 72
+        )
         let samples = workout.samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds }
         if samples.count >= 3 {
-            drawTelemetryChart(samples: samples, maxPower: workout.maxPower, in: chartRect, cg: cg, compact: true)
+            drawTelemetryChart(
+                samples: samples,
+                maxPower: workout.maxPower,
+                in: chartRect,
+                cg: cg,
+                compact: true,
+                showHeartRateLine: showHeartRateLine
+            )
         } else {
             drawPlaceholderChart(in: chartRect, workout: workout, cg: cg, compact: true)
         }
     }
 
-    private static func downsampleSamples(_ samples: [WorkoutSample], maxPoints: Int) -> [WorkoutSample] {
+    private static func downsampleSamples(_ samples: [WorkoutSample], maxPoints: Int)
+        -> [WorkoutSample]
+    {
         guard samples.count > maxPoints else { return samples }
         let step = max(1, samples.count / maxPoints)
         var out: [WorkoutSample] = []
@@ -468,12 +753,13 @@ private enum StoryCardDrawing {
         maxPower: Int,
         in rect: CGRect,
         cg: CGContext,
-        compact: Bool = false
+        compact: Bool = false,
+        showHeartRateLine: Bool = true
     ) {
         let lwPower: CGFloat = compact ? 8 : 7
         let lwHR: CGFloat = compact ? 5 : 5
-        let areaTopAlpha: CGFloat = compact ? 0.12 : 0.22
-        let glowBlur: CGFloat = compact ? 6 : 14
+        let areaTopAlpha: CGFloat = compact ? 0.22 : 0.45
+        let glowBlur: CGFloat = compact ? 8 : 18
 
         let picked = downsampleSamples(samples, maxPoints: compact ? 100 : 140)
         let powers = picked.map { Double($0.power) }
@@ -518,16 +804,19 @@ private enum StoryCardDrawing {
         let elevGrad = CGGradient(
             colorsSpace: CGColorSpaceCreateDeviceRGB(),
             colors: [
-                UIColor(white: 1, alpha: areaTopAlpha).cgColor,
-                UIColor(white: 1, alpha: 0).cgColor,
+                brandMango.withAlphaComponent(areaTopAlpha).cgColor,
+                brandMango.withAlphaComponent(0).cgColor,
             ] as CFArray,
             locations: [0, 1]
         )!
-        cg.drawLinearGradient(elevGrad, start: CGPoint(x: left, y: top), end: CGPoint(x: left, y: top + chartH), options: [])
+        cg.drawLinearGradient(
+            elevGrad, start: CGPoint(x: left, y: top), end: CGPoint(x: left, y: top + chartH),
+            options: [])
         cg.restoreGState()
 
         // Power stroke (smooth-ish)
-        let powerPath = smoothPathThrough(points: (0..<picked.count).map { CGPoint(x: xAt($0), y: yPower($0)) })
+        let powerPath = smoothPathThrough(
+            points: (0..<picked.count).map { CGPoint(x: xAt($0), y: yPower($0)) })
         cg.saveGState()
         cg.setLineWidth(lwPower)
         cg.setLineCap(.round)
@@ -549,7 +838,9 @@ private enum StoryCardDrawing {
         cg.restoreGState()
 
         cg.saveGState()
-        cg.setShadow(offset: CGSize(width: 0, height: 0), blur: glowBlur, color: brandMango.withAlphaComponent(0.45).cgColor)
+        cg.setShadow(
+            offset: CGSize(width: 0, height: 0), blur: glowBlur,
+            color: brandMango.withAlphaComponent(0.85).cgColor)
         cg.setStrokeColor(brandMango.cgColor)
         cg.setLineWidth(lwPower)
         cg.setLineCap(.round)
@@ -557,8 +848,9 @@ private enum StoryCardDrawing {
         cg.strokePath()
         cg.restoreGState()
 
-        if hasHR {
-            let hrPath = smoothPathThrough(points: (0..<picked.count).map { CGPoint(x: xAt($0), y: yHR($0)) })
+        if showHeartRateLine, hasHR {
+            let hrPath = smoothPathThrough(
+                points: (0..<picked.count).map { CGPoint(x: xAt($0), y: yHR($0)) })
             cg.saveGState()
             cg.setLineWidth(lwHR)
             cg.setLineCap(.round)
@@ -593,7 +885,8 @@ private enum StoryCardDrawing {
             let label = "\(peakW)W"
             let dotR: CGFloat = 8
             cg.setFillColor(UIColor.white.cgColor)
-            cg.fillEllipse(in: CGRect(x: cx - dotR, y: cy - dotR, width: dotR * 2, height: dotR * 2))
+            cg.fillEllipse(
+                in: CGRect(x: cx - dotR, y: cy - dotR, width: dotR * 2, height: dotR * 2))
 
             let fa: [NSAttributedString.Key: Any] = [
                 .font: UIFont.monospacedDigitSystemFont(ofSize: 22, weight: .bold),
@@ -618,7 +911,9 @@ private enum StoryCardDrawing {
         return path
     }
 
-    private static func drawPlaceholderChart(in rect: CGRect, workout: Workout, cg: CGContext, compact: Bool = false) {
+    private static func drawPlaceholderChart(
+        in rect: CGRect, workout: Workout, cg: CGContext, compact: Bool = false
+    ) {
         let left = rect.minX
         let chartW = rect.width
         let top = rect.minY
@@ -652,7 +947,8 @@ private enum StoryCardDrawing {
             ] as CFArray,
             locations: [0, 1]
         )!
-        cg.drawLinearGradient(g, start: CGPoint(x: left, y: top), end: CGPoint(x: left, y: top + chartH), options: [])
+        cg.drawLinearGradient(
+            g, start: CGPoint(x: left, y: top), end: CGPoint(x: left, y: top + chartH), options: [])
         cg.restoreGState()
 
         let path = smoothPathThrough(points: pts)
@@ -669,7 +965,10 @@ private enum StoryCardDrawing {
                 .foregroundColor: UIColor(white: 1, alpha: 0.35),
                 .kern: 1.5,
             ]
-            hint.draw(at: CGPoint(x: rect.midX - hint.size(withAttributes: ha).width / 2, y: rect.midY + 20), withAttributes: ha)
+            hint.draw(
+                at: CGPoint(
+                    x: rect.midX - hint.size(withAttributes: ha).width / 2, y: rect.midY + 20),
+                withAttributes: ha)
         }
     }
 
@@ -703,12 +1002,15 @@ private enum StoryCardDrawing {
             .kern: -2,
         ]
         let vs = distanceValue.size(withAttributes: valAttrs)
-        distanceValue.draw(at: CGPoint(x: rect.minX + 38, y: rect.minY + 50), withAttributes: valAttrs)
+        distanceValue.draw(
+            at: CGPoint(x: rect.minX + 38, y: rect.minY + 50), withAttributes: valAttrs)
 
         let unitFont = UIFont.monospacedDigitSystemFont(ofSize: 30, weight: .medium)
         let us = " km".size(withAttributes: [.font: unitFont])
         " km".draw(
-            at: CGPoint(x: rect.minX + 38 + vs.width + 8, y: rect.minY + 50 + (vs.height - us.height) * 0.55),
+            at: CGPoint(
+                x: rect.minX + 38 + vs.width + 8, y: rect.minY + 50 + (vs.height - us.height) * 0.55
+            ),
             withAttributes: [
                 .font: unitFont,
                 .foregroundColor: UIColor(white: 1, alpha: 0.85),
@@ -732,47 +1034,251 @@ private enum StoryCardDrawing {
         unit: String? = nil,
         accent: UIColor?,
         in rect: CGRect,
-        cornerRadius: CGFloat = 28,
-        elevated: Bool = false
+        cornerRadius: CGFloat = 52,
+        elevated: Bool = false,
+        secondaryValue: String? = nil,
+        secondaryLabel: String? = nil
     ) {
+        let cg = UIGraphicsGetCurrentContext()!
+
+        // Modern glass background with gradient
         let path = UIBezierPath(roundedRect: rect, cornerRadius: cornerRadius)
-        UIColor(white: 1, alpha: elevated ? 0.08 : 0.06).setFill()
-        path.fill()
+        cg.saveGState()
+        cg.addPath(path.cgPath)
+        cg.clip()
 
+        // Gradient fill for glass effect
+        let glassGrad = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(),
+            colors: [
+                UIColor(white: 1, alpha: elevated ? 0.14 : 0.10).cgColor,
+                UIColor(white: 1, alpha: elevated ? 0.06 : 0.03).cgColor,
+            ] as CFArray,
+            locations: [0, 1]
+        )!
+        cg.drawLinearGradient(
+            glassGrad,
+            start: CGPoint(x: rect.minX, y: rect.minY),
+            end: CGPoint(x: rect.minX, y: rect.maxY),
+            options: []
+        )
+        cg.restoreGState()
+
+        // Subtle accent glow at top
         if let accent {
-            accent.withAlphaComponent(0.35).setStroke()
-        } else {
-            UIColor(white: 1, alpha: 0.1).setStroke()
+            cg.saveGState()
+            cg.addPath(path.cgPath)
+            cg.clip()
+            let glowH: CGFloat = 60
+            let glowGrad = CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                colors: [
+                    accent.withAlphaComponent(0.25).cgColor,
+                    accent.withAlphaComponent(0).cgColor,
+                ] as CFArray,
+                locations: [0, 1]
+            )!
+            cg.drawLinearGradient(
+                glowGrad,
+                start: CGPoint(x: rect.minX, y: rect.minY),
+                end: CGPoint(x: rect.minX, y: rect.minY + glowH),
+                options: []
+            )
+            cg.restoreGState()
         }
-        path.lineWidth = 1
-        path.stroke()
 
+        // Border with gradient
+        if let accent {
+            cg.saveGState()
+            cg.setLineWidth(1.5)
+            let borderGrad = CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                colors: [
+                    accent.withAlphaComponent(0.5).cgColor,
+                    accent.withAlphaComponent(0.15).cgColor,
+                ] as CFArray,
+                locations: [0, 1]
+            )!
+            cg.addPath(path.cgPath)
+            cg.replacePathWithStrokedPath()
+            cg.clip()
+            cg.drawLinearGradient(
+                borderGrad,
+                start: CGPoint(x: rect.minX, y: rect.minY),
+                end: CGPoint(x: rect.minX, y: rect.maxY),
+                options: []
+            )
+            cg.restoreGState()
+        } else {
+            UIColor(white: 1, alpha: 0.12).setStroke()
+            path.lineWidth = 1
+            path.stroke()
+        }
+
+        // Label with icon-style indicator
+        let labelFontSize: CGFloat = 13
         let la: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 14, weight: .semibold),
-            .foregroundColor: UIColor(white: 1, alpha: 0.52),
-            .kern: 1.8,
+            .font: UIFont.systemFont(ofSize: labelFontSize, weight: .bold),
+            .foregroundColor: (accent ?? UIColor.white).withAlphaComponent(0.7),
+            .kern: 2.2,
         ]
-        label.draw(at: CGPoint(x: rect.minX + 22, y: rect.minY + 18), withAttributes: la)
+        let labelPos = CGPoint(x: rect.minX + 28, y: rect.minY + 24)
+        label.uppercased().draw(at: labelPos, withAttributes: la)
 
-        let valFont = UIFont.monospacedDigitSystemFont(ofSize: 48, weight: .bold)
+        // Main value - larger, centered
+        let valFontSize: CGFloat = 72
+        let valFont = UIFont.systemFont(ofSize: valFontSize, weight: .bold)
         var va: [NSAttributedString.Key: Any] = [
             .font: valFont,
             .foregroundColor: UIColor.white,
-            .kern: -1,
+            .kern: -3,
         ]
         if let accent {
             va[.foregroundColor] = accent
         }
-        value.draw(at: CGPoint(x: rect.minX + 22, y: rect.minY + 46), withAttributes: va)
+
+        let vs = value.size(withAttributes: va)
+
+        // Unit styling
+        let unitFontSize: CGFloat = 24
+        let uf = UIFont.systemFont(ofSize: unitFontSize, weight: .semibold)
+        let ua: [NSAttributedString.Key: Any] = [
+            .font: uf,
+            .foregroundColor: (accent ?? UIColor.white).withAlphaComponent(0.5),
+        ]
+
+        let us = unit?.size(withAttributes: ua) ?? .zero
+        let totalWidth = vs.width + (unit != nil ? 4 + us.width : 0)
+
+        // Center the value block
+        let valX = rect.minX + (rect.width - totalWidth) / 2
+        let valY = rect.minY + rect.height * 0.38 - vs.height / 2
+
+        value.draw(at: CGPoint(x: valX, y: valY), withAttributes: va)
 
         if let unit {
-            let uf = UIFont.monospacedDigitSystemFont(ofSize: 20, weight: .medium)
-            let ua: [NSAttributedString.Key: Any] = [
-                .font: uf,
-                .foregroundColor: (accent ?? UIColor.white).withAlphaComponent(0.55),
+            let unitY = valY + vs.height - us.height - 8
+            unit.draw(at: CGPoint(x: valX + vs.width + 4, y: unitY), withAttributes: ua)
+        }
+
+        // Secondary stat line at bottom
+        if let secVal = secondaryValue, let secLbl = secondaryLabel {
+            let sepY = rect.maxY - 52
+            let sepRect = CGRect(x: rect.minX + 28, y: sepY, width: rect.width - 56, height: 1)
+            UIColor(white: 1, alpha: 0.1).setFill()
+            UIRectFill(sepRect)
+
+            let secAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.monospacedDigitSystemFont(ofSize: 18, weight: .semibold),
+                .foregroundColor: UIColor(white: 1, alpha: 0.6),
+                .kern: 0.5,
             ]
-            let vs = value.size(withAttributes: va)
-            unit.draw(at: CGPoint(x: rect.minX + 22 + vs.width + 6, y: rect.minY + 56), withAttributes: ua)
+            let secText = "\(secLbl) \(secVal)"
+            let secSize = secText.size(withAttributes: secAttrs)
+            secText.draw(
+                at: CGPoint(x: rect.midX - secSize.width / 2, y: sepY + 10),
+                withAttributes: secAttrs
+            )
+        }
+    }
+
+    /// Draws a segmented pill with dividers between stats
+    private static func drawSegmentedPill(
+        segments: [(value: String, label: String)],
+        in rect: CGRect,
+        cg: CGContext,
+        accent: UIColor
+    ) {
+        guard !segments.isEmpty else { return }
+
+        let corner = rect.height / 2
+        let path = UIBezierPath(roundedRect: rect, cornerRadius: corner)
+
+        // Glass background
+        cg.saveGState()
+        cg.addPath(path.cgPath)
+        cg.clip()
+
+        let glassGrad = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(),
+            colors: [
+                UIColor(white: 1, alpha: 0.12).cgColor,
+                UIColor(white: 1, alpha: 0.05).cgColor,
+            ] as CFArray,
+            locations: [0, 1]
+        )!
+        cg.drawLinearGradient(
+            glassGrad,
+            start: CGPoint(x: rect.minX, y: rect.minY),
+            end: CGPoint(x: rect.minX, y: rect.maxY),
+            options: []
+        )
+        cg.restoreGState()
+
+        // Gradient border
+        cg.saveGState()
+        cg.setLineWidth(1.5)
+        let borderGrad = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(),
+            colors: [
+                accent.withAlphaComponent(0.4).cgColor,
+                UIColor(white: 1, alpha: 0.15).cgColor,
+            ] as CFArray,
+            locations: [0, 1]
+        )!
+        cg.addPath(path.cgPath)
+        cg.replacePathWithStrokedPath()
+        cg.clip()
+        cg.drawLinearGradient(
+            borderGrad,
+            start: CGPoint(x: rect.minX, y: rect.minY),
+            end: CGPoint(x: rect.maxX, y: rect.minY),
+            options: []
+        )
+        cg.restoreGState()
+
+        // Draw segments
+        let segCount = CGFloat(segments.count)
+        let segWidth = rect.width / segCount
+        let dividerInset: CGFloat = 14
+
+        for (i, seg) in segments.enumerated() {
+            let segX = rect.minX + CGFloat(i) * segWidth
+            let segRect = CGRect(x: segX, y: rect.minY, width: segWidth, height: rect.height)
+
+            // Value (top, larger)
+            let valAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.monospacedDigitSystemFont(ofSize: 26, weight: .bold),
+                .foregroundColor: UIColor.white,
+                .kern: -0.5,
+            ]
+            let valSize = seg.value.size(withAttributes: valAttrs)
+            let valX = segRect.midX - valSize.width / 2
+            let valY = segRect.midY - valSize.height / 2 - 6
+            seg.value.draw(at: CGPoint(x: valX, y: valY), withAttributes: valAttrs)
+
+            // Label (bottom, smaller)
+            let lblAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 10, weight: .semibold),
+                .foregroundColor: UIColor(white: 1, alpha: 0.5),
+                .kern: 1.2,
+            ]
+            let lblSize = seg.label.size(withAttributes: lblAttrs)
+            let lblX = segRect.midX - lblSize.width / 2
+            let lblY = valY + valSize.height + 2
+            seg.label.draw(at: CGPoint(x: lblX, y: lblY), withAttributes: lblAttrs)
+
+            // Divider (except after last)
+            if i < segments.count - 1 {
+                let divX = segX + segWidth
+                let divTop = rect.minY + dividerInset
+                let divBottom = rect.maxY - dividerInset
+                cg.setStrokeColor(UIColor(white: 1, alpha: 0.15).cgColor)
+                cg.setLineWidth(1)
+                cg.move(to: CGPoint(x: divX, y: divTop))
+                cg.addLine(to: CGPoint(x: divX, y: divBottom))
+                cg.strokePath()
+            }
         }
     }
 
@@ -798,4 +1304,5 @@ private enum StoryCardDrawing {
         let sw = sub.size(withAttributes: sa)
         sub.draw(at: CGPoint(x: width - sidePad - sw.width, y: bottomY - 28), withAttributes: sa)
     }
+
 }

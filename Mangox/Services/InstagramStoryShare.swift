@@ -2,7 +2,8 @@ import Foundation
 import UIKit
 import os.log
 
-private let instagramStoryLogger = Logger(subsystem: "com.abchalita.Mangox", category: "InstagramStoryShare")
+private let instagramStoryLogger = Logger(
+    subsystem: "com.abchalita.Mangox", category: "InstagramStoryShare")
 
 // MARK: - Instagram Stories (no login)
 
@@ -30,7 +31,9 @@ enum InstagramStoryShare {
 
     /// Numeric Facebook / Meta App ID from `FacebookAppID` in Info.plist (build setting `FACEBOOK_APP_ID`).
     static var facebookAppID: String? {
-        guard let raw = Bundle.main.object(forInfoDictionaryKey: "FacebookAppID") as? String else { return nil }
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: "FacebookAppID") as? String else {
+            return nil
+        }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
@@ -53,6 +56,19 @@ enum InstagramStoryShare {
         return UIApplication.shared.canOpenURL(url)
     }
 
+    // MARK: - Encoding (pasteboard size)
+
+    /// Opaque story layers: prefer **JPEG** so two-layer shares stay under iOS pasteboard limits (large dual-PNG payloads often fail silently).
+    static func encodeBackgroundImageData(_ image: UIImage) -> Data? {
+        if let j = image.jpegData(compressionQuality: 0.92) { return j }
+        return image.pngData()
+    }
+
+    /// Sticker layer must keep alpha — **PNG** only.
+    static func encodeStickerImageData(_ image: UIImage) -> Data? {
+        image.pngData()
+    }
+
     // MARK: - Render
 
     /// Renders a **full-bleed** 1080×1920 story bitmap (same as ``/storySize``) — no letterboxing, no corner logo.
@@ -61,13 +77,23 @@ enum InstagramStoryShare {
         workout: Workout,
         dominantZone: PowerZone,
         routeName: String?,
-        totalElevationGain: Double
+        totalElevationGain: Double,
+        personalRecordNames: [String] = [],
+        options: InstagramStoryCardOptions? = nil,
+        whoopStrain: Double? = nil,
+        whoopRecovery: Double? = nil,
+        aiTitle: String? = nil
     ) -> UIImage {
         InstagramStoryCardRenderer.render(
             workout: workout,
             dominantZone: dominantZone,
             routeName: routeName,
-            totalElevationGain: totalElevationGain
+            totalElevationGain: totalElevationGain,
+            personalRecordNames: personalRecordNames,
+            options: options,
+            whoopStrain: whoopStrain,
+            whoopRecovery: whoopRecovery,
+            aiTitle: aiTitle
         )
     }
 
@@ -79,33 +105,67 @@ enum InstagramStoryShare {
     /// Returns `true` if the Instagram URL was opened; `false` if App ID is missing or the URL cannot be opened.
     @discardableResult
     static func presentStories(withPNGData imageData: Data) -> Bool {
+        return presentStories(backgroundPNGData: imageData, stickerPNGData: nil)
+    }
+
+    /// Opens Instagram Stories with optional **background** and/or **sticker** assets (Meta pasteboard API).
+    /// Pass at least one of `backgroundPNGData` or `stickerPNGData`.
+    ///
+    /// Pasteboard keys follow Meta’s iOS samples: **no** gradient keys when a background image is present (only sticker-only mode sets colors).
+    @discardableResult
+    static func presentStories(
+        backgroundPNGData: Data?,
+        stickerPNGData: Data?,
+        backgroundTopColorHex: String = "050510",
+        backgroundBottomColorHex: String = "100818"
+    ) -> Bool {
         guard let storiesURL = instagramStoriesShareURL() else {
-            instagramStoryLogger.error("Instagram Stories: set FACEBOOK_APP_ID in Xcode build settings (FacebookAppID in Info.plist). See https://developers.facebook.com/docs/instagram-platform/sharing-to-stories/")
+            instagramStoryLogger.error(
+                "Instagram Stories: set FACEBOOK_APP_ID in Xcode build settings (FacebookAppID in Info.plist). See https://developers.facebook.com/docs/instagram-platform/sharing-to-stories/"
+            )
             return false
         }
 
-        var item: [String: Any] = [
-            "com.instagram.sharedSticker.backgroundImage": imageData
-        ]
-        // Per Meta: if a background *image* is supplied, gradient colors are typically ignored; kept as fallback only.
-        item["com.instagram.sharedSticker.backgroundTopColor"] = "050510"
-        item["com.instagram.sharedSticker.backgroundBottomColor"] = "100818"
+        guard backgroundPNGData != nil || stickerPNGData != nil else { return false }
+
+        var item: [String: Any] = [:]
+        switch (backgroundPNGData, stickerPNGData) {
+        case (let bg?, nil):
+            item["com.instagram.sharedSticker.backgroundImage"] = bg
+        case (nil, let st?):
+            item["com.instagram.sharedSticker.stickerImage"] = st
+            item["com.instagram.sharedSticker.backgroundTopColor"] = backgroundTopColorHex
+            item["com.instagram.sharedSticker.backgroundBottomColor"] = backgroundBottomColorHex
+        case (let bg?, let st?):
+            item["com.instagram.sharedSticker.backgroundImage"] = bg
+            item["com.instagram.sharedSticker.stickerImage"] = st
+        default:
+            return false
+        }
 
         UIPasteboard.general.setItems(
             [item],
             options: [.expirationDate: Date().addingTimeInterval(300)]
         )
 
-        guard UIApplication.shared.canOpenURL(storiesURL) else { return false }
-        UIApplication.shared.open(storiesURL, options: [:], completionHandler: nil)
+        guard UIApplication.shared.canOpenURL(storiesURL) else {
+            instagramStoryLogger.warning(
+                "Instagram Stories: canOpenURL(instagram-stories) is false — is Instagram installed?"
+            )
+            return false
+        }
+
+        // Defer `open` one run-loop turn so the pasteboard commit is visible to Instagram when it foregrounds.
+        DispatchQueue.main.async {
+            UIApplication.shared.open(storiesURL, options: [:], completionHandler: nil)
+        }
         return true
     }
 
     /// Encodes on the caller’s thread, then presents. For large story assets, prefer encoding with ``presentStories(withPNGData:)`` on a background executor.
     @discardableResult
     static func presentStories(with image: UIImage) -> Bool {
-        // Meta accepts JPG or PNG for the background asset; PNG keeps gradients and text sharp on the generated card.
-        guard let imageData = image.pngData() else { return false }
+        guard let imageData = encodeBackgroundImageData(image) else { return false }
         return presentStories(withPNGData: imageData)
     }
 }

@@ -53,7 +53,7 @@ final class HapticManager {
 
     // MARK: - Milestones & Goals
 
-    /// Double-tap for distance milestones (every 10 km).
+    /// Double-tap for distance milestones (every N km on the indoor dashboard).
     func milestone() {
         let gen = UIImpactFeedbackGenerator(style: .medium)
         gen.impactOccurred()
@@ -65,6 +65,11 @@ final class HapticManager {
     /// Single success tap when a ride goal is completed.
     func goalCompleted() {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    /// Subtle tap for optional in-ride training tips.
+    func rideTipNudge() {
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.85)
     }
 
     // MARK: - Outdoor Navigation

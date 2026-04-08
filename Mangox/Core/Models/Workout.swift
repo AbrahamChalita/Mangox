@@ -36,6 +36,9 @@ final class Workout {
     /// Optional subtitle for directions (e.g. address line).
     var routeDestinationSummary: String?
 
+    /// On-device AI generated 3-6 word label (e.g. "Solid Threshold Block"). Nil until generated.
+    var smartTitle: String?
+
     /// Optional link to a training plan day (e.g. "w2d2").
     /// Set when the workout is started from a guided plan session.
     /// Used to un-mark plan completion if the workout is deleted.

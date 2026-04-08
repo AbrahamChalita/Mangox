@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import FoundationModels
 import SwiftData
 import SwiftUI
 import os.log
@@ -198,6 +199,16 @@ struct UserContext: Encodable {
     let riderWeightKg: Double?
     /// Rider age in years when birth year is set.
     let riderAge: Int?
+    /// True when a WHOOP account is connected in-app (OAuth).
+    let whoopLinked: Bool
+    /// Latest WHOOP recovery score (0–100) when available.
+    let whoopRecoveryPercent: Double?
+    /// Resting HR from latest WHOOP recovery payload, when present.
+    let whoopRestingHR: Int?
+    /// HRV (RMSSD, ms) rounded from WHOOP when present.
+    let whoopHrvMs: Int?
+    /// Max HR from WHOOP body-measurement endpoint when present (not workout peak).
+    let whoopMaxHeartRate: Int?
 }
 
 struct LastRideContext: Encodable {
@@ -553,10 +564,33 @@ struct ChatWireEvent: Decodable, Sendable {
     let error: String?
 }
 
+// MARK: - Coach routing (quick starters vs typed input)
+
+/// Controls whether a send tries on-device narrow first or goes straight to Mangox Cloud.
+enum CoachChatDelivery: Sendable {
+    /// Heuristics + on-device classifier (default for typed messages).
+    case automatic
+    /// Quick starter tap: on-device narrow first, no cloud-biased classification.
+    case starter
+    /// Skip on-device (e.g. user chose “Go deeper with cloud coach”).
+    case cloudOnly
+
+    fileprivate var logLabel: String {
+        switch self {
+        case .automatic: "automatic"
+        case .starter: "starter"
+        case .cloudOnly: "cloudOnly"
+        }
+    }
+}
+
 // MARK: - AIService
 
 @Observable @MainActor
 final class AIService {
+
+    /// Injected from `MangoxApp` so coach context and recovery heuristics can use WHOOP when linked.
+    var whoopDataSource: WhoopService?
 
     // MARK: Public State
 
@@ -579,9 +613,15 @@ final class AIService {
     var streamStatusText: String?
     /// True while the model is emitting a `<think>` block with no visible content yet.
     var streamIsThinking: Bool = false
+    /// True while on-device Foundation Models is streaming (bubble chrome + status copy).
+    var streamUsesOnDeviceAppearance: Bool = false
 
     private var streamRawBuffer: String = ""
     private var streamDisplayThrottleTask: Task<Void, Never>?
+
+    /// Persistent on-device narrow-reply session. Reused across turns so the model has multi-turn
+    /// memory. Reset to nil on createNewSession / switchToSession / context-window overflow.
+    private var onDeviceNarrowSession: LanguageModelSession?
 
     /// The currently active chat session. Nil means no session selected.
     var currentSessionID: UUID?
@@ -605,9 +645,13 @@ final class AIService {
     private static func sanitizedSuggestedActions(_ raw: [SuggestedAction]) -> [SuggestedAction] {
         raw
             .map {
-                SuggestedAction(
+                let trimmed = SuggestedAction(
                     label: $0.label.trimmingCharacters(in: .whitespacesAndNewlines),
                     type: $0.type.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+                return SuggestedAction(
+                    label: CoachChipPresentation.displayTitle(for: trimmed),
+                    type: trimmed.type
                 )
             }
             .filter { !$0.label.isEmpty }
@@ -734,6 +778,25 @@ final class AIService {
 
     private let logger = Logger(subsystem: "com.abchalita.Mangox", category: "AIService")
 
+    // MARK: Coach chat flow logging
+
+    /// `UserDefaults` key. When `true`, logs routing for each coach send (on-device vs cloud, delivery mode).
+    /// In **DEBUG** builds, flow logging defaults to **on** unless this key is explicitly set to `false`.
+    static let coachChatFlowLogDefaultsKey = "MangoxCoachChatFlowLog"
+
+    private static var coachChatFlowLoggingEnabled: Bool {
+        let ud = UserDefaults.standard
+        #if DEBUG
+        if ud.object(forKey: coachChatFlowLogDefaultsKey) == nil { return true }
+        #endif
+        return ud.bool(forKey: coachChatFlowLogDefaultsKey)
+    }
+
+    private func logCoachFlow(_ message: String) {
+        guard Self.coachChatFlowLoggingEnabled else { return }
+        logger.info("\(message, privacy: .public)")
+    }
+
     // MARK: Private — daily usage tracking (UserDefaults, no @Observable needed)
 
     private let udDateKey = "ai_chat_count_date"
@@ -778,10 +841,12 @@ final class AIService {
     private var apiBaseURL: String {
         let cfg = ChatProviderResolver().resolve()
         if cfg.kind == .mangoxBackend, !cfg.baseURL.isEmpty {
-            return cfg.baseURL
+            return MangoxBackendBaseURLFormatting.normalizedRoot(cfg.baseURL)
         }
-        return Bundle.main.object(forInfoDictionaryKey: "MangoxAPIBaseURL") as? String
+        let raw =
+            Bundle.main.object(forInfoDictionaryKey: "MangoxAPIBaseURL") as? String
             ?? "https://mangox-backend-production.up.railway.app"
+        return MangoxBackendBaseURLFormatting.normalizedRoot(raw)
     }
 
     private var userID: String {
@@ -839,42 +904,253 @@ final class AIService {
         streamIsThinking = false
     }
 
-    // MARK: - Send Chat Message
+    private func applyOnDeviceNarrowPartial(_ partial: NarrowCoachReply.PartiallyGenerated) {
+        let body = partial.body ?? ""
+        let reasoning = partial.reasoning ?? ""
+        let bodyTrim = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if bodyTrim.isEmpty {
+            streamRawBuffer = ""
+            streamDraftText = ""
+            streamIsThinking = !reasoning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } else {
+            streamIsThinking = false
+            streamStatusText = nil
+            streamRawBuffer = body
+            scheduleStreamDraftDisplayFlush()
+        }
+    }
 
-    func sendMessage(_ text: String, isPro: Bool, modelContext: ModelContext) async {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        guard !hasReachedFreeLimit(isPro: isPro) else { return }
+    /// When Mangox Cloud (or plan UI) is mid–multi-turn intake, typed replies must not be hijacked by the on-device narrow path.
+    private func resolveCoachDelivery(proposed: CoachChatDelivery) -> CoachChatDelivery {
+        if proposed == .cloudOnly { return .cloudOnly }
+        if planConfirmationDraft != nil || planSaveCelebration != nil {
+            return .cloudOnly
+        }
+        if proposed != .starter, shouldRouteToCloudAfterStructuredAssistantTurn() {
+            return .cloudOnly
+        }
+        return proposed
+    }
 
-        incrementDailyCount()
+    private func shouldRouteToCloudAfterStructuredAssistantTurn() -> Bool {
+        guard let assistant = messages.reversed().first(where: { $0.role == .assistant }) else {
+            return false
+        }
+        if assistant.category == "on_device_coach" { return false }
+        if assistant.category == "error" { return false }
+        let cat = (assistant.category ?? "").lowercased()
+        if cat == "clarification" || cat.contains("clarif") { return true }
+        if !assistant.followUpBlocks.isEmpty { return true }
+        // Mangox Cloud uses `ask_followup` chips for plan intake and other continuations; free-text replies must stay on-thread.
+        if assistant.suggestedActions.contains(where: { $0.type.lowercased() == "ask_followup" }) {
+            return true
+        }
+        return false
+    }
 
-        // Auto-create a session if none exists
-        if currentSessionID == nil {
-            createNewSession(modelContext: modelContext)
+    /// Streams an on-device narrow reply when routing allows. Returns `true` if handled (no cloud call).
+    private func streamOnDeviceNarrowIfEligible(
+        userMessage: String,
+        modelContext: ModelContext,
+        delivery: CoachChatDelivery
+    ) async -> Bool {
+        if delivery == .cloudOnly {
+            logCoachFlow("coachFlow onDevice skip reason=deliveryCloudOnly")
+            return false
+        }
+        guard OnDeviceCoachEngine.isSystemModelAvailable else {
+            logCoachFlow(
+                "coachFlow onDevice skip reason=systemModelUnavailable systemModel=\(OnDeviceCoachEngine.systemModelAvailabilityLogDescription)"
+            )
+            return false
+        }
+        guard SystemLanguageModel.default.supportsLocale(Locale.current) else {
+            logCoachFlow("coachFlow onDevice skip reason=unsupportedLocale")
+            return false
+        }
+        if OnDeviceCoachEngine.heuristicCloudRoute(for: userMessage) {
+            logCoachFlow("coachFlow onDevice skip reason=heuristicCloudRoute")
+            return false
         }
 
-        let userMsg = ChatMessage.user(trimmed)
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
-            messages.append(userMsg)
+        let factSheet = coachFactSheetText(modelContext: modelContext)
+        let route: CoachRouteKind
+        if delivery == .starter {
+            route = .localNarrowReply
+            logCoachFlow("coachFlow onDevice route delivery=starter decision=forcedLocalNarrow")
+        } else {
+            do {
+                if OnDeviceCoachEngine.heuristicLocalPreferred(for: userMessage) {
+                    route = .localNarrowReply
+                    logCoachFlow("coachFlow onDevice route delivery=automatic decision=heuristicLocalPreferred")
+                } else {
+                    route = try await OnDeviceCoachEngine.classifyRoute(
+                        userMessage: userMessage,
+                        factSheet: factSheet
+                    )
+                    logCoachFlow(
+                        "coachFlow onDevice route delivery=automatic classifier=\(route.rawValue)"
+                    )
+                }
+            } catch {
+                logger.warning("On-device route classification failed: \(error.localizedDescription)")
+                logCoachFlow("coachFlow onDevice skip reason=classifierError")
+                return false
+            }
+            guard route == .localNarrowReply else {
+                logCoachFlow(
+                    "coachFlow onDevice skip reason=classifierNotLocalNarrow route=\(route.rawValue)"
+                )
+                return false
+            }
         }
-        persistCoachMessage(userMsg, modelContext: modelContext)
 
-        // Update session title from first user message
-        updateSessionTitleIfNeeded(modelContext: modelContext)
+        logCoachFlow("coachFlow onDevice streamNarrowReply begin")
+        var trainingSnapshot = await coachTrainingSnapshotForOnDeviceNarrow(modelContext: modelContext)
+        WorkoutRAGIndex.ensureRecentIndexed(modelContext: modelContext, maxNewEmbeddings: 16)
+        if let vectorAppendix = WorkoutRAGRetriever.appendixIfRelevant(
+            userMessage: userMessage,
+            modelContext: modelContext
+        ) {
+            trainingSnapshot += "\n\n\(vectorAppendix)"
+        }
+        if let ragAppendix = WorkoutHistoryKeywordRetriever.appendixIfRelevant(
+            userMessage: userMessage,
+            modelContext: modelContext
+        ) {
+            trainingSnapshot += "\n\n\(ragAppendix)"
+        }
 
-        isLoading = true
-        error = nil
-        streamDraftText = ""
-        streamRawBuffer = ""
-        streamDisplayThrottleTask?.cancel()
-        streamDisplayThrottleTask = nil
-        streamStatusText = nil
+        // Create the narrow session once per coach conversation; reuse it across turns for multi-turn memory.
+        // Tools are bound at creation with a data snapshot from this moment.
+        if onDeviceNarrowSession == nil {
+            let narrowTools: [any Tool] = [
+                MangoxOnDeviceRecentWorkoutsTool(
+                    digest: coachWorkoutHistoryDigestForOnDeviceTools(modelContext: modelContext)),
+                MangoxOnDeviceRiderExtendedTool(
+                    digest: coachRiderExtendedProfileToolPayload(modelContext: modelContext)),
+                MangoxOnDeviceFTPHistoryTool(digest: coachFTPTestHistoryToolPayload()),
+            ]
+            let newSession = OnDeviceCoachEngine.makeNarrowSession(tools: narrowTools)
+            newSession.prewarm()
+            onDeviceNarrowSession = newSession
+            logCoachFlow("coachFlow onDevice narrowSession created prewarm=true")
+        }
+        let narrowSession = onDeviceNarrowSession!
+
+        streamUsesOnDeviceAppearance = true
+        streamStatusText = "On-device coach"
+        defer {
+            streamUsesOnDeviceAppearance = false
+            streamStatusText = nil
+        }
+
+        do {
+            let reply: NarrowCoachReply? = try await OnDeviceCoachEngine.signpostOnDeviceNarrow {
+                try await OnDeviceCoachEngine.streamNarrowReply(
+                    userMessage: userMessage,
+                    trainingSnapshot: trainingSnapshot,
+                    session: narrowSession
+                ) { [weak self] partial in
+                    await MainActor.run {
+                        self?.applyOnDeviceNarrowPartial(partial)
+                    }
+                }
+            }
+
+            flushStreamDraftToUI()
+            streamDraftText = ""
+            streamRawBuffer = ""
+            streamDisplayThrottleTask?.cancel()
+            streamDisplayThrottleTask = nil
+            streamIsThinking = false
+
+            guard let narrow = reply else {
+                logCoachFlow("coachFlow onDevice stream end emptyReply")
+                return false
+            }
+            let body = narrow.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !body.isEmpty else {
+                logCoachFlow("coachFlow onDevice stream end emptyBody")
+                return false
+            }
+
+            let fu = narrow.followUp.trimmingCharacters(in: .whitespacesAndNewlines)
+            let onDeviceChips = narrow.suggestedActions.map {
+                SuggestedAction(label: $0.label, type: "on_device_followup")
+            }
+            let escalateChip: [SuggestedAction] =
+                delivery == .starter
+                ? [SuggestedAction(label: "Go deeper with cloud coach", type: "escalate_cloud")]
+                : []
+            let aiMsg = ChatMessage(
+                id: UUID(),
+                role: .assistant,
+                content: body,
+                timestamp: .now,
+                suggestedActions: onDeviceChips + escalateChip,
+                followUpQuestion: fu.isEmpty ? nil : fu,
+                followUpBlocks: [],
+                thinkingSteps: [],
+                category: "on_device_coach",
+                tags: ["on_device"],
+                references: [],
+                usedWebSearch: false,
+                feedbackScore: nil,
+                confidence: 0.95
+            )
+            messages.append(aiMsg)
+            persistCoachMessage(aiMsg, modelContext: modelContext)
+            isLoading = false
+            logCoachFlow(
+                "coachFlow onDevice success category=on_device_coach escalateChip=\(delivery == .starter ? "yes" : "no") bodyChars=\(body.count)"
+            )
+            return true
+        } catch {
+            logger.warning("On-device narrow stream failed: \(error.localizedDescription)")
+            MangoxFoundationModelsSupport.logGenerationFailure(error, label: "coach_narrow_aiservice")
+            if let gen = error as? LanguageModelSession.GenerationError {
+                switch gen {
+                case .exceededContextWindowSize:
+                    // Reset session so the next turn starts fresh; this message falls to cloud.
+                    onDeviceNarrowSession = nil
+                    logCoachFlow("coachFlow onDevice stream error exceededContextWindow sessionReset=true")
+                case .guardrailViolation:
+                    logCoachFlow("coachFlow onDevice stream error guardrailViolation")
+                case .unsupportedLanguageOrLocale:
+                    logCoachFlow("coachFlow onDevice stream error unsupportedLanguageOrLocale")
+                default:
+                    logCoachFlow("coachFlow onDevice stream error generation")
+                }
+            } else if error is LanguageModelSession.ToolCallError {
+                logCoachFlow("coachFlow onDevice stream error toolCall")
+            } else {
+                logCoachFlow("coachFlow onDevice stream error narrowStreamFailed")
+            }
+            flushStreamDraftToUI()
+            streamDraftText = ""
+            streamRawBuffer = ""
+            streamDisplayThrottleTask?.cancel()
+            streamDisplayThrottleTask = nil
+            streamIsThinking = false
+            return false
+        }
+    }
+
+    // MARK: - Mangox Cloud coach turn (no new user row)
+
+    private func runMangoxCloudCoachTurn(
+        userText: String,
+        isPro: Bool,
+        modelContext: ModelContext
+    ) async {
+        streamUsesOnDeviceAppearance = false
 
         let history = buildHistory()
         let context = buildUserContext(modelContext: modelContext)
         let encryptedContext = encryptUserContext(context)
         let request = ChatRequest(
-            message: trimmed,
+            message: userText,
             history: history,
             user_context: encryptedContext == nil ? context : nil,
             user_context_encrypted: encryptedContext,
@@ -885,6 +1161,10 @@ final class AIService {
 
         let provider = ChatProviderResolver().resolve()
         let adapter = ChatProviderFactory.makeAdapter(for: provider.kind)
+
+        logCoachFlow(
+            "coachFlow cloud runMangoxCloudCoachTurn begin provider=\(provider.kind.rawValue) historyTurns=\(history.count) userChars=\(userText.count)"
+        )
 
         do {
             var finalResponse: ChatAPIResponse?
@@ -938,6 +1218,7 @@ final class AIService {
                 messages.append(errMsg)
                 persistCoachMessage(errMsg, modelContext: modelContext)
                 self.error = streamFailure
+                logCoachFlow("coachFlow cloud end streamFailure assistantErrorBubble")
                 return
             }
 
@@ -961,6 +1242,7 @@ final class AIService {
                 messages.append(errMsg)
                 persistCoachMessage(errMsg, modelContext: modelContext)
                 self.error = "Empty response"
+                logCoachFlow("coachFlow cloud end emptyFinalResponse")
                 return
             }
 
@@ -1000,7 +1282,7 @@ final class AIService {
             }
 
             // For Mangox Cloud: use server-supplied thinkingSteps.
-            // For OpenAI-compatible (e.g. local Ollama): capture <think> blocks parsed from content.
+            // For OpenAI-compatible (e.g. local Ollama): capture <redacted_thinking> blocks parsed from content.
             let thinkingSource =
                 response.thinkingSteps.isEmpty ? parsedThinkingBlocks : response.thinkingSteps
 
@@ -1023,9 +1305,14 @@ final class AIService {
             messages.append(aiMsg)
             persistCoachMessage(aiMsg, modelContext: modelContext)
 
+            logCoachFlow(
+                "coachFlow cloud success category=\(response.category) suggestedActions=\(panelActions.count) followUpBlocks=\(blocks.count)"
+            )
+
             await executePendingGeneratePlanToolIfNeeded(from: response, modelContext: modelContext)
         } catch {
-            logger.error("sendMessage failed: \(error)")
+            logger.error("runMangoxCloudCoachTurn failed: \(error)")
+            logCoachFlow("coachFlow cloud catch transportOrDecodeError")
             streamDraftText = ""
             streamRawBuffer = ""
             streamDisplayThrottleTask?.cancel()
@@ -1054,6 +1341,159 @@ final class AIService {
             persistCoachMessage(errMsg, modelContext: modelContext)
             self.error = error.localizedDescription
         }
+    }
+
+    private func bumpSessionUpdatedAt(modelContext: ModelContext) {
+        guard let sessionID = currentSessionID else { return }
+        let descriptor = FetchDescriptor<ChatSession>(
+            predicate: #Predicate<ChatSession> { $0.id == sessionID }
+        )
+        if let sessions = try? modelContext.fetch(descriptor), let session = sessions.first {
+            session.updatedAt = .now
+            do {
+                try modelContext.save()
+            } catch {
+                logger.error("Failed to bump session timestamp: \(error)")
+            }
+        }
+    }
+
+    private func removeCoachMessage(id: UUID, modelContext: ModelContext) {
+        messages.removeAll { $0.id == id }
+        let descriptor = FetchDescriptor<CoachChatMessage>(
+            predicate: #Predicate<CoachChatMessage> { $0.id == id }
+        )
+        if let rows = try? modelContext.fetch(descriptor) {
+            for row in rows {
+                modelContext.delete(row)
+            }
+            do {
+                try modelContext.save()
+            } catch {
+                logger.error("Failed to delete coach message: \(error)")
+            }
+        }
+        bumpSessionUpdatedAt(modelContext: modelContext)
+    }
+
+    /// Replaces the latest on-device starter reply with a full Mangox Cloud turn for the same user message (no extra daily count).
+    func escalateStarterOnDeviceToCloud(isPro: Bool, modelContext: ModelContext) async {
+        guard !isLoading else {
+            logCoachFlow("coachFlow escalate skip reason=alreadyLoading")
+            return
+        }
+        guard let assistantIdx = messages.lastIndex(where: {
+            $0.role == .assistant && $0.category == "on_device_coach"
+        }) else {
+            logCoachFlow("coachFlow escalate skip reason=noOnDeviceAssistant")
+            return
+        }
+        guard assistantIdx > 0 else {
+            logCoachFlow("coachFlow escalate skip reason=assistantAtIndexZero")
+            return
+        }
+
+        var userText: String?
+        for j in (0..<assistantIdx).reversed() {
+            if messages[j].role == .user {
+                userText = messages[j].content
+                break
+            }
+        }
+        guard let userText else {
+            logCoachFlow("coachFlow escalate skip reason=noPrecedingUserMessage")
+            return
+        }
+        let assistantID = messages[assistantIdx].id
+
+        logCoachFlow(
+            "coachFlow escalate begin removeAssistant=\(assistantID.uuidString) userChars=\(userText.count)"
+        )
+        removeCoachMessage(id: assistantID, modelContext: modelContext)
+
+        isLoading = true
+        error = nil
+        streamDraftText = ""
+        streamRawBuffer = ""
+        streamDisplayThrottleTask?.cancel()
+        streamDisplayThrottleTask = nil
+        streamStatusText = nil
+        streamUsesOnDeviceAppearance = false
+
+        await runMangoxCloudCoachTurn(userText: userText, isPro: isPro, modelContext: modelContext)
+    }
+
+    // MARK: - Send Chat Message
+
+    func sendMessage(
+        _ text: String,
+        isPro: Bool,
+        modelContext: ModelContext,
+        delivery: CoachChatDelivery = .automatic
+    ) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            logCoachFlow("coachFlow sendMessage abort reason=empty")
+            return
+        }
+        guard !hasReachedFreeLimit(isPro: isPro) else {
+            logCoachFlow("coachFlow sendMessage abort reason=dailyLimit isPro=\(isPro)")
+            return
+        }
+
+        let sessionBefore = currentSessionID
+        let effectiveDelivery = resolveCoachDelivery(proposed: delivery)
+        if effectiveDelivery != delivery {
+            logCoachFlow(
+                "coachFlow sendMessage deliveryOverride proposed=\(delivery.logLabel) effective=\(effectiveDelivery.logLabel)"
+            )
+        }
+
+        logCoachFlow(
+            "coachFlow sendMessage start delivery=\(effectiveDelivery.logLabel) isPro=\(isPro) chars=\(trimmed.count) session=\(sessionBefore?.uuidString ?? "nil")"
+        )
+
+        incrementDailyCount()
+
+        // Auto-create a session if none exists
+        if currentSessionID == nil {
+            createNewSession(modelContext: modelContext)
+            logCoachFlow(
+                "coachFlow sendMessage createdSession id=\(currentSessionID?.uuidString ?? "?")"
+            )
+        }
+
+        let userMsg = ChatMessage.user(trimmed)
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
+            messages.append(userMsg)
+        }
+        persistCoachMessage(userMsg, modelContext: modelContext)
+
+        // Update session title from first user message
+        updateSessionTitleIfNeeded(modelContext: modelContext)
+
+        isLoading = true
+        error = nil
+        streamDraftText = ""
+        streamRawBuffer = ""
+        streamDisplayThrottleTask?.cancel()
+        streamDisplayThrottleTask = nil
+        streamStatusText = nil
+        streamUsesOnDeviceAppearance = false
+
+        if await streamOnDeviceNarrowIfEligible(
+            userMessage: trimmed,
+            modelContext: modelContext,
+            delivery: effectiveDelivery
+        ) {
+            logCoachFlow("coachFlow sendMessage path=finishedOnDeviceNarrow")
+            return
+        }
+
+        streamUsesOnDeviceAppearance = false
+
+        logCoachFlow("coachFlow sendMessage path=cloudAfterOnDeviceSkippedOrFailed")
+        await runMangoxCloudCoachTurn(userText: trimmed, isPro: isPro, modelContext: modelContext)
     }
 
     // MARK: - Generate Plan
@@ -1551,6 +1991,12 @@ final class AIService {
         let riderPrefs = RidePreferences.shared
         let riderWeight: Double? = riderPrefs.riderWeightKg > 0 ? riderPrefs.riderWeightKg : nil
 
+        let whoop = whoopDataSource
+        let whoopLinked = whoop?.isConnected == true
+        let whoopPct = whoopLinked ? whoop?.latestRecoveryScore : nil
+        let whoopRhr = whoopLinked ? whoop?.latestRecoveryRestingHR : nil
+        let whoopHrv = whoopLinked ? whoop?.latestRecoveryHRV : nil
+
         return UserContext(
             ftp: ftp,
             maxHR: maxHR,
@@ -1566,7 +2012,12 @@ final class AIService {
             seasonGoalSummary: MangoxTrainingGoals.summaryLineForCoach,
             planKeyDaySemanticsHint: planSemanticsHint,
             riderWeightKg: riderWeight,
-            riderAge: riderPrefs.riderAge
+            riderAge: riderPrefs.riderAge,
+            whoopLinked: whoopLinked,
+            whoopRecoveryPercent: whoopPct,
+            whoopRestingHR: whoopRhr,
+            whoopHrvMs: whoopHrv,
+            whoopMaxHeartRate: whoopLinked ? whoop?.latestMaxHeartRateFromProfile : nil
         )
     }
 
@@ -1630,6 +2081,7 @@ final class AIService {
             try modelContext.save()
             currentSessionID = session.id
             messages.removeAll()
+            onDeviceNarrowSession = nil
             logger.debug("Created new session \(session.id)")
         } catch {
             logger.error("Failed to create new session: \(error)")
@@ -1639,6 +2091,7 @@ final class AIService {
     /// Switches to an existing session by ID.
     func switchToSession(_ sessionID: UUID, modelContext: ModelContext) {
         currentSessionID = sessionID
+        onDeviceNarrowSession = nil
         loadSession(sessionID, modelContext: modelContext)
     }
 
@@ -1671,27 +2124,41 @@ final class AIService {
     }
 
     /// Updates the session title from the first user message if still default.
+    /// When Apple Intelligence is available, generates a descriptive 3-5 word title via Foundation Models.
     private func updateSessionTitleIfNeeded(modelContext: ModelContext) {
         guard let sessionID = currentSessionID else { return }
         let descriptor = FetchDescriptor<ChatSession>(
             predicate: #Predicate<ChatSession> { $0.id == sessionID }
         )
-        if let sessions = try? modelContext.fetch(descriptor), let session = sessions.first {
-            if session.title == "New Conversation" {
-                session.updateTitle(from: session.messages)
-                do {
-                    try modelContext.save()
-                } catch {
-                    logger.error("Failed to update session title: \(error)")
-                }
-            } else {
-                session.updatedAt = .now
-                do {
-                    try modelContext.save()
-                } catch {
-                    logger.error("Failed to update session timestamp: \(error)")
+        guard let sessions = try? modelContext.fetch(descriptor), let session = sessions.first else { return }
+
+        if session.title == "New Conversation" {
+            // Apply fallback title immediately so the session is never stuck with "New Conversation".
+            session.updateTitle(from: session.messages)
+            do { try modelContext.save() } catch { logger.error("Failed to update session title: \(error)") }
+
+            // Then attempt AI title generation in background (overwrites fallback if successful).
+            let firstUser = session.messages.first(where: { $0.roleRaw == "user" })?.content ?? ""
+            let firstAssistant = session.messages.first(where: { $0.roleRaw == "assistant" })?.content ?? ""
+            guard !firstUser.isEmpty, !firstAssistant.isEmpty else { return }
+            Task { [weak self] in
+                guard let aiTitle = await OnDeviceCoachEngine.generateSessionTitle(
+                    firstUserMessage: firstUser, firstAssistantReply: firstAssistant) else { return }
+                await MainActor.run { [weak self] in
+                    guard self != nil else { return }
+                    let desc2 = FetchDescriptor<ChatSession>(predicate: #Predicate { $0.id == sessionID })
+                    if let found = (try? modelContext.fetch(desc2))?.first, found.title != "New Conversation" {
+                        // Only overwrite if we set the 5-word fallback (not a user-renamed session)
+                        found.title = aiTitle
+                        found.updatedAt = .now
+                        try? modelContext.save()
+                        self?.logCoachFlow("coachFlow sessionTitle ai=\(aiTitle)")
+                    }
                 }
             }
+        } else {
+            session.updatedAt = .now
+            do { try modelContext.save() } catch { logger.error("Failed to update session timestamp: \(error)") }
         }
     }
 
@@ -1784,10 +2251,19 @@ final class AIService {
     // MARK: - Regenerate
 
     func regenerateLastMessage(isPro: Bool, modelContext: ModelContext) async {
-        guard let lastUserMsg = messages.last(where: { $0.role == .user }) else { return }
-        guard !isLoading else { return }
+        guard let lastUserMsg = messages.last(where: { $0.role == .user }) else {
+            logCoachFlow("coachFlow regenerate skip reason=noUserMessage")
+            return
+        }
+        guard !isLoading else {
+            logCoachFlow("coachFlow regenerate skip reason=loading")
+            return
+        }
         if let lastIdx = messages.lastIndex(where: { $0.role == .assistant }) {
             messages.remove(at: lastIdx)
+            logCoachFlow("coachFlow regenerate removedLastAssistant then sendMessage automatic")
+        } else {
+            logCoachFlow("coachFlow regenerate noAssistantRemoved then sendMessage automatic")
         }
         await sendMessage(lastUserMsg.content, isPro: isPro, modelContext: modelContext)
     }
@@ -1824,6 +2300,12 @@ final class AIService {
     }
 
     func recoveryStatus(modelContext: ModelContext) -> RecoveryStatus {
+        if let whoop = whoopDataSource, whoop.isConnected, let pct = whoop.latestRecoveryScore {
+            if pct >= 67 { return .fresh }
+            if pct >= 34 { return .recovering }
+            return .fatigued
+        }
+
         let desc = FetchDescriptor<Workout>(
             predicate: #Predicate<Workout> { $0.statusRaw == "completed" },
             sortBy: [SortDescriptor(\.startDate, order: .reverse)]
@@ -1849,10 +2331,16 @@ final class AIService {
 
     // MARK: - Contextual Quick Prompts
 
-    struct QuickPrompt: Identifiable {
+    struct QuickPrompt: Identifiable, Equatable {
         var id: String { text }
         let text: String
         let icon: String
+    }
+
+    /// Empty-state quick starters plus optional content-tagging topic chips (Foundation Models).
+    struct CoachEmptyStartersContent: Equatable {
+        let prompts: [QuickPrompt]
+        let topicTags: [String]
     }
 
     /// User-visible copy for plan API failures (avoids raw DecodingError strings in the confirm banner).
@@ -1870,6 +2358,14 @@ final class AIService {
     func contextualQuickPrompts(modelContext: ModelContext) -> [QuickPrompt] {
         var prompts: [QuickPrompt] = []
         let status = recoveryStatus(modelContext: modelContext)
+        if let whoop = whoopDataSource, whoop.isConnected, let pct = whoop.latestRecoveryScore, pct < 34 {
+            prompts.append(
+                QuickPrompt(
+                    text: "How should I train with my WHOOP recovery today?",
+                    icon: "waveform.path.ecg"
+                )
+            )
+        }
         if status != .fresh {
             prompts.append(QuickPrompt(text: "Analyze my last ride", icon: "chart.bar.fill"))
         }

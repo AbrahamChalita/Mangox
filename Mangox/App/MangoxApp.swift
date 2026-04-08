@@ -10,6 +10,7 @@ struct MangoxApp: App {
     @State private var locationManager = LocationManager()
     @State private var healthKitManager = HealthKitManager()
     @State private var stravaService = StravaService()
+    @State private var whoopService = WhoopService()
     @State private var purchasesManager = PurchasesManager.shared
     @State private var aiService = AIService()
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
@@ -53,6 +54,7 @@ struct MangoxApp: App {
                         .environment(locationManager)
                         .environment(healthKitManager)
                         .environment(stravaService)
+                        .environment(whoopService)
                         .environment(FTPRefreshTrigger.shared)
                         .environment(purchasesManager)
                         .environment(FitnessTracker.shared)
@@ -68,6 +70,7 @@ struct MangoxApp: App {
                         .environment(locationManager)
                         .environment(healthKitManager)
                         .environment(stravaService)
+                        .environment(whoopService)
                         .preferredColorScheme(.dark)
                 }
 
@@ -77,6 +80,7 @@ struct MangoxApp: App {
                 LaunchScreenView(isVisible: showLaunch)
             }
             .task {
+                aiService.whoopDataSource = whoopService
                 // Wait for SwiftData @Query population + BLE manager init.
                 // 900ms covers cold launch on older devices and gives the entry
                 // animation time to fully play before we trigger the exit.
@@ -91,6 +95,7 @@ struct MangoxApp: App {
                 Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self,
                 AIGeneratedPlan.self, ChatSession.self, CoachChatMessage.self,
                 CustomWorkoutTemplate.self, FitnessSettingsSnapshot.self,
+                WorkoutRAGChunk.self,
             ])
     }
 }
@@ -111,6 +116,7 @@ private struct NotificationLifecycleHook: View {
                     FitnessSettingsSnapshotBackfill.runIfNeeded(modelContext: modelContext)
                     TrainingNotificationsScheduler.evaluateMissedKeyIfNeeded(modelContext: modelContext)
                     TrainingNotificationsScheduler.rescheduleFTPReminder()
+                    WorkoutRAGIndex.scheduleBackgroundSync(modelContext: modelContext)
                 case .background:
                     TrainingNotificationsScheduler.rescheduleEveningPreview(modelContext: modelContext)
                 default:

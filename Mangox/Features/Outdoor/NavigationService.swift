@@ -647,16 +647,13 @@ final class NavigationService {
         if lastAnnouncedTurnStepIndex != idx {
             lastAnnouncedTurnStepIndex = idx
             previousDistanceToManeuver = d
-            AudioCueManager.shared.speakNavigationTurnPrimary(turn.instruction)
             HapticManager.shared.navigationPrimary()
             return
         }
 
         if previousDistanceToManeuver > 200 && d <= 200 && d > 35 {
-            AudioCueManager.shared.speakNavigationTurnDistance(meters: Int(d), instruction: turn.instruction)
             HapticManager.shared.navigationAdvance()
         } else if previousDistanceToManeuver > 50 && d <= 50 && d > 8 {
-            AudioCueManager.shared.speakNavigationTurnNow(turn.instruction)
             HapticManager.shared.navigationImmediate()
         }
         previousDistanceToManeuver = d
@@ -696,20 +693,13 @@ final class NavigationService {
         if announcedGPXCornerVertex != corner.vertexIndex {
             announcedGPXCornerVertex = corner.vertexIndex
             previousGPXHintDistance = d
-            if d > 95 {
-                AudioCueManager.shared.speakNavigationTurnDistance(meters: Int(d), instruction: hint.instruction)
-            } else {
-                AudioCueManager.shared.speakNavigationTurnPrimary(hint.instruction)
-            }
             HapticManager.shared.navigationPrimary()
             return
         }
 
         if previousGPXHintDistance > 120 && d <= 120 && d > 28 {
-            AudioCueManager.shared.speakNavigationTurnDistance(meters: Int(d), instruction: hint.instruction)
             HapticManager.shared.navigationAdvance()
         } else if previousGPXHintDistance > 45 && d <= 45 && d > 10 {
-            AudioCueManager.shared.speakNavigationTurnNow(hint.instruction)
             HapticManager.shared.navigationImmediate()
         }
         previousGPXHintDistance = d

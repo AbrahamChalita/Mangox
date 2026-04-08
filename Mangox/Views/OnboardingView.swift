@@ -884,4 +884,5 @@ private struct OnboardingPageView<ExtraContent: View>: View {
         .environment(HealthKitManager())
         .environment(LocationManager())
         .environment(StravaService())
+        .environment(WhoopService())
 }

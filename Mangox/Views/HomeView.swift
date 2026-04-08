@@ -34,15 +34,20 @@ struct HomeView: View {
     @Environment(BLEManager.self) private var bleManager
     @Environment(DataSourceCoordinator.self) private var dataSource
     @Environment(LocationManager.self) private var locationManager
+    @Environment(WhoopService.self) private var whoopService
     @Environment(\.modelContext) private var modelContext
     @Binding var navigationPath: NavigationPath
     @Binding var selectedTab: Int
+
+    @Environment(AIService.self) private var aiService
 
     @State private var trainingCache: HomeTrainingCache?
     @State private var trainingCacheRecomputeTask: Task<Void, Never>?
     @State private var trainingCacheGeneration: UInt64 = 0
     /// After an empty-workout snapshot, the next non-empty fetch should not wait on debounce.
     @State private var trainingCacheHasSeenWorkouts = false
+    /// On-device 1–2 word readiness label for the training status header badge. Nil while generating or unavailable.
+    @State private var homeTrainingStatusLabel: String?
 
     private static let recentWorkoutsDescriptor: FetchDescriptor<Workout> = {
         var d = FetchDescriptor<Workout>(sortBy: [SortDescriptor(\.startDate, order: .reverse)])
@@ -121,6 +126,15 @@ struct HomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .mangoxWorkoutAggregatesMayHaveChanged)) {
             _ in
             scheduleTrainingCacheRecompute()
+        }
+        .task {
+            await whoopService.refreshLinkedDataIfStale()
+        }
+        .task(id: trainingCacheGeneration) {
+            guard trainingCache != nil, OnDeviceCoachEngine.isSystemModelAvailable else { return }
+            let factSheet = aiService.coachFactSheetText(modelContext: modelContext)
+            homeTrainingStatusLabel = try? await OnDeviceCoachEngine.generateHomeTrainingInsight(
+                factSheet: factSheet)
         }
     }
 
@@ -256,14 +270,16 @@ struct HomeView: View {
 
                 Spacer()
 
-                // ACWR form badge
+                // ACWR tint + on-device status words (falls back to ACWR band label)
                 HStack(spacing: 5) {
                     Image(systemName: form.icon)
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(form.color)
-                    Text(form.description)
+                    Text(trainingStatusBadgeText(form: form))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(form.color)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -318,9 +334,71 @@ struct HomeView: View {
                 }
             }
             .frame(height: 40, alignment: .bottom)
+
+            if whoopService.isConnected, whoopService.isConfigured {
+                whoopTrainingStrip
+            }
         }
         .padding(16)
         .cardStyle(cornerRadius: 14)
+    }
+
+    private var whoopTrainingStrip: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider()
+                .background(Color.white.opacity(0.08))
+            HStack(alignment: .center, spacing: 6) {
+                Image(systemName: "waveform.path.ecg")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AppColor.whoop)
+                Text("WHOOP")
+                    .font(.system(size: 9, weight: .heavy))
+                    .foregroundStyle(textTertiary)
+                    .tracking(0.6)
+
+                if let pct = whoopService.latestRecoveryScore {
+                    Text(String(format: "%.0f%%", pct))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(whoopService.readinessAccentColor)
+                    Text("recovery")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(textTertiary)
+                } else {
+                    Text("—")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(textTertiary)
+                }
+
+                if let rhr = whoopService.latestRecoveryRestingHR {
+                    Text("·")
+                        .font(.system(size: 9))
+                        .foregroundStyle(textTertiary.opacity(0.35))
+                    Text("RHR \(rhr)")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(textTertiary)
+                }
+                if let hrv = whoopService.latestRecoveryHRV {
+                    Text("·")
+                        .font(.system(size: 9))
+                        .foregroundStyle(textTertiary.opacity(0.35))
+                    Text("HRV \(hrv)")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(textTertiary)
+                }
+
+                Spacer(minLength: 4)
+
+                if let last = whoopService.lastSuccessfulRefreshAt {
+                    Text(last.formatted(.relative(presentation: .named)))
+                        .font(.system(size: 9))
+                        .foregroundStyle(textTertiary.opacity(0.55))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+            }
+            .padding(.top, 6)
+            .accessibilityElement(children: .combine)
+        }
     }
 
     private var nextWorkoutFromPlanCard: some View {
@@ -405,6 +483,13 @@ struct HomeView: View {
         } else {
             return (AppColor.red, "xmark.circle.fill", "Overreaching")
         }
+    }
+
+    private func trainingStatusBadgeText(form: (color: Color, icon: String, description: String)) -> String {
+        if let s = homeTrainingStatusLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+            return s
+        }
+        return form.description
     }
 
     // MARK: - FTP Prompt
@@ -560,6 +645,7 @@ extension Date {
 
 #Preview {
     HomeView(navigationPath: .constant(NavigationPath()), selectedTab: .constant(0))
-        .modelContainer(for: [Workout.self, TrainingPlanProgress.self])
+        .modelContainer(for: [Workout.self, WorkoutRAGChunk.self, TrainingPlanProgress.self])
         .environment(HealthKitManager())
+        .environment(WhoopService())
 }

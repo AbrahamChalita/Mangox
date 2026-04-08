@@ -8,8 +8,8 @@ enum CoachHTTPError: LocalizedError {
         switch self {
         case .tunnelReturnedHTML(let status):
             return """
-            Tunnel returned a web page instead of the API (HTTP \(status)). On your Mac keep `npm run dev` running, start ngrok with `ngrok http 127.0.0.1:3000`, and set Coach Base URL to `https://…ngrok-free.dev` only (no `/api`). \
-            If this persists, open ngrok’s inspector at http://127.0.0.1:4040 for the exact edge error.
+            Tunnel returned a web page instead of the API (HTTP \(status)). Use the **host only** for Mangox Cloud base URL (e.g. `https://….ngrok-free.dev`) — **no** `/api` suffix (that becomes `/api/api/chat` and 404). \
+            Keep `npm run dev` running on the Mac, forward `ngrok http 127.0.0.1:3000`, and check http://127.0.0.1:4040 if the tunnel still fails.
             """
         }
     }

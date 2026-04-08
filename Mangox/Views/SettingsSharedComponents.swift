@@ -59,6 +59,7 @@ struct SettingsSubviewShell<Content: View>: View {
                     Spacer().frame(height: 40)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .scrollIndicators(.hidden)
         }
         .navigationTitle(title)

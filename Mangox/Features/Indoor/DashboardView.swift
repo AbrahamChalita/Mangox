@@ -38,10 +38,21 @@ struct DashboardView: View {
     // Delight state
     @State private var zonePulse = false
     @State private var lastMilestoneKm = 0
+    /// 25 / 50 / 75 — cleared when a new recording starts.
+    @State private var crossedDistanceGoalPercents: Set<Int> = []
     @State private var milestoneText: String? = nil
     @State private var milestoneVisible = false
+    /// Suppresses ride tips briefly after milestone / goal overlays.
+    @State private var lastDelightOverlayAt: Date?
+    @State private var activeRideTip: RideNudgeDisplay?
+    @State private var rideNudgeSession = RideNudgeSessionState()
+    /// AI-generated pre-ride briefing; nil until generated or when Apple Intelligence is unavailable.
+    @State private var rideBriefingPending: String?
 
     private let prefs = RidePreferences.shared
+
+    /// Whole-km toast + haptic when crossing each multiple (e.g. 5 → 5 km, 10 km, …).
+    private static let indoorDistanceMilestoneIntervalKm = 5
 
     private var plan: TrainingPlan {
         PlanLibrary.resolvePlan(planID: planID ?? CachedPlan.shared.id) ?? CachedPlan.shared
@@ -207,7 +218,27 @@ struct DashboardView: View {
             .onChange(of: workoutManager.state) { oldState, newState in
                 switch (oldState, newState) {
                 case (.idle, .recording):
+                    lastMilestoneKm = 0
+                    crossedDistanceGoalPercents = []
+                    rideNudgeSession.reset()
+                    activeRideTip = nil
                     hapticManager.workoutStarted()
+                    // Present the AI pre-ride briefing (generated async in configureGuidedSession).
+                    // Small delay so haptics and the start animation settle first.
+                    if guidedSession.isActive, let briefing = rideBriefingPending {
+                        rideBriefingPending = nil
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(1800))
+                            guard workoutManager.state == .recording else { return }
+                            presentRideTip(RideNudgeDisplay(
+                                id: "ai_ride_briefing",
+                                category: .recovery,
+                                headline: "Workout Briefing",
+                                body: briefing,
+                                audioScript: briefing
+                            ))
+                        }
+                    }
                 case (.recording, .autoPaused):
                     hapticManager.autoPaused()
                 case (.autoPaused, .recording):
@@ -232,16 +263,12 @@ struct DashboardView: View {
             }
             .onChange(of: workoutManager.justCompletedGoals) { _, completed in
                 if !completed.isEmpty { hapticManager.goalCompleted() }
+                if let goal = completed.first(where: { $0.kind == .distance }) {
+                    flashDistanceGoalCompleteToast(targetKm: goal.target)
+                }
             }
             .onChange(of: workoutManager.activeDistance) { _, dist in
-                guard workoutManager.state == .recording else { return }
-                let km = Int(dist / 1000)
-                let milestone = (km / 10) * 10
-                if milestone >= 10 && milestone > lastMilestoneKm {
-                    lastMilestoneKm = milestone
-                    flashMilestone("\(milestone) km")
-                    hapticManager.milestone()
-                }
+                processIndoorDistanceMilestones(distanceMeters: dist)
             }
             .onChange(of: workoutManager.displayPower) { _, newPower in
                 // Auto-resume when the last completed second shows power again (works for BLE + Wi‑Fi).
@@ -250,6 +277,7 @@ struct DashboardView: View {
                 }
             }
             .onChange(of: workoutManager.elapsedSeconds) { _, _ in
+                tickRideTipsIfNeeded()
                 Task {
                     await RideLiveActivityManager.shared.syncIndoorRecording(
                         isRecording: workoutManager.state == .recording,
@@ -520,6 +548,10 @@ struct DashboardView: View {
                 cadenceWarningBanner
             }
 
+            if let tip = activeRideTip {
+                rideTipBanner(tip)
+            }
+
             goalProgressSection(fit: fit)
 
             if guidedSession.isActive
@@ -643,6 +675,10 @@ struct DashboardView: View {
                     cadenceWarningBanner
                 }
 
+                if let tip = activeRideTip {
+                    rideTipBanner(tip)
+                }
+
                 goalProgressSection(fit: false)
 
                 if guidedSession.isActive
@@ -687,6 +723,14 @@ struct DashboardView: View {
     /// Hide the free-ride / route banner when a guided workout supplies context in the header.
     private var showRideModeBanner: Bool {
         !guidedSession.isActive
+    }
+
+    private var guidedStepIsHardIntensity: Bool {
+        guard let z = guidedSession.currentStep?.zone else { return false }
+        switch z {
+        case .z4, .z5, .z4z5, .z3z5: return true
+        default: return false
+        }
     }
 
     @ViewBuilder
@@ -874,6 +918,10 @@ struct DashboardView: View {
                         cadenceWarningBanner
                     }
 
+                    if let tip = activeRideTip {
+                        rideTipBanner(tip)
+                    }
+
                     goalProgressSection(fit: false)
 
                     if metrics.heartRate > 0 {
@@ -987,6 +1035,45 @@ struct DashboardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
+    private func rideTipBanner(_ tip: RideNudgeDisplay) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "lightbulb.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppColor.mango)
+                .frame(width: 20, alignment: .center)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(tip.headline.uppercased())
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(AppColor.mango.opacity(0.9))
+                    .tracking(0.6)
+                Text(tip.body)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                activeRideTip = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss tip")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(AppColor.blue.opacity(0.1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
     private var metricsGrid: some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
@@ -1097,6 +1184,21 @@ struct DashboardView: View {
         }
         guidedSession.configure(planDay: day, adaptiveERGScale: scale)
 
+        // Generate AI pre-ride briefing in background; present it as the first ride tip.
+        let capturedTimeline = guidedSession.timeline
+        let capturedTitle = guidedSession.dayTitle
+        let capturedNotes = guidedSession.dayNotes
+        let capturedFTP = PowerZone.ftp
+        Task { @MainActor in
+            guard let text = await OnDeviceCoachEngine.generateRideBriefing(
+                dayTitle: capturedTitle,
+                dayNotes: capturedNotes,
+                timeline: capturedTimeline,
+                ftpWatts: capturedFTP
+            ) else { return }
+            rideBriefingPending = text
+        }
+
         // Wire trainer mode changes: when the guided session advances to a new step,
         // automatically update the trainer control mode.
         //
@@ -1141,6 +1243,7 @@ struct DashboardView: View {
     // MARK: - Delight Helpers
 
     private func flashMilestone(_ text: String) {
+        lastDelightOverlayAt = Date()
         milestoneText = text
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
             milestoneVisible = true
@@ -1153,12 +1256,130 @@ struct DashboardView: View {
         }
     }
 
+    private func tickRideTipsIfNeeded() {
+        guard prefs.rideTipsEnabled else { return }
+        guard workoutManager.state == .recording else { return }
+        if let t = lastDelightOverlayAt, Date().timeIntervalSince(t) < 5.5 { return }
+
+        let guidedStepIndex: Int = {
+            guard guidedSession.isActive, guidedSession.currentStep != nil else { return -1 }
+            return guidedSession.currentStepIndex
+        }()
+
+        let guidedInto: Int? = {
+            guard guidedSession.isActive, let step = guidedSession.currentStep else { return nil }
+            return max(0, guidedSession.elapsedSeconds - step.startOffset)
+        }()
+
+        let ctx = RideNudgeContext(
+            now: Date(),
+            isRecording: true,
+            elapsedSeconds: workoutManager.elapsedSeconds,
+            displayPower: workoutManager.displayPower,
+            displayCadenceRpm: workoutManager.displayCadenceRpm,
+            zoneId: zone.id,
+            lowCadenceThreshold: prefs.lowCadenceThreshold,
+            lowCadenceStreakSeconds: workoutManager.lowCadenceStreakSeconds,
+            showLowCadenceHardWarning: workoutManager.showLowCadenceWarning,
+            guidedIsActive: guidedSession.isActive,
+            guidedStepIsRecovery: guidedSession.currentStep?.isRecovery ?? false,
+            guidedSecondsIntoStep: guidedInto,
+            guidedStepIsHardIntensity: guidedStepIsHardIntensity,
+            suppressUntil: nil
+        )
+
+        var sess = rideNudgeSession
+        if let tip = RideNudgeEngine.nextTip(
+            context: ctx,
+            prefs: prefs,
+            guidedStepIndex: guidedStepIndex,
+            session: &sess
+        ) {
+            rideNudgeSession = sess
+            presentRideTip(tip)
+        }
+    }
+
+    private func presentRideTip(_ tip: RideNudgeDisplay) {
+        activeRideTip = tip
+        hapticManager.rideTipNudge()
+        AudioCueManager.shared.announceRideTip(script: tip.audioScript)
+        let tipID = tip.id
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(11))
+            if activeRideTip?.id == tipID { activeRideTip = nil }
+        }
+    }
+
+    /// Progress toward an enabled distance goal (25 / 50 / 75%); otherwise fixed 5 km markers.
+    private func processIndoorDistanceMilestones(distanceMeters dist: Double) {
+        guard workoutManager.state == .recording else { return }
+        let km = dist / 1000.0
+
+        if let goal = prefs.activeGoals.first(where: { $0.kind == .distance && $0.target > 0 }) {
+            let target = goal.target
+            let progress = km / target
+            let thresholds = [25, 50, 75]
+            let newly = thresholds.filter { progress >= Double($0) / 100.0 && !crossedDistanceGoalPercents.contains($0) }
+            guard !newly.isEmpty else { return }
+            for p in newly {
+                crossedDistanceGoalPercents.insert(p)
+            }
+            let sorted = newly.sorted()
+            for (index, p) in sorted.enumerated() {
+                let delay = Double(index) * 3.5
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(delay))
+                    guard workoutManager.state == .recording else { return }
+                    let curKm = workoutManager.activeDistance / 1000.0
+                    flashDistanceGoalFractionToast(percent: p, currentKm: curKm, targetKm: target)
+                    hapticManager.milestone()
+                }
+            }
+            return
+        }
+
+        let step = Self.indoorDistanceMilestoneIntervalKm
+        let kmInt = Int(dist / 1000)
+        let milestone = (kmInt / step) * step
+        if milestone >= step && milestone > lastMilestoneKm {
+            lastMilestoneKm = milestone
+            flashMilestone("\(milestone) km")
+            hapticManager.milestone()
+        }
+    }
+
+    private func flashDistanceGoalFractionToast(percent: Int, currentKm: Double, targetKm: Double) {
+        let imperial = prefs.isImperial
+        let curStr = AppFormat.distanceString(currentKm * 1000.0, imperial: imperial, decimals: 1)
+        let tgtStr = AppFormat.distanceString(targetKm * 1000.0, imperial: imperial, decimals: 1)
+        let unit = AppFormat.distanceUnit(imperial: imperial)
+        let headline: String
+        switch percent {
+        case 25: headline = "25%"
+        case 50: headline = "Halfway"
+        case 75: headline = "75%"
+        default: headline = "\(percent)%"
+        }
+        flashMilestone("\(headline) · \(curStr) / \(tgtStr) \(unit)")
+    }
+
+    private func flashDistanceGoalCompleteToast(targetKm: Double) {
+        let imperial = prefs.isImperial
+        let tgtStr = AppFormat.distanceString(targetKm * 1000.0, imperial: imperial, decimals: 1)
+        let unit = AppFormat.distanceUnit(imperial: imperial)
+        flashMilestone("Goal reached · \(tgtStr) \(unit)")
+    }
+
     private func milestoneToast(_ text: String) -> some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .center, spacing: 6) {
             Image(systemName: "flag.checkered")
                 .font(.system(size: 11, weight: .semibold))
             Text(text)
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .multilineTextAlignment(.leading)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
         }
         .foregroundStyle(AppColor.mango)
         .padding(.horizontal, 16)

@@ -100,6 +100,23 @@ protocol ChatProviderAdapter {
     ) -> AsyncThrowingStream<ChatRuntimeEvent, Error>
 }
 
+/// Ensures `POST {root}/api/chat` is not accidentally `…/api/api/chat` when people paste an API prefix.
+enum MangoxBackendBaseURLFormatting {
+    static func normalizedRoot(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while s.hasSuffix("/") {
+            s.removeLast()
+        }
+        if s.lowercased().hasSuffix("/api") {
+            s = String(s.dropLast(4))
+            while s.hasSuffix("/") {
+                s.removeLast()
+            }
+        }
+        return s
+    }
+}
+
 struct ChatProviderResolver {
     private enum Keys {
         static let providerKind = ChatProviderDefaultsKey.providerKind
@@ -118,10 +135,11 @@ struct ChatProviderResolver {
         switch kind {
         case .mangoxBackend:
             let rawBaseURL = defaults.string(forKey: Keys.baseURL)
-            let baseURL =
+            let chosen =
                 (rawBaseURL?.isEmpty == false ? rawBaseURL : nil)
                 ?? bundle.object(forInfoDictionaryKey: Keys.mangoxBaseURL) as? String
                 ?? "https://mangox-backend-production.up.railway.app"
+            let baseURL = MangoxBackendBaseURLFormatting.normalizedRoot(chosen)
 
             return ChatProviderConfiguration(
                 kind: .mangoxBackend,
@@ -220,7 +238,7 @@ private struct MangoxBackendChatProvider: ChatProviderAdapter {
                                     }
                                 case "error":
                                     continuation.yield(.failed(event.error ?? "Streaming failed"))
-                                case "done":
+                                case "done", "meta":
                                     break
                                 default:
                                     continue

@@ -38,7 +38,7 @@ struct FTPHistoryView: View {
         .alert("Apply FTP", isPresented: $showApplyConfirmation, presenting: selectedResult) { result in
             Button("Cancel", role: .cancel) { selectedResult = nil }
             Button("Apply") {
-                PowerZone.ftp = result.estimatedFTP
+                PowerZone.setFTP(result.estimatedFTP)
                 FTPTestHistory.markApplied(id: result.id)
                 FitnessSettingsSnapshotRecorder.recordFromCurrentSettings(
                     source: "ftp_test_applied", modelContext: modelContext)

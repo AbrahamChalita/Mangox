@@ -1606,7 +1606,7 @@ struct IndoorMilestoneToastChrome: ViewModifier {
     .modelContainer(
         for: [
             Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self,
-            CustomWorkoutTemplate.self,
+            CustomWorkoutTemplate.self, WorkoutRAGChunk.self,
         ],
         inMemory: true
     )
@@ -1628,7 +1628,7 @@ struct IndoorMilestoneToastChrome: ViewModifier {
     .modelContainer(
         for: [
             Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self,
-            CustomWorkoutTemplate.self,
+            CustomWorkoutTemplate.self, WorkoutRAGChunk.self,
         ],
         inMemory: true
     )

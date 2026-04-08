@@ -10,6 +10,19 @@ struct AICoachSettingsView: View {
     @AppStorage(ChatProviderDefaultsKey.model) private var providerModel = ""
     @AppStorage(ChatProviderDefaultsKey.apiKey) private var providerAPIKey = ""
 
+    /// Local drafts avoid writing `UserDefaults` on every keystroke (which was freezing the field, paste, and keyboard).
+    @State private var baseURLDraft: String
+    @State private var modelDraft: String
+    @State private var apiKeyDraft: String
+    @State private var connectionPersistTask: Task<Void, Never>?
+
+    init() {
+        let d = UserDefaults.standard
+        _baseURLDraft = State(initialValue: d.string(forKey: ChatProviderDefaultsKey.baseURL) ?? "")
+        _modelDraft = State(initialValue: d.string(forKey: ChatProviderDefaultsKey.model) ?? "")
+        _apiKeyDraft = State(initialValue: d.string(forKey: ChatProviderDefaultsKey.apiKey) ?? "")
+    }
+
     private var selectedKind: ChatProviderKind {
         ChatProviderKind(rawValue: providerKindRaw) ?? .mangoxBackend
     }
@@ -58,16 +71,17 @@ struct AICoachSettingsView: View {
                     if selectedKind == .openAICompatible {
                         settingsField(
                             title: "API Endpoint URL",
-                            text: $providerBaseURL,
+                            text: $baseURLDraft,
                             placeholder: "https://api.openai.com",
-                            textContentType: .URL
+                            textContentType: .URL,
+                            keyboard: .URL
                         )
                         Divider()
                             .background(Color.white.opacity(0.06))
                             .padding(.vertical, 12)
                         settingsField(
                             title: "API Key",
-                            text: $providerAPIKey,
+                            text: $apiKeyDraft,
                             placeholder: "sk-…",
                             textContentType: .password,
                             secure: true
@@ -77,29 +91,35 @@ struct AICoachSettingsView: View {
                             .padding(.vertical, 12)
                         settingsField(
                             title: "Model",
-                            text: $providerModel,
+                            text: $modelDraft,
                             placeholder: "gpt-4o-mini",
                             textContentType: nil
                         )
                     } else {
                         settingsField(
                             title: "Backend URL",
-                            text: $providerBaseURL,
+                            text: $baseURLDraft,
                             placeholder: "https://mangox-backend-production.up.railway.app",
-                            textContentType: .URL
+                            textContentType: .URL,
+                            keyboard: .URL
                         )
                     }
                 }
+                .onChange(of: baseURLDraft) { _, _ in schedulePersistConnectionDrafts() }
+                .onChange(of: modelDraft) { _, _ in schedulePersistConnectionDrafts() }
+                .onChange(of: apiKeyDraft) { _, _ in schedulePersistConnectionDrafts() }
             }
 
             // Reset
             settingsSubCard {
                 HStack(spacing: 12) {
                     Button {
+                        connectionPersistTask?.cancel()
                         providerKindRaw = ChatProviderKind.mangoxBackend.rawValue
                         providerBaseURL = ""
                         providerModel = ""
                         providerAPIKey = ""
+                        syncDraftsFromAppStorage()
                     } label: {
                         Text("Reset to Defaults")
                             .font(.system(size: 13, weight: .semibold))
@@ -117,6 +137,33 @@ struct AICoachSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+        }
+        .onAppear { syncDraftsFromAppStorage() }
+        .onDisappear { flushConnectionDraftsToAppStorage() }
+        .onChange(of: providerKindRaw) { _, _ in syncDraftsFromAppStorage() }
+    }
+
+    private func syncDraftsFromAppStorage() {
+        baseURLDraft = providerBaseURL
+        modelDraft = providerModel
+        apiKeyDraft = providerAPIKey
+    }
+
+    private func flushConnectionDraftsToAppStorage() {
+        connectionPersistTask?.cancel()
+        providerBaseURL = baseURLDraft
+        providerModel = modelDraft
+        providerAPIKey = apiKeyDraft
+    }
+
+    private func schedulePersistConnectionDrafts() {
+        connectionPersistTask?.cancel()
+        connectionPersistTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(340))
+            guard !Task.isCancelled else { return }
+            providerBaseURL = baseURLDraft
+            providerModel = modelDraft
+            providerAPIKey = apiKeyDraft
         }
     }
 
@@ -167,7 +214,8 @@ struct AICoachSettingsView: View {
         text: Binding<String>,
         placeholder: String,
         textContentType: UITextContentType?,
-        secure: Bool = false
+        secure: Bool = false,
+        keyboard: UIKeyboardType = .default
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
@@ -178,12 +226,14 @@ struct AICoachSettingsView: View {
                 if secure {
                     SecureField(placeholder, text: text)
                 } else {
-                    TextField(placeholder, text: text, axis: .vertical)
+                    TextField(placeholder, text: text)
+                        .lineLimit(1)
                 }
             }
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .textContentType(textContentType)
+            .keyboardType(keyboard)
             .font(.system(size: 14))
             .foregroundStyle(.white.opacity(0.9))
             .padding(.horizontal, 14)
@@ -241,7 +291,7 @@ struct PowerZonesSettingsView: View {
 
                         HStack(spacing: 8) {
                             Button {
-                                PowerZone.ftp = ftpDraft
+                                PowerZone.setFTP(ftpDraft)
                                 FitnessSettingsSnapshotRecorder.recordFromCurrentSettings(
                                     source: "ftp_settings", modelContext: modelContext)
                             } label: {
@@ -376,8 +426,10 @@ struct PowerZonesSettingsView: View {
 
 struct HeartRateSettingsView: View {
     @Environment(HealthKitManager.self) private var healthKitManager
+    @Environment(WhoopService.self) private var whoopService
     @Environment(\.modelContext) private var modelContext
 
+    @AppStorage(WhoopService.syncHeartBaselinesDefaultsKey) private var syncWhoopBaselines = true
     @State private var manualMaxHRInput = ""
     @State private var manualRestingHRInput = ""
     @State private var statusMessage: String?
@@ -399,17 +451,13 @@ struct HeartRateSettingsView: View {
                         label: "Max HR",
                         value: "\(HeartRateZone.maxHR)",
                         unit: "bpm",
-                        source: HeartRateZone.hasManualMaxHROverride
-                            ? "Manual"
-                            : (healthKitManager.maxHeartRate != nil ? "Health" : "Estimated")
+                        source: maxHRBaselineSource
                     )
                     hrMetric(
                         label: "Resting HR",
                         value: HeartRateZone.hasRestingHR ? "\(HeartRateZone.restingHR)" : "—",
                         unit: HeartRateZone.hasRestingHR ? "bpm" : "",
-                        source: HeartRateZone.hasManualRestingHROverride
-                            ? "Manual"
-                            : (healthKitManager.restingHeartRate != nil ? "Health" : "Not set")
+                        source: restingHRBaselineSource
                     )
                     if let vo2 = healthKitManager.vo2Max {
                         hrMetric(
@@ -417,6 +465,13 @@ struct HeartRateSettingsView: View {
                             value: String(format: "%.1f", vo2),
                             unit: "",
                             source: "Health"
+                        )
+                    } else if whoopService.isConnected {
+                        hrMetric(
+                            label: "VO₂ Max",
+                            value: "—",
+                            unit: "",
+                            source: "WHOOP API has no VO₂"
                         )
                     }
                     Spacer()
@@ -427,6 +482,48 @@ struct HeartRateSettingsView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.white.opacity(0.25))
                         .padding(.top, 4)
+                }
+            }
+
+            if whoopService.isConfigured {
+                settingsSubCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "waveform.path.ecg")
+                                .font(.system(size: 14))
+                                .foregroundStyle(AppColor.whoop)
+                            Text(whoopService.isConnected ? "WHOOP connected" : "WHOOP not connected")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.75))
+                        }
+                        if whoopService.isConnected {
+                            Toggle(isOn: $syncWhoopBaselines) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Use WHOOP for max & resting HR")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.85))
+                                    Text(
+                                        "Max HR from WHOOP body profile; resting HR from latest recovery. Skipped if you set manual overrides below. Turn off to prefer Apple Health when both are available."
+                                    )
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.white.opacity(0.34))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .tint(AppColor.whoop)
+                            .onChange(of: syncWhoopBaselines) { _, on in
+                                if on {
+                                    whoopService.applyHeartBaselinesFromLatestWhoopData()
+                                } else {
+                                    syncHealthKit()
+                                }
+                            }
+                        } else {
+                            Text("Connect WHOOP under Settings → Connections to sync baselines.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.35))
+                        }
+                    }
                 }
             }
 
@@ -596,6 +693,24 @@ struct HeartRateSettingsView: View {
         .task { loadInputs() }
     }
 
+    private var maxHRBaselineSource: String {
+        if HeartRateZone.hasManualMaxHROverride { return "Manual" }
+        if syncWhoopBaselines, whoopService.isConnected, whoopService.latestMaxHeartRateFromProfile != nil {
+            return "WHOOP"
+        }
+        if healthKitManager.maxHeartRate != nil { return "Health" }
+        return "Estimated"
+    }
+
+    private var restingHRBaselineSource: String {
+        if HeartRateZone.hasManualRestingHROverride { return "Manual" }
+        if syncWhoopBaselines, whoopService.isConnected, whoopService.latestRecoveryRestingHR != nil {
+            return "WHOOP"
+        }
+        if healthKitManager.restingHeartRate != nil { return "Health" }
+        return HeartRateZone.hasRestingHR ? "Default" : "Not set"
+    }
+
     private func hrMetric(label: String, value: String, unit: String, source: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
@@ -662,6 +777,10 @@ struct HeartRateSettingsView: View {
     }
 
     private func syncHealthKit() {
+        if whoopService.syncHeartBaselinesFromWhoop && whoopService.isConnected {
+            whoopService.applyHeartBaselinesFromLatestWhoopData()
+            return
+        }
         let effectiveMax = healthKitManager.effectiveMaxHR
         if effectiveMax > 0, !HeartRateZone.hasManualMaxHROverride {
             HeartRateZone.maxHR = effectiveMax
@@ -778,6 +897,213 @@ struct StravaSettingsView: View {
     private func disconnect() {
         stravaService.disconnect()
         statusMessage = "Strava disconnected."
+    }
+}
+
+// MARK: - WHOOP
+
+struct WhoopSettingsView: View {
+    @Environment(WhoopService.self) private var whoopService
+    @AppStorage(WhoopService.syncHeartBaselinesDefaultsKey) private var syncWhoopBaselines = true
+    @State private var statusMessage: String?
+
+    var body: some View {
+        SettingsSubviewShell(title: "WHOOP") {
+            settingsSubCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "waveform.path.ecg")
+                            .font(.system(size: 20))
+                            .foregroundStyle(AppColor.whoop)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("WHOOP")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.9))
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(
+                                        whoopService.isConnected
+                                            ? AppColor.success : .white.opacity(0.2)
+                                    )
+                                    .frame(width: 6, height: 6)
+                                Text(whoopService.isConnected ? "Connected" : "Not connected")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(
+                                        whoopService.isConnected
+                                            ? AppColor.success : .white.opacity(0.35))
+                            }
+                        }
+                        Spacer()
+                    }
+
+                    if !whoopService.isConfigured {
+                        Text("WHOOP credentials are not set up in this build.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.32))
+                    } else {
+                        if whoopService.isConnected {
+                            VStack(alignment: .leading, spacing: 6) {
+                                if let score = whoopService.latestRecoveryScore {
+                                    Text(
+                                        String(
+                                            format: "Latest recovery: %.0f%%",
+                                            score
+                                        )
+                                    )
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.85))
+                                }
+                                if let rhr = whoopService.latestRecoveryRestingHR {
+                                    Text("Resting HR (recovery): \(rhr) bpm")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.white.opacity(0.38))
+                                }
+                                if let hrv = whoopService.latestRecoveryHRV {
+                                    Text("HRV (RMSSD): \(hrv) ms")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.white.opacity(0.38))
+                                }
+                                if let maxHR = whoopService.latestMaxHeartRateFromProfile {
+                                    Text("Max HR (WHOOP profile): \(maxHR) bpm")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.white.opacity(0.38))
+                                }
+                            }
+                            .padding(.bottom, 4)
+
+                            Toggle(isOn: $syncWhoopBaselines) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Sync max & resting HR into zones")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.88))
+                                    Text(
+                                        "Writes WHOOP profile max HR and recovery resting HR into Mangox heart-rate zones when you don’t use manual overrides. Also in Settings → Heart Rate."
+                                    )
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.white.opacity(0.32))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .tint(AppColor.whoop)
+                            .onChange(of: syncWhoopBaselines) { _, on in
+                                if on {
+                                    whoopService.applyHeartBaselinesFromLatestWhoopData()
+                                }
+                            }
+
+                            Button {
+                                Task { await refresh() }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 13))
+                                    Text("Refresh WHOOP data")
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                .foregroundStyle(.white.opacity(0.9))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 9)
+                                .background(AppColor.whoop.opacity(0.18))
+                                .clipShape(Capsule())
+                                .overlay(
+                                    Capsule().strokeBorder(AppColor.whoop.opacity(0.35), lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(whoopService.isBusy)
+                        }
+
+                        Button {
+                            Task {
+                                if whoopService.isConnected {
+                                    await disconnect()
+                                } else {
+                                    await connect()
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(
+                                    systemName: whoopService.isConnected
+                                        ? "link.circle" : "link.badge.plus"
+                                )
+                                .font(.system(size: 13))
+                                Text(
+                                    whoopService.isConnected
+                                        ? "Disconnect WHOOP" : "Connect WHOOP"
+                                )
+                                .font(.system(size: 13, weight: .semibold))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .background(AppColor.whoop.opacity(0.22))
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule().strokeBorder(AppColor.whoop.opacity(0.35), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(whoopService.isBusy)
+
+                        Text(
+                            "Read-only: recovery, sleep, workouts, and strain context from WHOOP. Mangox cannot upload activities to WHOOP via their API — turn on “Save rides to Apple Health” in Heart Rate settings if you want WHOOP to import indoor rides through Apple Health."
+                        )
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.3))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                        Text(
+                            "VO₂ max is not available from WHOOP’s developer API. Enable Apple Health in Mangox to show VO₂ from Apple Watch or other Health sources."
+                        )
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.26))
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if let statusMessage {
+                        Text(statusMessage)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.35))
+                    }
+                    if let err = whoopService.lastError, !err.isEmpty {
+                        Text(err)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.orange.opacity(0.8))
+                    }
+                }
+            }
+        }
+        .task {
+            if whoopService.isConnected, whoopService.isConfigured {
+                await refresh()
+            }
+        }
+    }
+
+    private func connect() async {
+        do {
+            try await whoopService.connect()
+            statusMessage =
+                "Connected as \(whoopService.memberDisplayName ?? "WHOOP member")."
+        } catch {
+            statusMessage =
+                (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func disconnect() async {
+        await whoopService.disconnect()
+        statusMessage = "WHOOP disconnected."
+    }
+
+    private func refresh() async {
+        guard whoopService.isConnected else { return }
+        do {
+            try await whoopService.refreshLinkedData()
+            statusMessage = "WHOOP data updated."
+        } catch {
+            statusMessage =
+                (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 }
 
@@ -1046,13 +1372,13 @@ struct AudioHapticsSettingsView: View {
                 VStack(spacing: 12) {
                     settingsSubToggle(
                         title: "Audio Cues",
-                        subtitle: "Spoken zone changes and milestones during guided sessions",
+                        subtitle: "Spoken zone changes and interval cues during guided sessions",
                         isOn: $prefs.stepAudioCueEnabled
                     )
                     Divider().background(Color.white.opacity(0.06))
                     settingsSubToggle(
                         title: "Outdoor Turn Cues",
-                        subtitle: "Spoken and haptic prompts for navigation and GPX route bends",
+                        subtitle: "Haptic prompts for navigation and GPX route bends",
                         isOn: $prefs.navigationTurnCuesEnabled
                     )
                 }
@@ -1084,6 +1410,46 @@ struct AudioHapticsSettingsView: View {
                             )
                             .frame(width: 160)
                         }
+                    }
+                }
+            }
+
+            settingsSubSectionLabel("Ride tips")
+            settingsSubCard {
+                VStack(spacing: 12) {
+                    settingsSubToggle(
+                        title: "Training tips",
+                        subtitle:
+                            "Occasional cadence, fueling, and posture nudges while you ride (indoor). Off by default.",
+                        isOn: $prefs.rideTipsEnabled
+                    )
+                    if prefs.rideTipsEnabled {
+                        Divider().background(Color.white.opacity(0.06))
+                        settingsSubToggle(
+                            title: "Spoken tips",
+                            subtitle: "Hear short versions of tips through the speaker or headphones",
+                            isOn: $prefs.rideTipsAudioEnabled
+                        )
+                        Divider().background(Color.white.opacity(0.06))
+                        HStack {
+                            Text("How often")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.white.opacity(0.6))
+                            Spacer()
+                            Picker("", selection: $prefs.rideTipsSpacing) {
+                                ForEach(RideNudgeSpacing.allCases, id: \.self) { s in
+                                    Text(s.label).tag(s)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .tint(AppColor.mango)
+                        }
+                        Divider().background(Color.white.opacity(0.06))
+                        settingsSubToggle(
+                            title: "Indoor heat awareness",
+                            subtitle: "Extra fluid reminders for hot trainer rooms",
+                            isOn: $prefs.rideTipsIndoorHeatAwareness
+                        )
                     }
                 }
             }
@@ -1444,6 +1810,7 @@ struct GearSettingsView: View {
 
 struct DataPrivacyNotificationsHubView: View {
     @Environment(StravaService.self) private var stravaService
+    @Environment(WhoopService.self) private var whoopService
     @Environment(HealthKitManager.self) private var healthKitManager
     @Environment(\.modelContext) private var modelContext
 
@@ -1465,6 +1832,11 @@ struct DataPrivacyNotificationsHubView: View {
                         title: "Strava",
                         value: stravaService.isConnected ? "Connected" : "Not connected",
                         ok: stravaService.isConnected
+                    )
+                    rowStatus(
+                        title: "WHOOP",
+                        value: whoopService.isConnected ? "Connected" : "Not connected",
+                        ok: whoopService.isConnected
                     )
                     rowStatus(
                         title: "Apple Health",

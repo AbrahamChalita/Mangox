@@ -5,7 +5,10 @@ import SwiftUI
 /// Heart rate limits, FTP, and HealthKit — training baselines for zones.
 struct FitnessZonesProfileCard: View {
     @Environment(HealthKitManager.self) private var healthKitManager
+    @Environment(WhoopService.self) private var whoopService
     @Environment(FTPRefreshTrigger.self) private var ftpRefresh
+
+    @AppStorage(WhoopService.syncHeartBaselinesDefaultsKey) private var syncWhoopBaselines = true
 
     @State private var manualMaxHRInput = ""
     @State private var manualRestingHRInput = ""
@@ -94,17 +97,13 @@ struct FitnessZonesProfileCard: View {
                     label: "Max HR",
                     value: "\(HeartRateZone.maxHR)",
                     unit: "bpm",
-                    source: HeartRateZone.hasManualMaxHROverride
-                        ? "Manual"
-                        : (healthKitManager.maxHeartRate != nil ? "Health" : "Estimated")
+                    source: profileMaxHRSource
                 )
                 healthMetric(
                     label: "Resting HR",
                     value: HeartRateZone.hasRestingHR ? "\(HeartRateZone.restingHR)" : "—",
                     unit: HeartRateZone.hasRestingHR ? "bpm" : "",
-                    source: HeartRateZone.hasManualRestingHROverride
-                        ? "Manual"
-                        : (healthKitManager.restingHeartRate != nil ? "Health" : "Not set")
+                    source: profileRestingHRSource
                 )
                 if let vo2 = healthKitManager.vo2Max {
                     healthMetric(
@@ -113,7 +112,23 @@ struct FitnessZonesProfileCard: View {
                         unit: "",
                         source: "Health"
                     )
+                } else if whoopService.isConnected {
+                    healthMetric(
+                        label: "VO2 Max",
+                        value: "—",
+                        unit: "",
+                        source: "Use Health for VO₂"
+                    )
                 }
+            }
+
+            if healthKitManager.vo2Max == nil && whoopService.isConnected {
+                Text(
+                    "WHOOP’s API doesn’t include VO₂ max. Enable Apple Health above to pull VO₂ from Apple Watch or other apps."
+                )
+                .font(.system(size: 9))
+                .foregroundStyle(.white.opacity(0.22))
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -136,7 +151,7 @@ struct FitnessZonesProfileCard: View {
                 }
                 HStack(spacing: 8) {
                     Button {
-                        PowerZone.ftp = ftpDraft
+                        PowerZone.setFTP(ftpDraft)
                     } label: {
                         Text("Apply")
                             .font(.system(size: 12, weight: .semibold))
@@ -305,6 +320,24 @@ struct FitnessZonesProfileCard: View {
         )
     }
 
+    private var profileMaxHRSource: String {
+        if HeartRateZone.hasManualMaxHROverride { return "Manual" }
+        if syncWhoopBaselines, whoopService.isConnected, whoopService.latestMaxHeartRateFromProfile != nil {
+            return "WHOOP"
+        }
+        if healthKitManager.maxHeartRate != nil { return "Health" }
+        return "Estimated"
+    }
+
+    private var profileRestingHRSource: String {
+        if HeartRateZone.hasManualRestingHROverride { return "Manual" }
+        if syncWhoopBaselines, whoopService.isConnected, whoopService.latestRecoveryRestingHR != nil {
+            return "WHOOP"
+        }
+        if healthKitManager.restingHeartRate != nil { return "Health" }
+        return HeartRateZone.hasRestingHR ? "Default" : "Not set"
+    }
+
     private func healthMetric(label: String, value: String, unit: String, source: String)
         -> some View
     {
@@ -330,6 +363,10 @@ struct FitnessZonesProfileCard: View {
     }
 
     private func syncHealthKitToZones() {
+        if whoopService.syncHeartBaselinesFromWhoop && whoopService.isConnected {
+            whoopService.applyHeartBaselinesFromLatestWhoopData()
+            return
+        }
         let effectiveMax = healthKitManager.effectiveMaxHR
         if effectiveMax > 0, !HeartRateZone.hasManualMaxHROverride {
             HeartRateZone.maxHR = effectiveMax

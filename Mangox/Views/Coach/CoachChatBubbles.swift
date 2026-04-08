@@ -1,9 +1,94 @@
 import SwiftUI
 
-fileprivate enum CoachSuggestedActionNavigation {
+enum CoachSuggestedActionNavigation {
     static func isNavigation(_ type: String) -> Bool {
         let k = type.lowercased()
         return k.hasPrefix("navigate") || k.contains("open_my_plans")
+    }
+}
+
+// MARK: - Coach metadata tag pills (message.tags, API snake_case)
+
+enum CoachTagPillFormatting {
+    /// `on_device` → "On Device"; keeps cloud/API tags readable in capsule pills.
+    static func displayLabel(for raw: String) -> String {
+        let spaced = raw.replacingOccurrences(of: "_", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !spaced.isEmpty else { return raw }
+        return spaced.localizedCapitalized
+    }
+}
+
+// MARK: - Suggested reply chip colors
+
+enum CoachReplyChipPalette {
+    case neutral
+    case mangoWash
+    case cyanWash
+    case indigoWash
+
+    static func forAction(_ action: SuggestedAction) -> CoachReplyChipPalette {
+        let k = action.type.lowercased()
+        if CoachSuggestedActionNavigation.isNavigation(k) { return .indigoWash }
+        if k == "escalate_cloud" { return .mangoWash }
+        switch CoachChipPresentation.colorBucket(action.label) {
+        case 0: return .mangoWash
+        case 1: return .cyanWash
+        default: return .neutral
+        }
+    }
+
+    func leadingIconTint(isEnabled: Bool) -> Color {
+        guard isEnabled else { return .white.opacity(0.22) }
+        switch self {
+        case .neutral: return AppColor.mango.opacity(0.92)
+        case .mangoWash: return AppColor.mango.opacity(0.95)
+        case .cyanWash: return Color.cyan.opacity(0.88)
+        case .indigoWash: return Color.indigo.opacity(0.85)
+        }
+    }
+
+    func gradientFill(isEnabled: Bool) -> LinearGradient {
+        let top: Color
+        let bottom: Color
+        switch self {
+        case .neutral:
+            top = Color.white.opacity(isEnabled ? 0.1 : 0.04)
+            bottom = Color.white.opacity(isEnabled ? 0.06 : 0.03)
+        case .mangoWash:
+            top = AppColor.mango.opacity(isEnabled ? 0.2 : 0.07)
+            bottom = Color.white.opacity(isEnabled ? 0.07 : 0.04)
+        case .cyanWash:
+            top = Color.cyan.opacity(isEnabled ? 0.16 : 0.06)
+            bottom = Color.white.opacity(isEnabled ? 0.06 : 0.03)
+        case .indigoWash:
+            top = Color.indigo.opacity(isEnabled ? 0.22 : 0.08)
+            bottom = Color.white.opacity(isEnabled ? 0.07 : 0.04)
+        }
+        return LinearGradient(
+            colors: [top, bottom],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    func strokeColor(isEnabled: Bool) -> Color {
+        switch self {
+        case .neutral: return Color.white.opacity(isEnabled ? 0.12 : 0.06)
+        case .mangoWash: return AppColor.mango.opacity(isEnabled ? 0.42 : 0.14)
+        case .cyanWash: return Color.cyan.opacity(isEnabled ? 0.38 : 0.12)
+        case .indigoWash: return Color.indigo.opacity(isEnabled ? 0.4 : 0.14)
+        }
+    }
+
+    func trailingOrbTint(isEnabled: Bool) -> Color {
+        guard isEnabled else { return .white.opacity(0.2) }
+        switch self {
+        case .neutral: return AppColor.mango.opacity(0.95)
+        case .mangoWash: return AppColor.mango.opacity(0.98)
+        case .cyanWash: return Color.cyan.opacity(0.92)
+        case .indigoWash: return Color.indigo.opacity(0.9)
+        }
     }
 }
 
@@ -145,6 +230,7 @@ struct CoachAssistantBubble: View {
         case "recovery": "waveform.path.ecg"
         case "equipment": "gearshape.fill"
         case "clarification": "questionmark.circle.fill"
+        case "on_device_coach": "apple.intelligence"
         default: "sparkles"
         }
     }
@@ -157,20 +243,36 @@ struct CoachAssistantBubble: View {
         case "recovery": "Recovery"
         case "equipment": "Equipment"
         case "clarification": "Clarify"
+        case "on_device_coach": "On-device"
         default: "Coach"
         }
+    }
+
+    private var categoryAccent: Color {
+        message.category == "on_device_coach"
+            ? Color.cyan.opacity(0.9)
+            : AppColor.mango
+    }
+
+    private var stripGradient: LinearGradient {
+        if message.category == "on_device_coach" {
+            return LinearGradient(
+                colors: [Color.cyan.opacity(0.85), Color.blue.opacity(0.35)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        return LinearGradient(
+            colors: [AppColor.mango.opacity(0.95), AppColor.mango.opacity(0.35)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [AppColor.mango.opacity(0.95), AppColor.mango.opacity(0.35)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .fill(stripGradient)
                 .frame(width: 3)
                 .padding(.vertical, 14)
                 .padding(.leading, 12)
@@ -179,7 +281,7 @@ struct CoachAssistantBubble: View {
                 HStack(spacing: 6) {
                     Image(systemName: categoryIcon)
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(AppColor.mango)
+                        .foregroundStyle(categoryAccent)
                     Text(categoryLabel.uppercased())
                         .font(.system(size: 9, weight: .heavy))
                         .foregroundStyle(.white.opacity(0.38))
@@ -195,6 +297,21 @@ struct CoachAssistantBubble: View {
                     .lineSpacing(5)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
+
+                if message.category == "on_device_coach" {
+                    HStack(alignment: .center, spacing: 6) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.cyan.opacity(0.75))
+                        Text("Processed on-device; not sent to Mangox Cloud for this reply.")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.48))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("On-device answer, private on this device")
+                }
 
                 if message.usedWebSearch {
                     HStack(alignment: .center, spacing: 6) {
@@ -215,13 +332,14 @@ struct CoachAssistantBubble: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
                             ForEach(message.tags, id: \.self) { tag in
-                                Text(tag)
+                                Text(CoachTagPillFormatting.displayLabel(for: tag))
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.52))
                                     .padding(.horizontal, 9)
                                     .padding(.vertical, 5)
                                     .background(Color.white.opacity(0.07))
                                     .clipShape(Capsule())
+                                    .accessibilityLabel(CoachTagPillFormatting.displayLabel(for: tag))
                             }
                         }
                         .padding(.horizontal, 14)
@@ -431,7 +549,6 @@ struct CoachThinkingDisclosure: View {
 
 struct CoachStreamStatusRow: View {
     let text: String
-    let bubbleMaxWidth: CGFloat
 
     var body: some View {
         HStack(spacing: 10) {
@@ -442,67 +559,120 @@ struct CoachStreamStatusRow: View {
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.48))
                 .lineLimit(2)
+                .multilineTextAlignment(.leading)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.white.opacity(0.05))
         )
-        .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Coach status: \(text)")
     }
 }
 
 struct CoachStreamingBubble: View {
+    enum Style {
+        case cloud
+        case onDevice
+    }
+
     let text: String
-    let bubbleMaxWidth: CGFloat
+    var style: Style = .cloud
+
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
+    private var headerIcon: String {
+        switch style {
+        case .cloud: "sparkles"
+        case .onDevice: "apple.intelligence"
+        }
+    }
+
+    private var headerLabel: String {
+        switch style {
+        case .cloud: "COACH"
+        case .onDevice: "ON-DEVICE"
+        }
+    }
+
+    private var headerTint: Color {
+        switch style {
+        case .cloud: AppColor.mango
+        case .onDevice: Color.cyan.opacity(0.9)
+        }
+    }
+
+    private var stripGradient: LinearGradient {
+        switch style {
+        case .cloud:
+            return LinearGradient(
+                colors: [AppColor.mango.opacity(0.85), AppColor.mango.opacity(0.25)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        case .onDevice:
+            return LinearGradient(
+                colors: [Color.cyan.opacity(0.75), Color.blue.opacity(0.25)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [AppColor.mango.opacity(0.85), AppColor.mango.opacity(0.25)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .fill(stripGradient)
                 .frame(width: 3)
                 .padding(.vertical, 12)
                 .padding(.leading, 12)
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
+                    Image(systemName: headerIcon)
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(AppColor.mango)
-                    Text("COACH")
+                        .foregroundStyle(headerTint)
+                        .contentTransition(.interpolate)
+                    Text(headerLabel)
                         .font(.system(size: 9, weight: .heavy))
                         .foregroundStyle(.white.opacity(0.38))
                         .tracking(0.65)
+                        .contentTransition(.interpolate)
                 }
                 Text(CoachAssistantFormatting.plainTextForStreaming(text))
                     .font(.body)
                     .foregroundStyle(.white.opacity(0.9))
                     .lineSpacing(5)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentTransition(accessibilityReduceMotion ? .identity : .interpolate)
+                    .animation(
+                        accessibilityReduceMotion ? .default : .easeOut(duration: 0.12),
+                        value: text
+                    )
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(Color.white.opacity(0.07))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(AppColor.mango.opacity(0.35), lineWidth: 1)
+                .strokeBorder(
+                    style == .onDevice ? Color.cyan.opacity(0.28) : AppColor.mango.opacity(0.35),
+                    lineWidth: 1
+                )
         )
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityLabel("Coach is writing a reply")
+        .accessibilityLabel(
+            style == .onDevice ? "On-device coach is writing a reply" : "Coach is writing a reply")
     }
 }
 
@@ -515,6 +685,8 @@ struct CoachTallPromptButton: View {
     var leadingSystemImage: String? = nil
     var trailingSystemImage: String = "arrow.up.circle.fill"
     var trailingTint: Color = AppColor.mango.opacity(0.95)
+    /// Tinted fill + stroke for coach quick-reply chips; starters use `.neutral`.
+    var chipPalette: CoachReplyChipPalette = .neutral
     var isEnabled: Bool = true
     /// When nil, a default label is derived from `title`.
     var accessibilityLabelOverride: String? = nil
@@ -529,7 +701,7 @@ struct CoachTallPromptButton: View {
                 if let leadingSystemImage {
                     Image(systemName: leadingSystemImage)
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(isEnabled ? AppColor.mango.opacity(0.92) : .white.opacity(0.22))
+                        .foregroundStyle(chipPalette.leadingIconTint(isEnabled: isEnabled))
                         .frame(width: 26, alignment: .center)
                         .accessibilityHidden(true)
                 }
@@ -561,12 +733,12 @@ struct CoachTallPromptButton: View {
             .frame(minHeight: (subtitle == nil || subtitle?.isEmpty == true) ? 52 : 58, alignment: .center)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.white.opacity(isEnabled ? 0.1 : 0.04))
+                    .fill(chipPalette.gradientFill(isEnabled: isEnabled))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(
-                        Color.white.opacity(isEnabled ? 0.12 : 0.06),
+                        chipPalette.strokeColor(isEnabled: isEnabled),
                         lineWidth: 1
                     )
             )
@@ -584,13 +756,23 @@ struct CoachEmptyStartersPanel: View {
     let greetingTitle: String
     let headline: String
     let subhead: String
+    /// Topic-style tags from `SystemLanguageModel(useCase: .contentTagging)` (Apple Intelligence).
+    let topicTags: [String]
     let prompts: [AIService.QuickPrompt]
     let onPlanBuilder: () -> Void
     let onPrompt: (AIService.QuickPrompt) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
     private var textPrimary: Color { .white.opacity(AppOpacity.textPrimary) }
     private var textSecondary: Color { .white.opacity(AppOpacity.textSecondary) }
     private var textTertiary: Color { .white.opacity(AppOpacity.textTertiary) }
+
+    /// Matches Apple’s sample spirit (blurReplace) without requiring a specific SDK symbol name.
+    private var tagAppearTransition: AnyTransition {
+        if accessibilityReduceMotion { return .opacity }
+        return .opacity.combined(with: .scale(scale: 0.96, anchor: .leading))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -648,6 +830,47 @@ struct CoachEmptyStartersPanel: View {
                 .padding(.horizontal, 14)
 
             VStack(alignment: .leading, spacing: 12) {
+                if !topicTags.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "tag.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.cyan.opacity(0.75))
+                            Text("TOPICS FROM YOUR DATA")
+                                .font(.system(size: 10, weight: .heavy))
+                                .foregroundStyle(textTertiary)
+                                .tracking(0.55)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(topicTags, id: \.self) { tag in
+                                    Text("#\(CoachTagPillFormatting.displayLabel(for: tag))")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.55))
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 7)
+                                        .background(Color.white.opacity(0.08))
+                                        .clipShape(Capsule())
+                                        .overlay(
+                                            Capsule()
+                                                .strokeBorder(Color.cyan.opacity(0.22), lineWidth: 1)
+                                        )
+                                        .transition(tagAppearTransition)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 4)
+                        }
+                    }
+                    .animation(
+                        accessibilityReduceMotion ? .easeInOut(duration: 0.16) : .smooth(duration: 0.35),
+                        value: topicTags
+                    )
+                }
+
                 HStack(spacing: 8) {
                     Image(systemName: "hand.tap.fill")
                         .font(.system(size: 12, weight: .semibold))
@@ -658,7 +881,7 @@ struct CoachEmptyStartersPanel: View {
                         .tracking(0.65)
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 14)
+                .padding(.top, topicTags.isEmpty ? 14 : 6)
 
                 VStack(spacing: 8) {
                     CoachTallPromptButton(
@@ -678,10 +901,15 @@ struct CoachEmptyStartersPanel: View {
                             accessibilityLabelOverride: "Starter: \(p.text)",
                             action: { onPrompt(p) }
                         )
+                        .transition(tagAppearTransition)
                     }
                 }
                 .padding(.horizontal, 14)
                 .padding(.bottom, 14)
+                .animation(
+                    accessibilityReduceMotion ? .easeInOut(duration: 0.18) : .smooth(duration: 0.38),
+                    value: prompts.map(\.id)
+                )
             }
         }
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
@@ -802,7 +1030,8 @@ private struct CoachFollowUpBlocksCarousel: View {
             return
         }
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        let answer = action.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let answer = CoachChipPresentation.outgoingText(for: action)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let row = (q, answer)
         if step >= blocks.count - 1 {
             let all = collected + [row]
@@ -928,14 +1157,17 @@ struct CoachFollowUpRepliesPanel: View {
 
     private func suggestedReplyButton(_ action: SuggestedAction) -> some View {
         let navigates = CoachSuggestedActionNavigation.isNavigation(action.type)
+        let palette = CoachReplyChipPalette.forAction(action)
+        let title = CoachChipPresentation.displayTitle(for: action)
         return CoachTallPromptButton(
-            title: action.label,
+            title: title,
             trailingSystemImage: navigates ? "arrow.right.circle.fill" : "arrow.up.circle.fill",
-            trailingTint: navigates ? AppColor.blue.opacity(0.9) : AppColor.mango.opacity(0.95),
+            trailingTint: navigates ? Color.indigo.opacity(0.92) : palette.trailingOrbTint(isEnabled: isEnabled),
+            chipPalette: palette,
             isEnabled: isEnabled,
             accessibilityLabelOverride: navigates
-                ? "\(action.label), opens elsewhere"
-                : "Suggested reply: \(action.label)",
+                ? "\(title), opens elsewhere"
+                : "Suggested reply: \(title)",
             action: { onSelect(action) }
         )
     }
@@ -946,7 +1178,6 @@ struct CoachFollowUpRepliesPanel: View {
 
 struct CoachTypingRow: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
-    let bubbleMaxWidth: CGFloat
     @State private var phase: Int = 0
 
     var body: some View {
@@ -963,9 +1194,11 @@ struct CoachTypingRow: View {
                         value: phase
                     )
             }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(Color.white.opacity(0.05))
@@ -974,7 +1207,6 @@ struct CoachTypingRow: View {
             if !accessibilityReduceMotion { phase = 1 }
         }
         .onDisappear { phase = 0 }
-        .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
         .accessibilityLabel("Coach is typing")
     }
 }

@@ -20,16 +20,17 @@ struct PowerZone: Identifiable {
     }
 
     static var ftp: Int {
-        get {
-            let value = UserDefaults.standard.integer(forKey: ftpStorageKey)
-            return value > 0 ? value : defaultFTP
-        }
-        @MainActor set {
-            UserDefaults.standard.set(max(100, newValue), forKey: ftpStorageKey)
-            UserDefaults.standard.set(true, forKey: ftpHasBeenSetKey)
-            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: ftpLastUpdateKey)
-            FTPRefreshTrigger.shared.bump()
-        }
+        let value = UserDefaults.standard.integer(forKey: ftpStorageKey)
+        return value > 0 ? value : defaultFTP
+    }
+
+    /// Swift 6: use an explicit MainActor method instead of `@MainActor set` on `ftp` (setters cannot carry a global actor).
+    @MainActor
+    static func setFTP(_ watts: Int) {
+        UserDefaults.standard.set(max(100, watts), forKey: ftpStorageKey)
+        UserDefaults.standard.set(true, forKey: ftpHasBeenSetKey)
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: ftpLastUpdateKey)
+        FTPRefreshTrigger.shared.bump()
     }
 
     static var lastFTPUpdate: Date? {

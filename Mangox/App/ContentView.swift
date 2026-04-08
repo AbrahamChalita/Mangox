@@ -433,11 +433,12 @@ struct AITrainingPlanView: View {
         .environment(LocationManager())
         .environment(HealthKitManager())
         .environment(StravaService())
+        .environment(WhoopService())
         .environment(FTPRefreshTrigger.shared)
         .modelContainer(
             for: [
                 Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self,
-                CustomWorkoutTemplate.self, FitnessSettingsSnapshot.self,
+                CustomWorkoutTemplate.self, FitnessSettingsSnapshot.self, WorkoutRAGChunk.self,
             ],
             inMemory: true)
 }

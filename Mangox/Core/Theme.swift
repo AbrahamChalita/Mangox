@@ -19,6 +19,8 @@ enum AppColor {
     static let blue = Color(red: 107/255, green: 127/255, blue: 212/255)
     static let strava = Color(red: 252/255, green: 82/255, blue: 0)
     static let stravaEnd = Color(red: 232/255, green: 58/255, blue: 0)
+    /// WHOOP brand accent (approximate; UI only).
+    static let whoop = Color(red: 0/255, green: 158/255, blue: 127/255)
     static let discord = Color(red: 88/255, green: 101/255, blue: 242/255)
     static let bg = Color(red: 0.03, green: 0.04, blue: 0.06)
 
@@ -141,6 +143,54 @@ enum AppFormat {
             return String(format: "%d:%02d:%02d", m / 60, m % 60, s)
         }
         return String(format: "%d:%02d", m, s)
+    }
+
+    // MARK: - Human-readable dates in text
+
+    /// Replaces ISO-8601 date/time snippets (e.g. from cached on-device insight copy) with locale-aware formatting.
+    static func naturalizeISODateSnippets(in string: String) -> String {
+        guard !string.isEmpty else { return string }
+
+        let isoFrac = ISO8601DateFormatter()
+        isoFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoStd = ISO8601DateFormatter()
+        isoStd.formatOptions = [.withInternetDateTime]
+        let isoDay = ISO8601DateFormatter()
+        isoDay.formatOptions = [.withFullDate]
+
+        func parse(_ sub: String) -> Date? {
+            if let d = isoFrac.date(from: sub) { return d }
+            if let d = isoStd.date(from: sub) { return d }
+            return isoDay.date(from: sub)
+        }
+
+        func format(_ date: Date, dateOnly: Bool) -> String {
+            if dateOnly {
+                return date.formatted(date: .abbreviated, time: .omitted)
+            }
+            return date.formatted(date: .abbreviated, time: .shortened)
+        }
+
+        // Datetime first, then bare calendar dates (not followed by `T` or more digits).
+        let pattern =
+            #"(?<![0-9])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.[0-9]{1,9})?)?(?:Z|[+-]\d{2}(?::)?\d{2})?)|(?<![0-9])(\d{4}-\d{2}-\d{2})(?![0-9T])"#
+
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return string
+        }
+
+        var result = string
+        let nsFull = result as NSString
+        let matches = regex.matches(in: result, options: [], range: NSRange(location: 0, length: nsFull.length))
+
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: result) else { continue }
+            let sub = String(result[range])
+            let dateOnly = !sub.contains("T")
+            guard let date = parse(sub) else { continue }
+            result.replaceSubrange(range, with: format(date, dateOnly: dateOnly))
+        }
+        return result
     }
 }
 

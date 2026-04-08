@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
 enum CoachAuxiliarySheet: String, Identifiable {
     case paywall, plans
@@ -33,6 +34,7 @@ struct CoachConversationView: View {
     /// Recreates `ScrollView` when the thread first appears (empty → messages) so layout/scroll state does not stick blank until a manual scroll.
     @State private var transcriptScrollSession: Int = 0
     @State private var didRequestPersistedLoad = false
+    @State private var starterContent: AIService.CoachEmptyStartersContent?
 
     private static let planBuilderSeed =
         "I want to build a structured training plan for an event. Ask me about my goal, target date, weekly training hours, and experience, then outline next steps."
@@ -52,7 +54,9 @@ struct CoachConversationView: View {
 
     private static func bubbleMaxWidth(containerWidth: CGFloat) -> CGFloat {
         let horizontalPadding: CGFloat = 32
-        return min(580, max(0, containerWidth - horizontalPadding))
+        // Geometry/preference can report 0 briefly; a near-zero max width makes LazyVStack relayout wildly.
+        let w = max(containerWidth, 64)
+        return min(580, max(120, w - horizontalPadding))
     }
 
     var body: some View {
@@ -94,6 +98,10 @@ struct CoachConversationView: View {
             await Task.yield()
             await aiService.loadPersistedMessages(modelContext: modelContext)
         }
+        .task(id: "\(aiService.currentSessionID?.uuidString ?? "none")") {
+            guard aiService.messages.isEmpty else { return }
+            starterContent = await aiService.loadCoachEmptyStartersContent(modelContext: modelContext)
+        }
     }
 
     // MARK: Top chrome
@@ -108,7 +116,9 @@ struct CoachConversationView: View {
                         .font(.body)
                         .foregroundStyle(.white.opacity(0.55))
                         .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel("Close chat")
 
                 Spacer(minLength: 0)
@@ -120,7 +130,9 @@ struct CoachConversationView: View {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.system(size: 17, weight: .medium))
                             .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .foregroundStyle(.white.opacity(0.5))
                     .accessibilityLabel("Conversations")
 
@@ -130,7 +142,9 @@ struct CoachConversationView: View {
                         Image(systemName: "calendar.badge.plus")
                             .font(.system(size: 17, weight: .medium))
                             .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .foregroundStyle(AppColor.mango)
                     .accessibilityLabel("Plan builder")
                     .disabled(aiService.isLoading)
@@ -141,7 +155,9 @@ struct CoachConversationView: View {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 17, weight: .medium))
                             .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .foregroundStyle(.white.opacity(0.5))
                     .accessibilityLabel("New conversation")
                     .disabled(aiService.isLoading)
@@ -247,6 +263,7 @@ struct CoachConversationView: View {
         ScrollView {
             if aiService.messages.isEmpty && !aiService.isLoading {
                 emptyState(maxW: maxW)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .scrollTargetLayout()
             } else {
                 // `VStack` avoids LazyVStack deferring layout until scroll (blank transcript until user drags).
@@ -261,20 +278,18 @@ struct CoachConversationView: View {
                             suggestionsInteractive: !aiService.isLoading,
                             onRetry: { send("Try again") },
                             onSuggestedAction: handleSuggestedAction,
-                            onFollowUpBatchComplete: send
+                            onFollowUpBatchComplete: { send($0) }
                         )
                     }
 
                     if aiService.generatingPlan && !aiService.isLoading {
                         CoachStreamStatusRow(
-                            text: aiService.planProgress?.message ?? "Building your plan…",
-                            bubbleMaxWidth: maxW
+                            text: aiService.planProgress?.message ?? "Building your plan…"
                         )
                         .id("planGen")
                     }
 
                     CoachStreamingSection(
-                        maxW: maxW,
                         lastStreamScrollDate: .constant(.distantPast),
                         scheduleScrollToBottom: {
                             withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
@@ -284,6 +299,9 @@ struct CoachConversationView: View {
                     Color.clear
                         .frame(height: coachTranscriptBottomSpacerHeight)
                 }
+                // `LazyVStack` otherwise shrink-wraps to the widest bubble; user rows stay `.trailing` inside
+                // that narrow width, leaving a dead band on the right (your screenshot).
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 16)
@@ -322,7 +340,12 @@ struct CoachConversationView: View {
     }
 
     private func emptyState(maxW: CGFloat) -> some View {
-        let prompts = aiService.contextualQuickPrompts(modelContext: modelContext)
+        let content =
+            starterContent
+            ?? AIService.CoachEmptyStartersContent(
+                prompts: aiService.contextualQuickPrompts(modelContext: modelContext),
+                topicTags: []
+            )
 
         return VStack(spacing: 0) {
             CoachEmptyStartersPanel(
@@ -331,9 +354,10 @@ struct CoachConversationView: View {
                 headline: "What should we work on?",
                 subhead:
                     "Training, recovery, your last ride, or a full event plan — type below or tap a starter.",
-                prompts: prompts,
+                topicTags: content.topicTags,
+                prompts: content.prompts,
                 onPlanBuilder: { send(Self.planBuilderSeed) },
-                onPrompt: { send($0.text) }
+                onPrompt: { send($0.text, delivery: .starter) }
             )
             .frame(maxWidth: maxW)
 
@@ -401,7 +425,7 @@ struct CoachConversationView: View {
             chatSheetPresented: $chatSheetPresented,
             auxiliarySheet: $auxiliarySheet,
             showComposerLimitBanner: showComposerLimitBanner,
-            sendAction: send,
+            sendAction: { send($0) },
             onFocusChanged: { focused in
                 if focused && !aiService.messages.isEmpty {
                     withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
@@ -414,38 +438,46 @@ struct CoachConversationView: View {
         )
     }
 
-    private func send(_ text: String) {
+    private func send(_ text: String, delivery: CoachChatDelivery = .automatic) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         HapticManager.shared.coachMessageSent()
         Task { @MainActor in
-            await aiService.sendMessage(trimmed, isPro: purchases.isPro, modelContext: modelContext)
+            await aiService.sendMessage(
+                trimmed, isPro: purchases.isPro, modelContext: modelContext, delivery: delivery)
         }
     }
 
     /// Taps on model-provided `suggestedActions` chips (same JSON contract as the Mangox Cloud coach).
     private func handleSuggestedAction(_ action: SuggestedAction) {
         guard !aiService.isLoading else { return }
+        let kind = action.type.lowercased()
+        if kind == "escalate_cloud" {
+            HapticManager.shared.coachQuickReplyTapped()
+            Task { @MainActor in
+                await aiService.escalateStarterOnDeviceToCloud(
+                    isPro: purchases.isPro, modelContext: modelContext)
+            }
+            return
+        }
         guard !aiService.hasReachedFreeLimit(isPro: purchases.isPro) else {
             auxiliarySheet = .paywall
             return
         }
         HapticManager.shared.coachQuickReplyTapped()
-        let kind = action.type.lowercased()
         switch kind {
         case "navigate_to_plan":
             navigationPath.append(AppRoute.trainingPlan)
         case "navigate_to_my_plans", "open_my_plans":
             auxiliarySheet = .plans
         default:
-            send(action.label)
+            send(CoachChipPresentation.outgoingText(for: action))
         }
     }
 }
 
 struct CoachStreamingSection: View {
     @Environment(AIService.self) private var aiService
-    let maxW: CGFloat
     @Binding var lastStreamScrollDate: Date
     let scheduleScrollToBottom: () -> Void
 
@@ -455,20 +487,25 @@ struct CoachStreamingSection: View {
                 if !aiService.streamDraftText.isEmpty {
                     CoachStreamingBubble(
                         text: aiService.streamDraftText,
-                        bubbleMaxWidth: maxW
+                        style: aiService.streamUsesOnDeviceAppearance ? .onDevice : .cloud
                     )
                     .id("streaming")
                 } else if aiService.streamIsThinking {
-                    CoachStreamStatusRow(text: "Reasoning…", bubbleMaxWidth: maxW)
-                        .id("thinking")
+                    CoachStreamStatusRow(
+                        text: aiService.streamUsesOnDeviceAppearance
+                            ? "Structuring on-device answer…" : "Reasoning…"
+                    )
+                    .id("thinking")
                 } else if let status = aiService.streamStatusText, !status.isEmpty {
-                    CoachStreamStatusRow(text: status, bubbleMaxWidth: maxW)
+                    CoachStreamStatusRow(text: status)
                         .id("status")
                 } else {
-                    CoachTypingRow(bubbleMaxWidth: maxW)
+                    CoachTypingRow()
                         .id("typing")
                 }
             }
+            // Same contract as `CoachMessageRow`: occupy the row width, keep stream/typing rows leading-aligned.
+            .frame(maxWidth: .infinity, alignment: .leading)
             .onChange(of: aiService.streamDraftText) { _, _ in
                 guard aiService.isLoading, !aiService.streamDraftText.isEmpty else { return }
                 let now = Date()
@@ -488,8 +525,17 @@ struct CoachInputBarWrapper: View {
     let sendAction: (String) -> Void
     let onFocusChanged: (Bool) -> Void
 
+    @Environment(AIService.self) private var aiService
+    @Environment(PurchasesManager.self) private var purchases
+
     @State private var inputText = ""
     @FocusState private var inputFocused: Bool
+
+    private var canSendFromKeyboard: Bool {
+        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && !aiService.isLoading
+            && !aiService.hasReachedFreeLimit(isPro: purchases.isPro)
+    }
 
     var body: some View {
         InputBarView(
@@ -510,7 +556,27 @@ struct CoachInputBarWrapper: View {
         )
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
+                Button {
+                    if let s = UIPasteboard.general.string {
+                        inputText += s
+                    }
+                } label: {
+                    Image(systemName: "doc.on.clipboard")
+                }
+                .accessibilityLabel("Paste from clipboard")
+
                 Spacer()
+
+                Button("Send") {
+                    guard canSendFromKeyboard else { return }
+                    let t = inputText
+                    sendAction(t)
+                    inputText = ""
+                }
+                .font(.system(size: 17, weight: .semibold))
+                .disabled(!canSendFromKeyboard)
+                .accessibilityLabel("Send message")
+
                 Button("Done") { inputFocused = false }
                     .font(.system(size: 17, weight: .semibold))
                     .accessibilityLabel("Dismiss keyboard")
@@ -590,7 +656,6 @@ struct InputBarView: View {
                     .foregroundStyle(.white)
                     .tint(AppColor.mango)
                     .textInputAutocapitalization(.sentences)
-                    .autocorrectionDisabled()
                     .lineLimit(1...6)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 11)

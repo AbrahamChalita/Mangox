@@ -7,6 +7,7 @@ private enum SettingsRoute: Hashable {
     case powerZones
     case heartRate
     case strava
+    case whoop
     case integrations
     case indoorTrainer
     case outdoorRide
@@ -24,6 +25,7 @@ struct SettingsView: View {
     @Binding var navigationPath: NavigationPath
     @Environment(PurchasesManager.self) private var purchases
     @Environment(StravaService.self) private var stravaService
+    @Environment(WhoopService.self) private var whoopService
     @Environment(FTPRefreshTrigger.self) private var ftpRefresh
 
     @State private var showPaywall = false
@@ -33,6 +35,7 @@ struct SettingsView: View {
         let ftp = PowerZone.ftp
         let maxHR = HeartRateZone.maxHR
         let stravaConnected = stravaService.isConnected
+        let whoopConnected = whoopService.isConnected
         let isPro = purchases.isPro
 
         ZStack {
@@ -41,7 +44,9 @@ struct SettingsView: View {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
                         Color.clear.frame(height: 8)
 
-                        identityHeader(ftp: ftp, stravaConnected: stravaConnected, isPro: isPro)
+                        identityHeader(
+                            ftp: ftp, stravaConnected: stravaConnected, whoopConnected: whoopConnected,
+                            isPro: isPro)
                             .padding(.bottom, 24)
 
                         // MARK: Training
@@ -99,6 +104,16 @@ struct SettingsView: View {
                                 valueColor: stravaConnected
                                     ? AppColor.success : .white.opacity(0.3),
                                 route: .strava
+                            )
+                            rowDivider
+                            navRow(
+                                icon: "waveform.path.ecg",
+                                iconColor: AppColor.whoop,
+                                title: "WHOOP",
+                                value: whoopConnected ? "Connected" : "Not connected",
+                                valueColor: whoopConnected
+                                    ? AppColor.success : .white.opacity(0.3),
+                                route: .whoop
                             )
                             rowDivider
                             navRow(
@@ -228,6 +243,7 @@ struct SettingsView: View {
                     case .powerZones: PowerZonesSettingsView()
                     case .heartRate: HeartRateSettingsView()
                     case .strava: StravaSettingsView()
+                    case .whoop: WhoopSettingsView()
                     case .integrations: IntegrationsSettingsView()
                     case .indoorTrainer: IndoorTrainerSettingsView()
                     case .outdoorRide: OutdoorRideSettingsView()
@@ -317,7 +333,9 @@ struct SettingsView: View {
 
     // MARK: - Identity header
 
-    private func identityHeader(ftp: Int, stravaConnected: Bool, isPro: Bool) -> some View {
+    private func identityHeader(
+        ftp: Int, stravaConnected: Bool, whoopConnected: Bool, isPro: Bool
+    ) -> some View {
         let _ = ftpRefresh.generation
         return
             (HStack(alignment: .center, spacing: 14) {
@@ -331,6 +349,11 @@ struct SettingsView: View {
                             Label("Strava", systemImage: "checkmark.circle.fill")
                                 .font(.system(size: 12))
                                 .foregroundStyle(AppColor.success)
+                        }
+                        if whoopConnected {
+                            Label("WHOOP", systemImage: "checkmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(AppColor.whoop)
                         }
                         if isPro {
                             Label("Pro", systemImage: "crown.fill")

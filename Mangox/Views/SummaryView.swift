@@ -5,6 +5,20 @@ import os.log
 
 private let summaryLogger = Logger(subsystem: "com.abchalita.Mangox", category: "SummaryView")
 
+private enum SummaryRiderNaming {
+    /// First token of Strava display name for on-device insight headlines (optional).
+    static func stravaFirstName(from displayName: String?) -> String? {
+        guard let raw = displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
+        else { return nil }
+        let token =
+            raw.split { $0.isWhitespace || $0 == "·" }
+            .first
+            .map(String.init) ?? raw
+        if token.count > 24 { return String(token.prefix(24)) }
+        return token
+    }
+}
+
 private struct SummaryDataSignature: Equatable {
     let workoutStatus: String
     let duration: TimeInterval
@@ -75,7 +89,8 @@ struct SummaryView: View {
     /// When Strava rejects API photo upload, user can share the rendered summary image from here.
     @State private var showStravaPhotoFallbackDialog = false
     @State private var stravaPhotoFallbackImage: Any?
-    @State private var isPreparingInstagramStory = false
+    @State private var showInstagramStoryStudio = false
+    @State private var aiStravaDescriptionTask: Task<Void, Never>?
     /// Set after saving a free ride as a `CustomWorkoutTemplate` in this session (enables repeat).
     @State private var customRepeatTemplateID: UUID?
     @Environment(\.horizontalSizeClass) private var hSizeClass
@@ -346,27 +361,17 @@ struct SummaryView: View {
 
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    shareToInstagramStories()
+                    guard workout != nil, dataReady else { return }
+                    showInstagramStoryStudio = true
                 } label: {
-                    if isPreparingInstagramStory {
-                        ProgressView()
-                            .tint(
-                                Color(
-                                    red: 0.88,
-                                    green: 0.19,
-                                    blue: 0.42
-                                )
-                            )
-                    } else {
-                        Image("BrandInstagram")
-                            .renderingMode(.template)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: toolbarBrandIconSize, height: toolbarBrandIconSize)
-                            .accessibilityHidden(true)
-                    }
+                    Image("BrandInstagram")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: toolbarBrandIconSize, height: toolbarBrandIconSize)
+                        .accessibilityHidden(true)
                 }
-                .disabled(isPreparingInstagramStory)
+                .disabled(!dataReady)
                 .tint(
                     Color(
                         red: 0.88,
@@ -374,14 +379,7 @@ struct SummaryView: View {
                         blue: 0.42
                     )
                 )
-                .accessibilityLabel(
-                    isPreparingInstagramStory
-                        ? "Preparing Instagram story" : "Share to Instagram Stories"
-                )
-                .accessibilityAddTraits(
-                    isPreparingInstagramStory
-                        ? AccessibilityTraits.updatesFrequently : AccessibilityTraits()
-                )
+                .accessibilityLabel("Instagram Story — customize and share")
             }
 
             ToolbarItem(placement: .topBarTrailing) {
@@ -390,6 +388,22 @@ struct SummaryView: View {
                 } label: {
                     Image(systemName: "square.and.arrow.up")
                 }
+            }
+        }
+        .sheet(isPresented: $showInstagramStoryStudio) {
+            if let workout, dataReady {
+                InstagramStoryStudioView(
+                    workout: workout,
+                    routeName: workout.savedRouteName ?? routeManager.routeName,
+                    totalElevationGain: workout.elevationGain > 0
+                        ? workout.elevationGain : routeManager.totalElevationGain,
+                    personalRecordNames: stravaPersonalRecordNames(for: workout),
+                    onDismiss: { showInstagramStoryStudio = false },
+                    onShareError: { message in
+                        showInstagramStoryStudio = false
+                        actionError = message
+                    }
+                )
             }
         }
         .sheet(isPresented: $showShareSheet) {
@@ -664,14 +678,32 @@ struct SummaryView: View {
     private func ensureStravaDraft(for workout: Workout) {
         guard stravaDraftWorkoutID != workout.id else { return }
         let prNames = stravaPersonalRecordNames(for: workout)
-        stravaTitleInput = StravaPostBuilder.buildTitle(
-            workout: workout,
-            routeName: workout.savedRouteName ?? routeManager.routeName,
-            dominantPowerZone: PowerZone.zone(for: Int(workout.avgPower.rounded())),
-            personalRecordNames: prNames
-        )
+        stravaTitleInput =
+            workout.smartTitle
+            ?? StravaPostBuilder.buildTitle(
+                workout: workout,
+                routeName: workout.savedRouteName ?? routeManager.routeName,
+                dominantPowerZone: PowerZone.zone(for: Int(workout.avgPower.rounded())),
+                personalRecordNames: prNames
+            )
         applyStravaDescriptionTemplate(for: workout)
         stravaDraftWorkoutID = workout.id
+        scheduleAIStravaDescription(for: workout)
+    }
+
+    private func scheduleAIStravaDescription(for workout: Workout) {
+        aiStravaDescriptionTask?.cancel()
+        let zoneLine = zoneBuckets.map { "Z\($0.zone.id) \(Int(($0.percent * 100).rounded()))%" }.joined(separator: ", ")
+        let ftpWatts = PowerZone.ftp
+        let capturedWorkoutID = workout.id
+        aiStravaDescriptionTask = Task { @MainActor in
+            let ai = await WorkoutSummaryOnDeviceInsight.generateStravaDescription(
+                workout: workout, powerZoneLine: zoneLine, ftpWatts: ftpWatts)
+            guard !Task.isCancelled, stravaDraftWorkoutID == capturedWorkoutID, let ai else { return }
+            // Only overwrite if the user hasn't manually edited the description yet
+            // (compare against the template output to detect edits)
+            stravaDescriptionInput = ai
+        }
     }
 
     /// Uploads the summary card JPEG when **Attach summary card** is on. Used after a fresh Strava upload
@@ -893,49 +925,6 @@ struct SummaryView: View {
         }
     }
 
-    /// Renders the Instagram story card into a 9:16 image and opens Instagram’s composer (no login).
-    /// Falls back to the system share sheet if Instagram isn’t installed.
-    private func shareToInstagramStories() {
-        guard let workout else { return }
-        guard dataReady else { return }
-        guard !isPreparingInstagramStory else { return }
-
-        isPreparingInstagramStory = true
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-
-        Task { @MainActor in
-            await Task.yield()
-            defer { isPreparingInstagramStory = false }
-
-            let dominantZone = PowerZone.zone(for: Int(workout.avgPower.rounded()))
-            let storyImage = InstagramStoryShare.renderWorkoutStory(
-                workout: workout,
-                dominantZone: dominantZone,
-                routeName: workout.savedRouteName ?? routeManager.routeName,
-                totalElevationGain: workout.elevationGain > 0
-                    ? workout.elevationGain : routeManager.totalElevationGain
-            )
-
-            if InstagramStoryShare.facebookAppID == nil {
-                actionError =
-                    "Instagram Stories needs a Meta/Facebook App ID. Set FACEBOOK_APP_ID in Xcode build settings (see Meta: Sharing to Stories)."
-                return
-            }
-
-            let pngData = await Task.detached(priority: .userInitiated) {
-                storyImage.pngData()
-            }.value
-
-            guard let pngData else { return }
-
-            if InstagramStoryShare.presentStories(withPNGData: pngData) {
-                return
-            }
-            shareItems = [storyImage]
-            showShareSheet = true
-        }
-    }
-
     // MARK: - Delete & Navigation
 
     private func saveWorkoutAsCustomTemplate() {
@@ -1029,12 +1018,19 @@ private struct SummaryContentView: View {
 
     // RPE Slider State
     @State private var rpeRating: Int = 5
+    /// When on-device insight is unavailable, show the standalone power-zones card again.
+    @State private var onDeviceInsightFailed = false
 
     private var hPad: CGFloat { isWide ? 40 : 20 }
     private var cardGap: CGFloat { isWide ? 16 : 12 }
 
     private var isOutdoor: Bool {
         return workout.savedRouteName != nil || workout.elevationGain > 0
+    }
+
+    /// Power zones appear inside the ride insight card while insight loads or succeeds; otherwise use the full zone card.
+    private var showStandalonePowerZoneCard: Bool {
+        workout.status != .completed || !workout.isValid || onDeviceInsightFailed
     }
 
     private func plannedVsActualCard(plan: PlanDay) -> some View {
@@ -1141,10 +1137,56 @@ private struct SummaryContentView: View {
                     .padding(.horizontal, hPad)
                     .padding(.top, isWide ? 28 : 20)
 
+                    if workout.status == .completed, workout.isValid {
+                        SummaryOnDeviceInsightCard(
+                            workout: workout,
+                            zoneSegments: zoneBuckets.map {
+                                RideInsightZoneSegment(
+                                    zone: $0.zone, seconds: $0.seconds, percent: $0.percent)
+                            },
+                            powerZoneLine: zoneBuckets.map { z in
+                                "Z\(z.zone.id) \(Int((z.percent * 100).rounded()))%"
+                            }.joined(separator: ", "),
+                            planLine: linkedPlanDay.map { plan in
+                                let ftp = PowerZone.ftp
+                                let tss = Int(plan.estimatedPlannedTSS(ftp: ftp))
+                                return "\(plan.title) · est TSS \(tss)"
+                            },
+                            ftpWatts: PowerZone.ftp,
+                            riderCallName: SummaryRiderNaming.stravaFirstName(
+                                from: stravaService.athleteDisplayName),
+                            onDeviceInsightFailed: $onDeviceInsightFailed
+                        )
+                        .id(workout.id)
+                        .padding(.horizontal, hPad)
+                        .padding(.top, 12)
+                    }
+
                     if let plan = linkedPlanDay {
                         plannedVsActualCard(plan: plan)
                             .padding(.horizontal, hPad)
                             .padding(.top, 12)
+                    }
+
+                    if workout.planDayID != nil {
+                        Button(action: onRepeatStructuredWorkout) {
+                            Label("Repeat this session", systemImage: "arrow.clockwise.circle.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.black)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(AppColor.mango)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, hPad)
+                        .padding(.top, 12)
+                    }
+
+                    if isWide {
+                        wideBody
+                    } else {
+                        compactBody
                     }
 
                     if workout.planDayID == nil, workout.status == .completed, workout.isValid {
@@ -1177,27 +1219,6 @@ private struct SummaryContentView: View {
                         .padding(.top, 12)
                     }
 
-                    if workout.planDayID != nil {
-                        Button(action: onRepeatStructuredWorkout) {
-                            Label("Repeat this session", systemImage: "arrow.clockwise.circle.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.black)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(AppColor.mango)
-                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, hPad)
-                        .padding(.top, 12)
-                    }
-
-                    if isWide {
-                        wideBody
-                    } else {
-                        compactBody
-                    }
-
                     // RPE Rating Section
                     rpeSliderSection
                         .padding(.horizontal, hPad)
@@ -1205,6 +1226,9 @@ private struct SummaryContentView: View {
                 }
                 .frame(maxWidth: isWide ? 1100 : .infinity)
                 .frame(maxWidth: .infinity)
+            }
+            .onChange(of: workout.id) { _, _ in
+                onDeviceInsightFailed = false
             }
         }
     }
@@ -1222,7 +1246,9 @@ private struct SummaryContentView: View {
 
                 // RIGHT — Zones, Laps
                 VStack(spacing: cardGap) {
-                    SummaryZoneCard(title: "POWER ZONES", icon: "bolt.fill", buckets: zoneBuckets)
+                    if showStandalonePowerZoneCard {
+                        SummaryZoneCard(title: "POWER ZONES", icon: "bolt.fill", buckets: zoneBuckets)
+                    }
                     if workout.maxHR > 0 {
                         SummaryHRZoneCard(buckets: hrZoneBuckets)
                     }
@@ -1267,9 +1293,11 @@ private struct SummaryContentView: View {
             .padding(.horizontal, hPad)
             .padding(.top, 20)
 
-            SummaryZoneCard(title: "POWER ZONES", icon: "bolt.fill", buckets: zoneBuckets)
-                .padding(.horizontal, hPad)
-                .padding(.top, 16)
+            if showStandalonePowerZoneCard {
+                SummaryZoneCard(title: "POWER ZONES", icon: "bolt.fill", buckets: zoneBuckets)
+                    .padding(.horizontal, hPad)
+                    .padding(.top, 16)
+            }
 
             if workout.maxHR > 0 {
                 SummaryHRZoneCard(buckets: hrZoneBuckets)
@@ -2642,7 +2670,10 @@ private struct HRZoneBucket: Identifiable {
         navigationPath: .constant(NavigationPath())
     )
     .modelContainer(
-        for: [Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self],
+        for: [
+            Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self,
+            WorkoutRAGChunk.self,
+        ],
         inMemory: true)
 }
 
