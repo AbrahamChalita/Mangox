@@ -246,7 +246,7 @@ private enum StoryCardDrawing {
         }
     }
 
-    // MARK: - New Metric Card (matches reference image)
+    // MARK: - Metric Card
 
     private static func drawMetricCard(
         label: String,
@@ -256,30 +256,30 @@ private enum StoryCardDrawing {
         in rect: CGRect,
         cg: CGContext
     ) {
-        let corner: CGFloat = 14  // Mangox standard
+        let corner: CGFloat = 14
         let path = UIBezierPath(roundedRect: rect, cornerRadius: corner)
 
         // Mangox card style: white @ 4% fill
         UIColor(white: 1, alpha: 0.04).setFill()
         path.fill()
 
-        // Border: white @ 8%
-        UIColor(white: 1, alpha: 0.08).setStroke()
+        // Subtle border glow
+        UIColor(white: 1, alpha: 0.06).setStroke()
         path.lineWidth = 1
         path.stroke()
 
-        let inset: CGFloat = 24
+        let inset: CGFloat = 28
 
-        // Label: small, bold, white @ 35%, tracked
+        // Label: tracked uppercase
         let labelAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 20, weight: .bold),
-            .foregroundColor: UIColor(white: 1, alpha: 0.35),
-            .kern: 2,
+            .font: UIFont.systemFont(ofSize: 18, weight: .bold),
+            .foregroundColor: UIColor(white: 1, alpha: 0.45),
+            .kern: 2.5,
         ]
         label.draw(at: CGPoint(x: rect.minX + inset, y: rect.minY + inset), withAttributes: labelAttrs)
 
-        // Value: large, bold, monospaced, colored
-        let valueFont = UIFont.monospacedSystemFont(ofSize: 96, weight: .bold)
+        // Value: large, bold, monospaced, colored with subtle glow
+        let valueFont = UIFont.monospacedSystemFont(ofSize: 90, weight: .bold)
         let valueAttrs: [NSAttributedString.Key: Any] = [
             .font: valueFont,
             .foregroundColor: accent,
@@ -289,16 +289,21 @@ private enum StoryCardDrawing {
         let valueY = rect.maxY - inset - valueSize.height
         value.draw(at: CGPoint(x: rect.minX + inset, y: valueY), withAttributes: valueAttrs)
 
-        // Unit: white @ 60%
+        // Unit: subtle secondary color
         if let unit = unit {
             let unitAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 24, weight: .medium),
-                .foregroundColor: UIColor(white: 1, alpha: 0.6),
+                .font: UIFont.systemFont(ofSize: 22, weight: .medium),
+                .foregroundColor: UIColor(white: 1, alpha: 0.55),
             ]
-            let unitX = rect.minX + inset + valueSize.width + 6
-            let unitY = valueY + valueSize.height - 34
+            let unitX = rect.minX + inset + valueSize.width + 8
+            let unitY = valueY + valueSize.height - 32
             unit.draw(at: CGPoint(x: unitX, y: unitY), withAttributes: unitAttrs)
         }
+
+        // Subtle accent line at bottom
+        let accentLine = CGRect(x: rect.minX + inset, y: rect.maxY - inset - 6, width: 48, height: 3)
+        accent.setFill()
+        UIRectFill(accentLine)
     }
 
     // MARK: - Stats Pill (compact, inline format)
@@ -354,6 +359,27 @@ private enum StoryCardDrawing {
         UIColor(red: 0.03, green: 0.04, blue: 0.06, alpha: 1).setFill()
         UIRectFill(CGRect(origin: .zero, size: size))
 
+        // Subtle grain texture for depth
+        let noiseRect = CGRect(origin: .zero, size: size)
+        cg.saveGState()
+        cg.setBlendMode(.overlay)
+        cg.setAlpha(0.06)
+        let step: CGFloat = 4
+        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+        var x: CGFloat = 0
+        while x < noiseRect.width {
+            var y: CGFloat = 0
+            while y < noiseRect.height {
+                seed &+= 0xC6BC_2796_92B5_C323
+                let g = CGFloat(seed % 1000) / 1000.0 * 0.04 + 0.02
+                UIColor(white: g, alpha: 1).setFill()
+                cg.fill(CGRect(x: x, y: y, width: step, height: step))
+                y += step
+            }
+            x += step
+        }
+        cg.restoreGState()
+
         func orb(
             _ center: CGPoint, radius: CGFloat, color: UIColor, alpha: CGFloat
         ) {
@@ -392,27 +418,6 @@ private enum StoryCardDrawing {
             CGPoint(x: size.width * 0.15, y: size.height * 0.85), radius: 450,
             color: brandMango, alpha: 0.08)
 
-        cg.restoreGState()
-    }
-
-    private static func drawSubtleNoise(in rect: CGRect, cg: CGContext) {
-        cg.saveGState()
-        cg.setBlendMode(.overlay)
-        cg.setAlpha(0.12)
-        let step: CGFloat = 6
-        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
-        var x: CGFloat = 0
-        while x < rect.width {
-            var y: CGFloat = 0
-            while y < rect.height {
-                seed &+= 0xC6BC_2796_92B5_C323
-                let g = CGFloat(seed % 1000) / 1000.0 * 0.08 + 0.04
-                UIColor(white: g, alpha: 1).setFill()
-                cg.fill(CGRect(x: x, y: y, width: step, height: step))
-                y += step
-            }
-            x += step
-        }
         cg.restoreGState()
     }
 
@@ -701,12 +706,12 @@ private enum StoryCardDrawing {
         bgPath.lineWidth = 1
         bgPath.stroke()
 
-        // Label: "POWER + HEART RATE"
+        // Label: "POWER + HEART RATE" - tracked uppercase style
         let label = showHeartRateLine ? "POWER + HEART RATE" : "POWER"
         let la: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 18, weight: .bold),
-            .foregroundColor: UIColor(white: 1, alpha: 0.35),
-            .kern: 2,
+            .font: UIFont.systemFont(ofSize: 16, weight: .bold),
+            .foregroundColor: UIColor(white: 1, alpha: 0.4),
+            .kern: 2.5,
         ]
         label.draw(at: CGPoint(x: rect.minX + 24, y: rect.minY + 20), withAttributes: la)
 
@@ -1283,26 +1288,30 @@ private enum StoryCardDrawing {
     }
 
     private static func drawFooterBranding(width: CGFloat, bottomY: CGFloat) {
+        // Subtle divider line
         let topLine = CGRect(x: sidePad, y: bottomY - 44, width: width - sidePad * 2, height: 1)
-        UIColor(white: 1, alpha: 0.2).setFill()
+        UIColor(white: 1, alpha: 0.15).setFill()
         UIRectFill(topLine)
 
+        // Mangox brand
         let brand = "MANGOX"
         let ba: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 20, weight: .semibold),
-            .foregroundColor: UIColor(white: 1, alpha: 0.85),
-            .kern: 3,
+            .font: UIFont.systemFont(ofSize: 22, weight: .bold),
+            .foregroundColor: brandMango,
+            .kern: 4,
         ]
-        brand.draw(at: CGPoint(x: sidePad, y: bottomY - 30), withAttributes: ba)
+        brand.draw(at: CGPoint(x: sidePad, y: bottomY - 32), withAttributes: ba)
 
-        let sub = "RIDE TELEMETRY"
+        // Cycling icon + version
+        let icon = "\u{1F6B2}"  // Bicycle emoji
+        let sub = "\u{1F6B2}  TELEMETRY"
         let sa: [NSAttributedString.Key: Any] = [
-            .font: UIFont.monospacedDigitSystemFont(ofSize: 14, weight: .regular),
-            .foregroundColor: UIColor(white: 1, alpha: 0.8),
-            .kern: 1.5,
+            .font: UIFont.monospacedDigitSystemFont(ofSize: 14, weight: .medium),
+            .foregroundColor: UIColor(white: 1, alpha: 0.55),
+            .kern: 1.2,
         ]
         let sw = sub.size(withAttributes: sa)
-        sub.draw(at: CGPoint(x: width - sidePad - sw.width, y: bottomY - 28), withAttributes: sa)
+        sub.draw(at: CGPoint(x: width - sidePad - sw.width, y: bottomY - 30), withAttributes: sa)
     }
 
 }

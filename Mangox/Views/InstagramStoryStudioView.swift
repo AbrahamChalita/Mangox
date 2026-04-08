@@ -30,7 +30,7 @@ struct InstagramStoryStudioView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
+                VStack(spacing: 24) {
                     storyPreview
                     appearanceSection
                     contentSection
@@ -38,6 +38,7 @@ struct InstagramStoryStudioView: View {
                     exportSection
                 }
                 .padding(.horizontal, 20)
+                .padding(.top, 8)
                 .padding(.bottom, 28)
             }
             .background(AppColor.bg)
@@ -49,6 +50,7 @@ struct InstagramStoryStudioView: View {
                         InstagramStoryStudioPreferences.save(options)
                         onDismiss()
                     }
+                    .foregroundStyle(Color.white.opacity(AppOpacity.textSecondary))
                 }
             }
             .onAppear {
@@ -65,7 +67,6 @@ struct InstagramStoryStudioView: View {
                 renderPreview()
             }
             .task {
-                // Generate AI title on appear
                 guard aiTitle == nil, !isTitleGenerating else { return }
                 isTitleGenerating = true
                 defer { isTitleGenerating = false }
@@ -81,17 +82,30 @@ struct InstagramStoryStudioView: View {
                 ShareSheet(activityItems: shareFallbackItems)
             }
         }
-    }
+}
 
     private var storyPreview: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Preview")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.white.opacity(AppOpacity.textSecondary))
+            HStack {
+                Text("PREVIEW")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(AppOpacity.textTertiary))
+                    .tracking(1.5)
+                Spacer()
+                if isRendering {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .tint(AppColor.mango)
+                }
+            }
 
             ZStack {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color.black.opacity(0.35))
+                    .fill(Color.white.opacity(AppOpacity.cardBg))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
+                    )
 
                 if let previewImage {
                     Image(uiImage: previewImage)
@@ -103,74 +117,131 @@ struct InstagramStoryStudioView: View {
                     ProgressView()
                         .tint(AppColor.mango)
                 } else {
-                    Text("Tap a setting to render")
-                        .font(.caption)
-                        .foregroundStyle(Color.white.opacity(AppOpacity.textSecondary))
+                    VStack(spacing: 8) {
+                        Image(systemName: "photo")
+                            .font(.system(size: 28))
+                            .foregroundStyle(Color.white.opacity(AppOpacity.textQuaternary))
+                        Text("Tap a setting to render")
+                            .font(.caption)
+                            .foregroundStyle(Color.white.opacity(AppOpacity.textSecondary))
+                    }
                 }
             }
             .aspectRatio(9 / 16, contentMode: .fit)
-            .frame(maxWidth: 420)
+            .frame(maxWidth: .infinity)
+            .frame(maxWidth: 380, alignment: .center)
 
-            Text("Safe areas at top and bottom are reserved for Instagram’s UI.")
-                .font(.caption2)
-                .foregroundStyle(Color.white.opacity(AppOpacity.textTertiary))
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 10))
+                Text("Safe areas at top and bottom are reserved for Instagram's UI")
+                    .font(.system(size: 11))
+            }
+            .foregroundStyle(Color.white.opacity(AppOpacity.textQuaternary))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var appearanceSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionLabel("Appearance")
-            Picker("Accent", selection: $options.accent) {
-                ForEach(InstagramStoryCardOptions.Accent.allCases) { a in
-                    Text(a.pickerTitle).tag(a)
+        VStack(alignment: .leading, spacing: 0) {
+            sectionLabel("APPEARANCE")
+            Spacer()
+            VStack(spacing: 12) {
+                Picker("Accent", selection: $options.accent) {
+                    ForEach(InstagramStoryCardOptions.Accent.allCases) { a in
+                        HStack {
+                            Circle()
+                                .fill(a.swiftUIColor)
+                                .frame(width: 12, height: 12)
+                            Text(a.pickerTitle)
+                        }
+                        .tag(a)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(AppColor.mango)
+                .onChange(of: options.accent) { _, _ in
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+
+                Toggle(
+                    "Layered share (gradient + movable card)", isOn: $options.layeredShare
+                )
+                .tint(AppColor.mango)
+                .onChange(of: options.layeredShare) { _, _ in
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }
             }
-            .pickerStyle(.menu)
-
-            Toggle(
-                "Layered share (gradient background + movable card)", isOn: $options.layeredShare
-            )
-            .tint(AppColor.mango)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color.white.opacity(AppOpacity.cardBg))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
+        )
     }
 
     private var contentSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionLabel("Content")
-            Toggle("Power / HR chart", isOn: $options.showPowerHRChart)
-            Toggle("Heart rate line on chart", isOn: $options.showHeartRateLineOnChart)
-                .disabled(!options.showPowerHRChart)
-            Toggle("Detail line (cadence, route, …)", isOn: $options.showMetaLine)
-            Toggle("NP · TSS · IF row", isOn: $options.showNPAndTSS)
-            Toggle("Elevation on card (or in detail line)", isOn: $options.showElevation)
-            Toggle("Mangox footer", isOn: $options.showFooterBranding)
+        VStack(alignment: .leading, spacing: 0) {
+            sectionLabel("CONTENT")
+            Spacer()
+            VStack(spacing: 12) {
+                Toggle("Power / HR chart", isOn: $options.showPowerHRChart)
+                    .onChange(of: options.showPowerHRChart) { _, _ in
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                Toggle("Heart rate line on chart", isOn: $options.showHeartRateLineOnChart)
+                    .disabled(!options.showPowerHRChart)
+                    .tint(options.showPowerHRChart ? AppColor.mango : Color.gray)
+                Toggle("Detail line (cadence, route, …)", isOn: $options.showMetaLine)
+                    .onChange(of: options.showMetaLine) { _, _ in
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                Toggle("NP · TSS · IF row", isOn: $options.showNPAndTSS)
+                    .onChange(of: options.showNPAndTSS) { _, _ in
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                Toggle("Elevation on card", isOn: $options.showElevation)
+                    .onChange(of: options.showElevation) { _, _ in
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                Toggle("Mangox footer", isOn: $options.showFooterBranding)
+                    .onChange(of: options.showFooterBranding) { _, _ in
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .tint(AppColor.mango)
+        .padding(16)
+        .background(Color.white.opacity(AppOpacity.cardBg))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
+        )
     }
 
     private var captionSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
-                sectionLabel("Caption")
+                sectionLabel("CAPTION")
                 Image(systemName: "apple.intelligence")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(AppColor.mango)
                 Spacer(minLength: 0)
                 if isCaptionGenerating {
                     ProgressView()
-                        .scaleEffect(0.75)
+                        .scaleEffect(0.7)
                         .tint(AppColor.mango)
                 }
             }
+            Spacer()
 
             if let caption = aiCaption {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     Text(caption)
                         .font(.system(size: 13))
-                        .foregroundStyle(Color.white.opacity(0.85))
+                        .foregroundStyle(Color.white.opacity(0.88))
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
 
@@ -184,23 +255,33 @@ struct InstagramStoryStudioView: View {
                         }
                     } label: {
                         Label(
-                            captionCopied ? "Copied!" : "Copy caption",
+                            captionCopied ? "Copied!" : "Copy",
                             systemImage: captionCopied ? "checkmark" : "doc.on.doc"
                         )
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(captionCopied ? AppColor.mango : Color.white.opacity(0.65))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(captionCopied ? AppColor.mango : Color.white.opacity(0.6))
                     }
                 }
-                .padding(12)
-                .background(Color.white.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             } else if !isCaptionGenerating {
-                Text("Caption will appear here once generated.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.white.opacity(0.35))
+                VStack(spacing: 6) {
+                    Image(systemName: "text.bubble")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Color.white.opacity(AppOpacity.textQuaternary))
+                    Text("Caption will appear here once generated.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.white.opacity(AppOpacity.textSecondary))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color.white.opacity(AppOpacity.cardBg))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
+        )
         .task {
             guard aiCaption == nil, !isCaptionGenerating else { return }
             isCaptionGenerating = true
@@ -216,7 +297,7 @@ struct InstagramStoryStudioView: View {
     }
 
     private var exportSection: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             Button {
                 shareToInstagram()
             } label: {
@@ -229,7 +310,7 @@ struct InstagramStoryStudioView: View {
                             .renderingMode(.template)
                             .resizable()
                             .scaledToFit()
-                            .frame(width: 22, height: 22)
+                            .frame(width: 20, height: 20)
                     }
                     Text(isSharing ? "Opening Instagram…" : "Share to Instagram Stories")
                         .font(.headline)
@@ -246,20 +327,30 @@ struct InstagramStoryStudioView: View {
                 )
             )
             .disabled(isSharing || isRendering)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-            Button("Reset to defaults") {
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 options = .default
+                renderPreview()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 12, weight: .medium))
+                    Text("Reset to defaults")
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .foregroundStyle(Color.white.opacity(AppOpacity.textSecondary))
             }
-            .font(.subheadline)
-            .foregroundStyle(Color.white.opacity(AppOpacity.textSecondary))
+            .padding(.top, 8)
         }
-        .padding(.top, 8)
     }
 
     private func sectionLabel(_ title: String) -> some View {
         Text(title)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Color.white.opacity(AppOpacity.textSecondary))
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(Color.white.opacity(AppOpacity.textTertiary))
+            .tracking(1.5)
     }
 
     private func renderPreview() {

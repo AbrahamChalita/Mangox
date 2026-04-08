@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// User-tunable layout and export options for the ride summary Instagram Story card.
 struct InstagramStoryCardOptions: Equatable, Codable, Sendable {
@@ -12,6 +13,13 @@ struct InstagramStoryCardOptions: Equatable, Codable, Sendable {
             switch self {
             case .dominantZone: return "Power zone"
             case .brandMango: return "Mangox mango"
+            }
+        }
+
+        var swiftUIColor: Color {
+            switch self {
+            case .dominantZone: return AppColor.orange
+            case .brandMango: return AppColor.mango
             }
         }
     }
