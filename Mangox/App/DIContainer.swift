@@ -5,9 +5,10 @@ import Foundation
 ///
 /// Concrete implementations are created here. Protocol-typed properties are exposed
 /// so ViewModels depend on contracts rather than concrete classes.
-/// Views that still use @Environment(ConcreteType.self) can access the concrete
-/// properties below; new ViewModels should consume the protocol-typed versions.
+/// Inject as `@Environment(DIContainer.self)` in views that create ViewModels.
+/// Individual concrete services are also injected separately for legacy @Environment usage.
 @MainActor
+@Observable
 final class DIContainer {
 
     // MARK: - Indoor / BLE infrastructure (concrete — used by DashboardView directly)

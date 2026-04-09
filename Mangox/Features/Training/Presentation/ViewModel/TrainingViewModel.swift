@@ -6,7 +6,6 @@ import Foundation
 final class TrainingViewModel {
     // MARK: - View state
     var weekCompliance: PlanWeekCompliance.Snapshot? = nil
-    var trainingGoals: MangoxTrainingGoals.Type = MangoxTrainingGoals.self
     var isLoading: Bool = false
 
     func refreshCompliance(

@@ -28,6 +28,7 @@ struct MangoxApp: App {
             ZStack {
                 if hasCompletedOnboarding {
                     ContentView()
+                        .environment(di)                        // DIContainer for ViewModel factories
                         .environment(di.bleManager)
                         .environment(di.wifiTrainerService)
                         .environment(di.dataSourceCoordinator)
@@ -50,6 +51,7 @@ struct MangoxApp: App {
                         }
                 } else {
                     OnboardingView()
+                        .environment(di)
                         .environment(di.locationManager)
                         .environment(di.healthKitManager)
                         .environment(di.stravaService)
@@ -57,23 +59,15 @@ struct MangoxApp: App {
                         .preferredColorScheme(.dark)
                 }
 
-                // Launch screen sits on top and fades out once the app is ready.
                 LaunchScreenView(isVisible: showLaunch)
             }
             .task {
                 di.aiService.whoopDataSource = di.whoopService
-                // Wait for SwiftData @Query population + BLE manager init.
                 try? await Task.sleep(for: .milliseconds(900))
                 showLaunch = false
             }
         }
-        .modelContainer(
-            for: [
-                Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self,
-                AIGeneratedPlan.self, ChatSession.self, CoachChatMessage.self,
-                CustomWorkoutTemplate.self, FitnessSettingsSnapshot.self,
-                WorkoutRAGChunk.self,
-            ])
+        .modelContainer(PersistenceContainer.shared)
     }
 }
 
