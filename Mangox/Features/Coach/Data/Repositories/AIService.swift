@@ -589,8 +589,8 @@ enum CoachChatDelivery: Sendable {
 @Observable @MainActor
 final class AIService: AIServiceProtocol {
 
-    /// Injected from `MangoxApp` so coach context and recovery heuristics can use WHOOP when linked.
-    var whoopDataSource: WhoopService?
+    /// Injected from `DIContainer` so coach context and recovery heuristics can use WHOOP when linked.
+    var whoopDataSource: (any WhoopServiceProtocol)?
 
     // MARK: Public State
 
