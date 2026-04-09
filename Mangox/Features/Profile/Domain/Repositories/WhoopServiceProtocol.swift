@@ -13,6 +13,7 @@ protocol WhoopServiceProtocol: AnyObject {
     var latestRecoveryScore: Double? { get }
     var latestRecoveryRestingHR: Int? { get }
     var latestRecoveryHRV: Int? { get }
+    var latestMaxHeartRateFromProfile: Int? { get }
     var isBusy: Bool { get }
     var lastError: String? { get }
     var isConfigured: Bool { get }
