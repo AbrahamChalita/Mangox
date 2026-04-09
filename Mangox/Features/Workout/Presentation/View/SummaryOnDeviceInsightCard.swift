@@ -208,21 +208,19 @@ struct SummaryOnDeviceInsightCard: View {
             }
 
             insight = nil
-            // Both methods are @MainActor — async let runs them concurrently without crossing actor boundaries.
-            async let insightTask = WorkoutSummaryOnDeviceInsight.generate(
+            let result = await WorkoutSummaryOnDeviceInsight.generate(
                 workout: workout,
                 powerZoneLine: powerZoneLine,
                 planLine: planLine,
                 ftpWatts: ftpWatts,
                 riderCallName: riderCallName
             )
-            async let titleTask: Void = WorkoutSummaryOnDeviceInsight.generateSmartTitleIfNeeded(
+            await WorkoutSummaryOnDeviceInsight.generateSmartTitleIfNeeded(
                 workout: workout,
                 powerZoneLine: powerZoneLine,
                 ftpWatts: ftpWatts,
                 modelContext: modelContext
             )
-            let (result, _) = await (insightTask, titleTask)
             if let result {
                 insight = result
             } else {

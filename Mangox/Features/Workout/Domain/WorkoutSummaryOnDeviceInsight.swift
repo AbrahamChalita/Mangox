@@ -350,7 +350,7 @@ struct WorkoutSummaryOnDeviceInsight: Equatable, Sendable, Codable {
     /// Generates a natural-language Strava description and caches it to disk by workout fingerprint.
     /// Returns the cached description instantly on subsequent calls. Returns `nil` when Apple
     /// Intelligence is unavailable or the workout is incomplete.
-    static func generateStravaDescription(
+    @MainActor static func generateStravaDescription(
         workout: Workout,
         powerZoneLine: String,
         ftpWatts: Int
