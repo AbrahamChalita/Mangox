@@ -186,7 +186,7 @@ struct SummaryOnDeviceInsightCard: View {
                 .cardStyle(cornerRadius: 16)
             }
         }
-        .task(id: workout.id) {
+        .task(id: workout.id) { @MainActor in
             onDeviceInsightFailed = false
             loadFailed = false
 

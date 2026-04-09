@@ -1260,9 +1260,7 @@ struct TrainingPlanView: View {
         // Snap to Monday if needed
         let calendar = Calendar.current
         var start = planStartDate
-        let weekday = calendar.component(.weekday, from: start)
-        // Plan now strictly starts on the chosen day without forcing Monday.
-        // The first day (Day 1) will be mapped to the `startDate`.
+        // Plan starts on the chosen day; Day 1 maps to `startDate`.
         start = calendar.startOfDay(for: start)
 
         let newProgress = TrainingPlanProgress(
