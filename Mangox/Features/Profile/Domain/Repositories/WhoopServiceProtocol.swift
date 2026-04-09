@@ -1,8 +1,11 @@
 import Foundation
-import SwiftUI
+
+// Features/Profile/Domain/Repositories/WhoopServiceProtocol.swift
 
 /// Contract for Whoop OAuth and recovery data.
-/// Concrete implementation: `WhoopService` in Profile/Data/.
+/// Concrete implementation: `WhoopService` in Profile/Data/DataSources/.
+/// Note: `readinessAccentColor` is intentionally omitted — Color is a Presentation concern.
+/// Add it as a SwiftUI extension on `WhoopServiceProtocol` in the Presentation layer.
 @MainActor
 protocol WhoopServiceProtocol: AnyObject {
     var isConnected: Bool { get }
@@ -14,7 +17,6 @@ protocol WhoopServiceProtocol: AnyObject {
     var lastError: String? { get }
     var isConfigured: Bool { get }
     var syncHeartBaselinesFromWhoop: Bool { get set }
-    var readinessAccentColor: Color { get }
     var readinessTrainingHint: String { get }
 
     func connect() async throws

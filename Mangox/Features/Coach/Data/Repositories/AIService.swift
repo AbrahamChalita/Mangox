@@ -587,7 +587,7 @@ enum CoachChatDelivery: Sendable {
 // MARK: - AIService
 
 @Observable @MainActor
-final class AIService: AIServiceProtocol {
+final class AIService: AIServiceProtocol, CoachRepository {
 
     /// Injected from `DIContainer` so coach context and recovery heuristics can use WHOOP when linked.
     var whoopDataSource: (any WhoopServiceProtocol)?
