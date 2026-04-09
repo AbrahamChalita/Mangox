@@ -8,6 +8,7 @@ private let liveActivityLogger = Logger(
 /// Starts and updates a Live Activity while recording. Requires a Widget Extension target that declares
 /// `ActivityConfiguration(for: MangoxRideAttributes.self)` and embeds the `.appex` in the Mangox app.
 @MainActor
+@Observable
 final class RideLiveActivityManager {
     static let shared = RideLiveActivityManager()
 
