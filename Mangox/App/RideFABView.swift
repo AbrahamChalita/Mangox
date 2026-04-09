@@ -15,6 +15,7 @@ struct RideFABView: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
+            Color.clear  // anchors the ZStack to fill the full overlay area
             if showRideMenu {
                 Color.black.opacity(0.18)
                     .ignoresSafeArea()
