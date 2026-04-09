@@ -29,12 +29,13 @@ protocol AIServiceProtocol: AnyObject {
         delivery: CoachChatDelivery
     ) async
 
+    @discardableResult
     func generatePlan(
         inputs: PlanInputs,
         isPro: Bool,
         modelContext: ModelContext,
         idempotencyKey: String
-    ) async
+    ) async throws -> PlanGenerationResult
 
     func runConfirmedPlanGeneration(
         draft: PlanGenerationDraft,
@@ -48,7 +49,7 @@ protocol AIServiceProtocol: AnyObject {
     func deleteSession(_ sessionID: UUID, modelContext: ModelContext)
     func fetchSessions(modelContext: ModelContext) -> [ChatSession]
     func clearMessages(modelContext: ModelContext)
-    func submitFeedback(for messageID: UUID, score: Int) async
+    func submitFeedback(for messageID: UUID, score: Int)
     func regenerateLastMessage(isPro: Bool, modelContext: ModelContext) async
 
     var contextWindowSize: Int { get }

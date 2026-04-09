@@ -13,7 +13,14 @@ protocol StravaServiceProtocol: AnyObject {
 
     func connect() async throws
     func disconnect()
-    func updateActivity(activityID: Int, name: String?, description: String?, sportType: String?) async
+    func updateActivity(
+        activityID: Int,
+        name: String?,
+        description: String?,
+        sportType: String?,
+        trainer: Bool?,
+        commute: Bool?,
+        gearID: String?
+    ) async throws
     func checkForDuplicate(startDate: Date, elapsedSeconds: Int) async -> Int?
-    func uploadWorkoutFile(fileURL: URL, name: String, description: String?, trainer: Bool) async throws
 }
