@@ -190,14 +190,6 @@ struct SummaryOnDeviceInsightCard: View {
             onDeviceInsightFailed = false
             loadFailed = false
 
-            // Smart title runs in parallel — it writes directly to workout.smartTitle via SwiftData.
-            async let titleTask: Void = WorkoutSummaryOnDeviceInsight.generateSmartTitleIfNeeded(
-                workout: workout,
-                powerZoneLine: powerZoneLine,
-                ftpWatts: ftpWatts,
-                modelContext: modelContext
-            )
-
             if let hit = WorkoutSummaryOnDeviceInsight.loadCached(
                 workout: workout,
                 powerZoneLine: powerZoneLine,
@@ -206,16 +198,29 @@ struct SummaryOnDeviceInsightCard: View {
                 riderCallName: riderCallName
             ) {
                 insight = hit
-                _ = await titleTask
+                await WorkoutSummaryOnDeviceInsight.generateSmartTitleIfNeeded(
+                    workout: workout,
+                    powerZoneLine: powerZoneLine,
+                    ftpWatts: ftpWatts,
+                    modelContext: modelContext
+                )
                 return
             }
+
             insight = nil
+            // Both methods are @MainActor — async let runs them concurrently without crossing actor boundaries.
             async let insightTask = WorkoutSummaryOnDeviceInsight.generate(
                 workout: workout,
                 powerZoneLine: powerZoneLine,
                 planLine: planLine,
                 ftpWatts: ftpWatts,
                 riderCallName: riderCallName
+            )
+            async let titleTask: Void = WorkoutSummaryOnDeviceInsight.generateSmartTitleIfNeeded(
+                workout: workout,
+                powerZoneLine: powerZoneLine,
+                ftpWatts: ftpWatts,
+                modelContext: modelContext
             )
             let (result, _) = await (insightTask, titleTask)
             if let result {

@@ -177,7 +177,7 @@ struct WorkoutSummaryOnDeviceInsight: Equatable, Sendable, Codable {
     }
 
     /// Returns a previously generated insight from disk when inputs still match. Does not call the model.
-    static func loadCached(
+    @MainActor static func loadCached(
         workout: Workout,
         powerZoneLine: String,
         planLine: String?,
@@ -197,7 +197,7 @@ struct WorkoutSummaryOnDeviceInsight: Equatable, Sendable, Codable {
 
     /// On-device ride takeaway when Apple Intelligence is available; otherwise `nil`.
     /// - Parameter riderCallName: Optional first name (e.g. from Strava) for natural headlines; otherwise copy uses "you/your".
-    static func generate(
+    @MainActor static func generate(
         workout: Workout,
         powerZoneLine: String,
         planLine: String?,
@@ -305,7 +305,7 @@ struct WorkoutSummaryOnDeviceInsight: Equatable, Sendable, Codable {
 
     /// Generates a 3-6 word descriptive workout label and writes it into `workout.smartTitle`.
     /// Skips generation if `workout.smartTitle` is already set or Apple Intelligence is unavailable.
-    static func generateSmartTitleIfNeeded(
+    @MainActor static func generateSmartTitleIfNeeded(
         workout: Workout,
         powerZoneLine: String,
         ftpWatts: Int,
