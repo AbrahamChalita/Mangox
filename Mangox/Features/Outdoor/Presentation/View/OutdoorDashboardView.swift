@@ -18,6 +18,7 @@ struct OutdoorDashboardView: View {
     @Environment(BLEManager.self) private var bleManager
     @Environment(HealthKitManager.self) private var healthKitManager
     @Environment(RouteManager.self) private var routeManager
+    @Environment(RideLiveActivityManager.self) private var liveActivityManager
     @Environment(\.modelContext) private var modelContext
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
@@ -232,7 +233,7 @@ struct OutdoorDashboardView: View {
         }
         .task(id: locationManager.isRecording) {
             guard locationManager.isRecording else {
-                await RideLiveActivityManager.shared.syncRecording(
+                await liveActivityManager.syncRecording(
                     isRecording: false,
                     prefs: prefs,
                     navigationService: navigationService,
@@ -251,7 +252,7 @@ struct OutdoorDashboardView: View {
             while !Task.isCancelled, locationManager.isRecording {
                 try? await Task.sleep(for: .seconds(5))
                 guard locationManager.isRecording else { break }
-                await RideLiveActivityManager.shared.syncRecording(
+                await liveActivityManager.syncRecording(
                     isRecording: true,
                     prefs: prefs,
                     navigationService: navigationService,

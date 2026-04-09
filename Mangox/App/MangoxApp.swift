@@ -39,6 +39,8 @@ struct MangoxApp: App {
                         .environment(di.ftpRefreshTrigger)
                         .environment(di.purchasesManager)
                         .environment(di.fitnessTracker)
+                        .environment(di.personalRecords)
+                        .environment(di.liveActivityManager)
                         .environment(di.aiService)
                         .environment(\.launchOverlayVisible, showLaunch)
                         .preferredColorScheme(.dark)

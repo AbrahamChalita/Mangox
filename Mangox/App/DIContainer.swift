@@ -25,6 +25,11 @@ final class DIContainer {
     let healthKitManager: HealthKitManager
     let fitnessTracker: FitnessTracker
 
+    // MARK: - Workout utilities
+
+    let personalRecords: PersonalRecords
+    let liveActivityManager: RideLiveActivityManager
+
     // MARK: - External services
 
     let stravaService: StravaService
@@ -45,6 +50,8 @@ final class DIContainer {
         locationManager = LocationManager()
         healthKitManager = HealthKitManager()
         fitnessTracker = FitnessTracker.shared
+        personalRecords = PersonalRecords.shared
+        liveActivityManager = RideLiveActivityManager.shared
         stravaService = StravaService()
         whoopService = WhoopService()
         purchasesManager = PurchasesManager.shared

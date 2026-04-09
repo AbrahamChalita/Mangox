@@ -6,6 +6,7 @@ struct DashboardView: View {
     @Environment(DataSourceCoordinator.self) private var dataSource
     @Environment(RouteManager.self) private var routeManager
     @Environment(HealthKitManager.self) private var healthKitManager
+    @Environment(RideLiveActivityManager.self) private var liveActivityManager
     @Binding var navigationPath: NavigationPath
     var planID: String? = nil
     var planDayID: String? = nil
@@ -250,7 +251,7 @@ struct DashboardView: View {
                 }
                 // Elapsed time does not tick after `endWorkout()` stops the timer, so Live Activity would stay "live" forever.
                 Task {
-                    await RideLiveActivityManager.shared.syncIndoorRecording(
+                    await liveActivityManager.syncIndoorRecording(
                         isRecording: newState == .recording,
                         prefs: prefs,
                         workoutManager: workoutManager,
@@ -279,7 +280,7 @@ struct DashboardView: View {
             .onChange(of: workoutManager.elapsedSeconds) { _, _ in
                 tickRideTipsIfNeeded()
                 Task {
-                    await RideLiveActivityManager.shared.syncIndoorRecording(
+                    await liveActivityManager.syncIndoorRecording(
                         isRecording: workoutManager.state == .recording,
                         prefs: prefs,
                         workoutManager: workoutManager,

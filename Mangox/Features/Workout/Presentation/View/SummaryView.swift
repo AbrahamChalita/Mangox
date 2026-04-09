@@ -54,6 +54,7 @@ struct SummaryView: View {
     @Environment(RouteManager.self) private var routeManager
     @Environment(HealthKitManager.self) private var healthKitManager
     @Environment(StravaService.self) private var stravaService
+    @Environment(PersonalRecords.self) private var personalRecords
     @Binding var navigationPath: NavigationPath
 
     @Environment(\.openURL) private var openURL
@@ -658,7 +659,7 @@ struct SummaryView: View {
         guard let mmp = PersonalRecords.computeMMP(for: samples, workoutID: workout.id) else {
             return []
         }
-        return PersonalRecords.shared.newPRs(for: mmp).map { "\($0.duration.label) @ \($0.watts)W" }
+        return personalRecords.newPRs(for: mmp).map { "\($0.duration.label) @ \($0.watts)W" }
     }
 
     private func applyStravaDescriptionTemplate(for workout: Workout) {
@@ -719,7 +720,7 @@ struct SummaryView: View {
         let buckets = zoneBuckets.map { (zone: $0.zone, percent: $0.percent) }
         let samples = sortedSamples
         let mmp = PersonalRecords.computeMMP(for: samples, workoutID: workout.id)
-        let prFlags: [NewPRFlag] = mmp.map { PersonalRecords.shared.newPRs(for: $0) } ?? []
+        let prFlags: [NewPRFlag] = mmp.map { personalRecords.newPRs(for: $0) } ?? []
 
         guard
             let image = StravaPostBuilder.renderSummaryCard(
