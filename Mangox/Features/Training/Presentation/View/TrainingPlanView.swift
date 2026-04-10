@@ -56,10 +56,7 @@ struct TrainingPlanView: View {
     private let accentBlue = AppColor.blue
     private let bg = AppColor.bg
 
-    /// True when this plan was AI-generated (not the built-in Classicissima).
-    private var isAIPlan: Bool {
-        true
-    }
+    private let isAIPlan = true
 
     private var progress: TrainingPlanProgress? {
         allProgress.first { $0.planID == plan.id }
@@ -1283,8 +1280,20 @@ struct TrainingPlanView: View {
 // MARK: - Preview
 
 #Preview {
+    let previewPlan = TrainingPlan(
+        id: "preview-plan",
+        name: "Preview Plan",
+        eventName: "Sample Event",
+        eventDate: "",
+        distance: "",
+        elevation: "",
+        location: "",
+        description: "",
+        weeks: []
+    )
     TrainingPlanView(
         navigationPath: .constant(NavigationPath()),
+        plan: previewPlan,
         viewModel: TrainingViewModel(
             whoopService: WhoopService(),
             purchasesService: PurchasesManager.shared,

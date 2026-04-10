@@ -2241,9 +2241,9 @@ struct ConnectionView: View {
         case .ride:
             if rideLaunchMode == .outdoor {
                 navigationPath.append(AppRoute.outdoorDashboard)
-            } else if let dayID = planDayID {
+            } else if let dayID = planDayID, let planID {
                 navigationPath.append(
-                    AppRoute.planDashboard(planID: planID ?? CachedPlan.shared.id, dayID: dayID))
+                    AppRoute.planDashboard(planID: planID, dayID: dayID))
             } else if let tid = selectedCustomTemplateID {
                 navigationPath.append(AppRoute.customWorkoutRide(templateID: tid))
             } else {

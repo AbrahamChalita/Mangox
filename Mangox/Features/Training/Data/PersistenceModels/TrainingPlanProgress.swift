@@ -12,7 +12,7 @@ final class TrainingPlanProgress {
     var ftpAtStart: Int = 0
     var currentFTP: Int = 0
     var notes: [String: String] = [:]
-    /// Optional display title for progress rows (Classicissima uses `CachedPlan` event name when empty).
+    /// Optional display title for progress rows.
     var aiPlanTitle: String = ""
     /// Scales guided ERG targets (1.0 = plan as written). Updated when plan-linked rides complete.
     var adaptiveLoadMultiplier: Double = 1.0

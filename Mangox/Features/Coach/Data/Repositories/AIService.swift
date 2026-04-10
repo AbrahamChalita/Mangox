@@ -1750,7 +1750,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
             let plan = PlanLibrary.resolvePlan(planID: p.planID, modelContext: modelContext)
         {
             planName = plan.name
-            planSource = p.planID == CachedPlan.shared.id ? "builtin" : "ai"
+            planSource = "ai"
             let totalDays = plan.allDays.filter {
                 switch $0.dayType {
                 case .workout, .ftpTest, .optionalWorkout, .commute: return true

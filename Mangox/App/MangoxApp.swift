@@ -12,12 +12,6 @@ struct MangoxApp: App {
     @State private var showLaunch = true
 
     init() {
-        // Warm up the training plan at launch so the first access from
-        // HomeView / TrainingPlanView costs nothing on the main thread.
-        Task(priority: .utility) {
-            _ = CachedPlan.shared
-        }
-
         if let apiKey = Bundle.main.object(forInfoDictionaryKey: "RevenueCatAPIKey") as? String {
             PurchasesManager.shared.configure(apiKey: apiKey)
         }

@@ -36,8 +36,7 @@ final class WorkoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol {
     }
 
     func deleteWorkout(_ workout: Workout) throws {
-        if let dayID = workout.planDayID {
-            let planID = workout.planID ?? CachedPlan.shared.id
+        if let dayID = workout.planDayID, let planID = workout.planID {
             unmarkPlanDay(dayID, planID: planID)
         }
 

@@ -377,16 +377,6 @@ struct CoachPlansPanel: View {
         .accessibilityHidden(true)
     }
 
-    private func statusOrb(text: String, tint: Color) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(tint.opacity(0.12))
-            .clipShape(Capsule())
-    }
-
     private func planStatPill(icon: String, text: String) -> some View {
         HStack(spacing: 4) {
             Image(systemName: icon)

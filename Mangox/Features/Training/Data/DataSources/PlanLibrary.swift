@@ -2,14 +2,12 @@
 import Foundation
 import SwiftData
 
-// MARK: - Plan resolution (built-in template)
+// MARK: - Plan resolution
 
 enum PlanLibrary {
-    /// Resolves a `TrainingPlan` by ID. Checks the built-in Classicissima plan first,
-    /// then AI-generated plans in SwiftData when a `ModelContext` is provided.
+    /// Resolves an AI-generated `TrainingPlan` by ID when a `ModelContext` is provided.
     static func resolvePlan(planID: String?, modelContext: ModelContext? = nil) -> TrainingPlan? {
         guard let planID else { return nil }
-        if planID == CachedPlan.shared.id { return CachedPlan.shared }
         if let ctx = modelContext {
             let descriptor = FetchDescriptor<AIGeneratedPlan>(
                 predicate: #Predicate { $0.id == planID }
