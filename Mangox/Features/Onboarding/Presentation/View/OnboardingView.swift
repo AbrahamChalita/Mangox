@@ -337,6 +337,7 @@ struct OnboardingView: View {
                             let age = Calendar.current.component(.year, from: .now) - viewModel.onboardingBirthYear
                             Text("\(viewModel.onboardingBirthYear)  ·  Age \(age)")
                                 .font(.system(size: 22, weight: .bold, design: .monospaced))
+                                .monospacedDigit()
                                 .foregroundStyle(.white)
                         }
                         Spacer()

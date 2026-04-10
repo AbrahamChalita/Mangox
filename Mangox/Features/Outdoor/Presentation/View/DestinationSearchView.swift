@@ -243,6 +243,7 @@ struct DestinationSearchOverlay: View {
     @State private var resolvingIndex: Int? = nil
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var resolveErrorMessage: String?
+    @State private var showResolveErrorOverlay = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -254,10 +255,9 @@ struct DestinationSearchOverlay: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
+                        .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(.plain)
-                .background(.ultraThinMaterial, in: Circle())
 
                 Text("Choose Destination")
                     .font(.system(size: 17, weight: .semibold))
@@ -349,13 +349,29 @@ struct DestinationSearchOverlay: View {
             guard q.count >= 2 else { return }
             completer.update(query: q, near: searchBiasCoordinate, bias: newBias)
         }
-        .alert("Couldn’t open destination", isPresented: Binding(
-            get: { resolveErrorMessage != nil },
-            set: { if !$0 { resolveErrorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) { resolveErrorMessage = nil }
-        } message: {
-            Text(resolveErrorMessage ?? "Try selecting the destination again.")
+        .overlay {
+            if showResolveErrorOverlay {
+                MangoxConfirmOverlay(
+                    title: "Couldn’t open destination",
+                    message: resolveErrorMessage ?? "Try selecting the destination again.",
+                    onDismiss: {
+                        showResolveErrorOverlay = false
+                        resolveErrorMessage = nil
+                    }
+                ) {
+                    Button {
+                        showResolveErrorOverlay = false
+                        resolveErrorMessage = nil
+                    } label: {
+                        Text("OK")
+                            .mangoxButtonChrome(.hero)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .onChange(of: resolveErrorMessage) { _, value in
+            showResolveErrorOverlay = value != nil
         }
     }
 
@@ -405,7 +421,7 @@ struct RouteSearchPage: View {
                     .onSubmit { focused = false }
             }
             .padding(12)
-            .glassEffect(.regular, in: .rect(cornerRadius: 12, style: .continuous))
+            .mangoxSurface(.mapOverlay, shape: .rounded(12))
             .padding(.horizontal, 16)
             .padding(.top, 8)
 
@@ -467,13 +483,22 @@ struct RouteSearchPage: View {
             guard q.count >= 2 else { return }
             completer.update(query: q, near: searchBiasCoordinate, bias: newBias)
         }
-        .alert("Couldn’t open destination", isPresented: Binding(
-            get: { resolveErrorMessage != nil },
-            set: { if !$0 { resolveErrorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) { resolveErrorMessage = nil }
-        } message: {
-            Text(resolveErrorMessage ?? "Try selecting the destination again.")
+        .overlay {
+            if let error = resolveErrorMessage {
+                MangoxConfirmOverlay(
+                    title: "Couldn’t open destination",
+                    message: error,
+                    onDismiss: { resolveErrorMessage = nil }
+                ) {
+                    Button {
+                        resolveErrorMessage = nil
+                    } label: {
+                        Text("OK")
+                            .mangoxButtonChrome(.hero)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 

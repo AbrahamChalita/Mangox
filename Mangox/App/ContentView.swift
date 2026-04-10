@@ -42,7 +42,7 @@ struct ContentView: View {
                             selectedTab: $selectedTab,
                             viewModel: di.makeHomeViewModel()
                         )
-                        .toolbar(.hidden, for: .navigationBar)
+                        .toolbar(Visibility.hidden, for: ToolbarPlacement.navigationBar)
                         .navigationDestination(for: AppRoute.self) { route in
                             appRouteDestination(route, path: $homePath, di: di)
                         }
@@ -55,7 +55,7 @@ struct ContentView: View {
                     ) {
                         NavigationStack(path: $calendarPath) {
                             CalendarView(navigationPath: $calendarPath)
-                                .toolbar(.hidden, for: .navigationBar)
+                                .toolbar(Visibility.hidden, for: ToolbarPlacement.navigationBar)
                                 .navigationDestination(for: AppRoute.self) { route in
                                     appRouteDestination(route, path: $calendarPath, di: di)
                                 }
@@ -87,7 +87,7 @@ struct ContentView: View {
                             PMChartView(
                                 navigationPath: $statsPath, viewModel: di.makeFitnessViewModel()
                             )
-                            .toolbar(.hidden, for: .navigationBar)
+                            .toolbar(Visibility.hidden, for: ToolbarPlacement.navigationBar)
                             .navigationDestination(for: AppRoute.self) { route in
                                 appRouteDestination(route, path: $statsPath, di: di)
                             }

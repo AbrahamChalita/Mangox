@@ -196,7 +196,7 @@ struct InstagramStoryStudioView: View {
 
     private var appearanceSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionLabel("APPEARANCE")
+            MangoxSectionLabel(title: "Appearance", horizontalPadding: 0)
             Spacer()
             VStack(spacing: 12) {
                 Picker("Accent", selection: optionBinding(\.accent)) {
@@ -236,7 +236,7 @@ struct InstagramStoryStudioView: View {
 
     private var contentSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionLabel("CONTENT")
+            MangoxSectionLabel(title: "Content", horizontalPadding: 0)
             Spacer()
             VStack(spacing: 12) {
                 Toggle("Power / HR chart", isOn: optionBinding(\.showPowerHRChart))
@@ -276,7 +276,7 @@ struct InstagramStoryStudioView: View {
     private var captionSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
-                sectionLabel("CAPTION")
+                MangoxSectionLabel(title: "Caption", horizontalPadding: 0)
                 Image(systemName: "apple.intelligence")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(AppColor.mango)
@@ -415,10 +415,4 @@ struct InstagramStoryStudioView: View {
         }
     }
 
-    private func sectionLabel(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(Color.white.opacity(AppOpacity.textTertiary))
-            .tracking(1.5)
-    }
 }

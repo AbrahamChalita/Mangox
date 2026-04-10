@@ -3,12 +3,7 @@ import SwiftUI
 // MARK: - Shared settings chrome (detail screens + root rows)
 
 func settingsIconBadge(_ systemName: String, color: Color) -> some View {
-    Image(systemName: systemName)
-        .font(.system(size: 14, weight: .medium))
-        .foregroundStyle(color)
-        .frame(width: 30, height: 30)
-        .background(color.opacity(0.15))
-        .clipShape(RoundedRectangle(cornerRadius: 7))
+    MangoxIconBadge(systemName: systemName, color: color)
 }
 
 func settingsSubCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -18,7 +13,7 @@ func settingsSubCard<Content: View>(@ViewBuilder content: () -> Content) -> some
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(16)
     .cardStyle(cornerRadius: 16)
-    .padding(.horizontal, 20)
+    .padding(.horizontal, MangoxSpacing.page)
 }
 
 func settingsSubToggle(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
@@ -36,11 +31,8 @@ func settingsSubToggle(title: String, subtitle: String, isOn: Binding<Bool>) -> 
 }
 
 func settingsSubSectionLabel(_ title: String) -> some View {
-    Text(title.uppercased())
-        .font(.system(size: 10, weight: .bold))
-        .foregroundStyle(.white.opacity(0.32))
+    MangoxSectionLabel(title: title)
         .tracking(1.2)
-        .padding(.horizontal, 20)
         .padding(.top, 8)
         .padding(.bottom, 4)
 }

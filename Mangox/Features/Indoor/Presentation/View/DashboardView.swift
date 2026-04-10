@@ -273,10 +273,7 @@ struct DashboardView: View {
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.white.opacity(0.75))
                             .frame(width: 28, height: 28)
-                            .modifier(
-                                IndoorGlassOrOpaqueCircle(
-                                    useOpaque: accessibilityReduceTransparency
-                                ))
+                            .mangoxSurface(.frostedInteractive, shape: .circle)
                     }
                     .frame(minHeight: 28)
                 }
@@ -344,83 +341,46 @@ struct DashboardView: View {
                 .frame(height: 3)
             }
         }
-        .modifier(IndoorHeaderBarChrome(reduceTransparency: accessibilityReduceTransparency))
+        .mangoxSurface(.frosted, shape: .rectangle)
     }
 
     // MARK: - End / discard (matches outdoor `endDiscardOverlays` chrome)
 
     private var indoorEndWorkoutOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.52)
-                .ignoresSafeArea()
-                .onTapGesture { viewModel.dismissEndConfirmation() }
-
-            VStack(alignment: .leading, spacing: 16) {
-                Text("End workout?")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
-                Text(
-                    "We’ll open the summary next so you can review power, heart rate, and time — or discard this session with no save."
-                )
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white.opacity(0.55))
-                .fixedSize(horizontal: false, vertical: true)
-
-                HStack(spacing: 12) {
-                    Button {
-                        viewModel.dismissEndConfirmation()
-                    } label: {
-                        Text("Cancel")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                    }
-                    .buttonStyle(.plain)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-                    Button {
-                        endRide()
-                    } label: {
-                        Text("End & Save")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(AppColor.bg)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                    }
-                    .buttonStyle(.plain)
-                    .background(AppColor.mango)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-
+        MangoxConfirmOverlay(
+            title: "End workout?",
+            message:
+                "We’ll open the summary next so you can review power, heart rate, and time — or discard this session with no save.",
+            onDismiss: { viewModel.dismissEndConfirmation() }
+        ) {
+            HStack(spacing: 12) {
                 Button {
-                    discardRide()
+                    viewModel.dismissEndConfirmation()
                 } label: {
-                    Text("Discard without saving")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
+                    Text("Cancel")
+                        .mangoxFont(.bodyBold)
+                        .mangoxButtonChrome(.secondary)
                 }
                 .buttonStyle(.plain)
-                .background(AppColor.red.opacity(0.95))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                Button {
+                    endRide()
+                } label: {
+                    Text("End & Save")
+                        .mangoxButtonChrome(.hero)
+                }
+                .buttonStyle(.plain)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(AppColor.bg)
-                    .shadow(color: .black.opacity(0.45), radius: 30, y: 8)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-            )
-            .padding(.horizontal, 24)
+
+            Button {
+                discardRide()
+            } label: {
+                Text("Discard without saving")
+                    .mangoxFont(.bodyBold)
+                    .mangoxButtonChrome(.destructive)
+            }
+            .buttonStyle(.plain)
         }
-        .allowsHitTesting(true)
     }
 
     // MARK: - Compact Layout (iPhone portrait)
@@ -1250,7 +1210,7 @@ struct DashboardView: View {
         .foregroundStyle(AppColor.mango)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .modifier(IndoorMilestoneToastChrome(reduceTransparency: accessibilityReduceTransparency))
+        .mangoxSurface(.frosted, shape: .capsule)
     }
 
     private func exitPreRide() {

@@ -398,11 +398,9 @@ struct SettingsView: View {
     // MARK: - Row builders
 
     private func sectionLabel(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.system(size: 11, weight: .semibold))
+        MangoxSectionLabel(title: title)
+            .mangoxFont(.label)
             .foregroundStyle(.white.opacity(0.32))
-            .tracking(1.0)
-            .padding(.horizontal, 20)
             .padding(.bottom, 6)
     }
 
@@ -411,7 +409,7 @@ struct SettingsView: View {
             content()
         }
         .cardStyle(cornerRadius: 16)
-        .padding(.horizontal, 20)
+        .padding(.horizontal, MangoxSpacing.page)
     }
 
     private func navRow(

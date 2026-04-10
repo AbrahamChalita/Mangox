@@ -42,16 +42,16 @@ struct WorkoutControlBar: View {
                             .tint(AppColor.yellow.opacity(0.6))
                             .scaleEffect(0.7)
                         Text("AUTO-PAUSED")
-                            .font(.system(size: 12, weight: .bold))
+                            .mangoxFont(.caption)
                             .foregroundStyle(AppColor.yellow)
                             .tracking(1)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(AppColor.yellow.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .background(AppColor.wash(for: AppColor.yellow))
+                    .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue)
                             .strokeBorder(AppColor.yellow.opacity(0.25), lineWidth: 1)
                     )
 
@@ -75,13 +75,10 @@ struct WorkoutControlBar: View {
                 Image(systemName: icon)
                     .font(.system(size: 12))
                 Text(label)
-                    .font(.system(size: 13, weight: .bold))
+                    .mangoxFont(.callout)
                     .tracking(0.5)
             }
-            .foregroundStyle(color)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+            .mangoxButtonChrome(.primary, tint: color)
         }
         .buttonStyle(MangoxPressStyle())
     }
@@ -94,14 +91,11 @@ struct WorkoutControlBar: View {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 10))
                 Text("END")
-                    .font(.system(size: 13, weight: .bold))
+                    .mangoxFont(.callout)
                     .tracking(0.5)
             }
-            .foregroundStyle(AppColor.bg)
             .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .background(AppColor.red)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .mangoxButtonChrome(.destructive)
         }
         .buttonStyle(MangoxPressStyle())
     }

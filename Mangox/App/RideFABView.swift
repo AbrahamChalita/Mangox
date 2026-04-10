@@ -21,7 +21,7 @@ struct RideFABView: View {
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        withAnimation(.spring(duration: 0.2)) { showRideMenu = false }
+                        withAnimation(MangoxMotion.micro) { showRideMenu = false }
                     }
                     .transition(.opacity)
             }
@@ -34,19 +34,19 @@ struct RideFABView: View {
                         collapsedFAB
                     }
                 }
-                .padding(.trailing, 20)
+                .padding(.trailing, MangoxSpacing.page)
                 .padding(.bottom, 70)
                 .transition(.opacity)
             }
         }
-        .animation(.spring(duration: 0.35), value: showFloatingButton)
+        .animation(MangoxMotion.smooth, value: showFloatingButton)
     }
 
     // MARK: - Collapsed FAB
 
     private var collapsedFAB: some View {
         Button {
-            withAnimation(.spring(duration: 0.22, bounce: 0.1)) {
+            withAnimation(MangoxMotion.micro) {
                 showRideMenu = true
             }
         } label: {
@@ -102,25 +102,20 @@ struct RideFABView: View {
         route: AppRoute
     ) -> some View {
         Button {
-            withAnimation(.spring(duration: 0.3)) { showRideMenu = false }
+            withAnimation(MangoxMotion.smooth) { showRideMenu = false }
             onSelect(route)
         } label: {
             HStack(spacing: 14) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(iconColor.opacity(0.15))
-                        .frame(width: 44, height: 44)
-                    Image(systemName: icon)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(iconColor)
+                    MangoxIconBadge(systemName: icon, color: iconColor, size: 44, cornerRadius: 10)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.primary)
+                        .mangoxFont(.bodyBold)
+                        .foregroundStyle(.white)
                     Text(subtitle)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .mangoxFont(.caption)
+                        .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
                 }
                 Spacer(minLength: 0)
             }

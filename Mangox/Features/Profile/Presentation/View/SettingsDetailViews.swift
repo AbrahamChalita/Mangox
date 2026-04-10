@@ -28,7 +28,7 @@ struct AICoachSettingsView: View {
 
     var body: some View {
         SettingsSubviewShell(title: "AI Coach") {
-            settingsSubSectionLabel("Provider")
+            MangoxSectionLabel(title: "Provider")
             settingsSubCard {
                 VStack(spacing: 0) {
                     providerRow(.mangoxBackend)
@@ -64,7 +64,7 @@ struct AICoachSettingsView: View {
             }
 
             // Connection fields
-            settingsSubSectionLabel("Connection")
+            MangoxSectionLabel(title: "Connection")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 0) {
                     if selectedKind == .openAICompatible {
@@ -358,7 +358,7 @@ struct PowerZonesSettingsView: View {
                 }
 
                 // Zone table
-                settingsSubSectionLabel("Power Zones")
+                MangoxSectionLabel(title: "Power Zones")
                 settingsSubCard {
                     VStack(spacing: 6) {
                         ForEach(PowerZone.zones) { zone in
@@ -390,7 +390,7 @@ struct PowerZonesSettingsView: View {
                 }
 
                 // Power display mode
-                settingsSubSectionLabel("Display")
+                MangoxSectionLabel(title: "Display")
                 settingsSubCard {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Indoor power readout")
@@ -609,7 +609,7 @@ struct HeartRateSettingsView: View {
             }
 
             // Manual overrides
-            settingsSubSectionLabel("Manual Overrides")
+            MangoxSectionLabel(title: "Manual Overrides")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(
@@ -1138,7 +1138,7 @@ struct IndoorTrainerSettingsView: View {
             }
 
             if prefs.indoorSpeedSource == .computed {
-                settingsSubSectionLabel("Physics Model")
+                MangoxSectionLabel(title: "Physics Model")
                 settingsSubCard {
                     VStack(alignment: .leading, spacing: 14) {
                         weightRow(label: "Rider weight", value: "\(Int(prefs.riderWeightKg)) kg") {
@@ -1189,7 +1189,7 @@ struct IndoorTrainerSettingsView: View {
                 }
             }
 
-            settingsSubSectionLabel("Live Activity")
+            MangoxSectionLabel(title: "Live Activity")
             settingsSubCard {
                 settingsSubToggle(
                     title: "Indoor ride status",
@@ -1198,7 +1198,7 @@ struct IndoorTrainerSettingsView: View {
                 )
             }
 
-            settingsSubSectionLabel("Display")
+            MangoxSectionLabel(title: "Display")
             settingsSubCard {
                 settingsSubToggle(
                     title: "Show Laps",
@@ -1264,7 +1264,7 @@ struct OutdoorRideSettingsView: View {
                 )
             }
 
-            settingsSubSectionLabel("Live Activity")
+            MangoxSectionLabel(title: "Live Activity")
             settingsSubCard {
                 settingsSubToggle(
                     title: "Lock Screen ride status",
@@ -1274,7 +1274,7 @@ struct OutdoorRideSettingsView: View {
                 )
             }
 
-            settingsSubSectionLabel("GPX export privacy")
+            MangoxSectionLabel(title: "GPX export privacy")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(
@@ -1314,7 +1314,7 @@ struct OutdoorRideSettingsView: View {
                 }
             }
 
-            settingsSubSectionLabel("Sensors")
+            MangoxSectionLabel(title: "Sensors")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Speed sensor wheel size")
@@ -1368,7 +1368,7 @@ struct AudioHapticsSettingsView: View {
                 }
             }
 
-            settingsSubSectionLabel("Cadence")
+            MangoxSectionLabel(title: "Cadence")
             settingsSubCard {
                 VStack(spacing: 12) {
                     settingsSubToggle(
@@ -1398,7 +1398,7 @@ struct AudioHapticsSettingsView: View {
                 }
             }
 
-            settingsSubSectionLabel("Ride tips")
+            MangoxSectionLabel(title: "Ride tips")
             settingsSubCard {
                 VStack(spacing: 12) {
                     settingsSubToggle(
@@ -1488,7 +1488,7 @@ struct MangoxProSettingsView: View {
             }
 
             if viewModel.hasStoreSubscription, let url = viewModel.subscriptionManagementURL {
-                settingsSubSectionLabel("Subscription")
+                MangoxSectionLabel(title: "Subscription")
                 settingsSubCard {
                     Button {
                         openURL(url)
@@ -1507,7 +1507,7 @@ struct MangoxProSettingsView: View {
                 }
             }
 
-            settingsSubSectionLabel("Included with Pro")
+            MangoxSectionLabel(title: "Included with Pro")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 14) {
                     proBenefitLine(icon: "calendar.badge.checkmark", title: "Training plans", subtitle: "Structured and AI-built plans")
@@ -1806,7 +1806,7 @@ struct DataPrivacyNotificationsHubView: View {
 
     var body: some View {
         SettingsSubviewShell(title: "Data, privacy & alerts") {
-            settingsSubSectionLabel("Where rides go")
+            MangoxSectionLabel(title: "Where rides go")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 10) {
                     rowStatus(
@@ -1850,7 +1850,7 @@ struct DataPrivacyNotificationsHubView: View {
                 }
             }
 
-            settingsSubSectionLabel("Training alerts")
+            MangoxSectionLabel(title: "Training alerts")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Notifications: \(authStatusText)")
@@ -1957,7 +1957,7 @@ struct DataPrivacyNotificationsHubView: View {
                 }
             }
 
-            settingsSubSectionLabel("Export my data")
+            MangoxSectionLabel(title: "Export my data")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(
@@ -2056,7 +2056,7 @@ struct RiderProfileSettingsView: View {
 
     var body: some View {
         SettingsSubviewShell(title: "Rider Profile") {
-            settingsSubSectionLabel("WEIGHT")
+            MangoxSectionLabel(title: "WEIGHT")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -2085,7 +2085,7 @@ struct RiderProfileSettingsView: View {
                 }
             }
 
-            settingsSubSectionLabel("AGE")
+            MangoxSectionLabel(title: "AGE")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .firstTextBaseline, spacing: 0) {

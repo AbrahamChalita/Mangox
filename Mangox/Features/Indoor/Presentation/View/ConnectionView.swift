@@ -89,6 +89,8 @@ struct ConnectionView: View {
     @State private var selectedCustomTemplateID: UUID?
     @State private var showZWOImporter = false
     @State private var zwoImportError: String?
+    @State private var showRouteImportErrorOverlay = false
+    @State private var showZWOImportErrorOverlay = false
 
     private let prefs = RidePreferences.shared
 
@@ -198,7 +200,7 @@ struct ConnectionView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     statusBanner
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, MangoxSpacing.page)
                         .padding(.top, 12)
                         .padding(.bottom, 20)
 
@@ -206,13 +208,13 @@ struct ConnectionView: View {
                         && (rideLaunchMode == .indoor || outdoorSensorsOnly)
                     {
                         bluetoothOffCard
-                            .padding(.horizontal, 20)
+                            .padding(.horizontal, MangoxSpacing.page)
                     } else {
                         if startMode == .ride, planDayID == nil, !indoorRideLocked,
                             !outdoorSensorsOnly
                         {
                             rideModeCard
-                                .padding(.horizontal, 20)
+                                .padding(.horizontal, MangoxSpacing.page)
                                 .padding(.bottom, 20)
                         }
 
@@ -222,34 +224,34 @@ struct ConnectionView: View {
                             icon: "antenna.radiowaves.left.and.right",
                             prominent: true
                         )
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, MangoxSpacing.page)
                         .padding(.bottom, 10)
 
                         scanButton
-                            .padding(.horizontal, 20)
+                            .padding(.horizontal, MangoxSpacing.page)
                             .padding(.bottom, 14)
 
                         devicesCard
-                            .padding(.horizontal, 20)
+                            .padding(.horizontal, MangoxSpacing.page)
                             .padding(.bottom, 24)
 
                         if startMode == .ride, rideLaunchMode == .indoor, !outdoorSensorsOnly {
                             sectionHeader(title: "WIFI TRAINERS", icon: "wifi", prominent: true)
-                                .padding(.horizontal, 20)
+                                .padding(.horizontal, MangoxSpacing.page)
                                 .padding(.bottom, 10)
                             wifiTrainersCard
-                                .padding(.horizontal, 20)
+                                .padding(.horizontal, MangoxSpacing.page)
                                 .padding(.bottom, 24)
                         }
 
                         // Route section (ride mode only)
                         if startMode == .ride, !outdoorSensorsOnly {
                             sectionHeader(title: "ROUTE", icon: "map")
-                                .padding(.horizontal, 20)
+                                .padding(.horizontal, MangoxSpacing.page)
                                 .padding(.bottom, 10)
 
                             routeCard
-                                .padding(.horizontal, 20)
+                                .padding(.horizontal, MangoxSpacing.page)
                                 .padding(.bottom, 24)
                         }
 
@@ -258,18 +260,18 @@ struct ConnectionView: View {
                             planDayID == nil
                         {
                             sectionHeader(title: "CUSTOM WORKOUT", icon: "doc.text.fill")
-                                .padding(.horizontal, 20)
+                                .padding(.horizontal, MangoxSpacing.page)
                                 .padding(.bottom, 10)
 
                             customWorkoutLibraryCard
-                                .padding(.horizontal, 20)
+                                .padding(.horizontal, MangoxSpacing.page)
                                 .padding(.bottom, 24)
                         }
 
                         // Settings quick glance
                         if !outdoorSensorsOnly {
                             setupSummaryCard
-                                .padding(.horizontal, 20)
+                                .padding(.horizontal, MangoxSpacing.page)
                                 .padding(.bottom, 24)
                         }
                     }
@@ -277,7 +279,7 @@ struct ConnectionView: View {
                     #if DEBUG
                         if !outdoorSensorsOnly {
                             debugOverlay
-                                .padding(.horizontal, 20)
+                                .padding(.horizontal, MangoxSpacing.page)
                                 .padding(.bottom, 16)
                         }
                     #endif
@@ -334,6 +336,49 @@ struct ConnectionView: View {
             bleService.stopScan()
             dataSourceService.stopWiFiDiscovery()
         }
+        .overlay {
+            if showRouteImportErrorOverlay {
+                MangoxConfirmOverlay(
+                    title: "Route Import Failed",
+                    message: routeImportError ?? "",
+                    onDismiss: {
+                        showRouteImportErrorOverlay = false
+                        routeImportError = nil
+                    }
+                ) {
+                    Button {
+                        showRouteImportErrorOverlay = false
+                        routeImportError = nil
+                    } label: {
+                        Text("OK")
+                            .mangoxButtonChrome(.hero)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .transition(.opacity)
+            }
+
+            if showZWOImportErrorOverlay {
+                MangoxConfirmOverlay(
+                    title: "Workout Import Failed",
+                    message: zwoImportError ?? "",
+                    onDismiss: {
+                        showZWOImportErrorOverlay = false
+                        zwoImportError = nil
+                    }
+                ) {
+                    Button {
+                        showZWOImportErrorOverlay = false
+                        zwoImportError = nil
+                    } label: {
+                        Text("OK")
+                            .mangoxButtonChrome(.hero)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .transition(.opacity)
+            }
+        }
         .fileImporter(
             isPresented: $showRouteImporter,
             allowedContentTypes: [UTType(filenameExtension: "gpx") ?? .xml],
@@ -355,18 +400,6 @@ struct ConnectionView: View {
                 routeImportError = error.localizedDescription
             }
         }
-        .alert(
-            "Route Import Failed",
-            isPresented: Binding(
-                get: { routeImportError != nil },
-                set: { if !$0 { routeImportError = nil } }
-            ),
-            actions: {
-                Button("OK") { routeImportError = nil }
-            },
-            message: {
-                Text(routeImportError ?? "")
-            })
         .fileImporter(
             isPresented: $showZWOImporter,
             allowedContentTypes: [UTType(filenameExtension: "zwo") ?? .xml],
@@ -408,18 +441,12 @@ struct ConnectionView: View {
                 zwoImportError = error.localizedDescription
             }
         }
-        .alert(
-            "Workout Import Failed",
-            isPresented: Binding(
-                get: { zwoImportError != nil },
-                set: { if !$0 { zwoImportError = nil } }
-            ),
-            actions: {
-                Button("OK") { zwoImportError = nil }
-            },
-            message: {
-                Text(zwoImportError ?? "")
-            })
+        .onChange(of: routeImportError) { _, value in
+            showRouteImportErrorOverlay = value != nil
+        }
+        .onChange(of: zwoImportError) { _, value in
+            showZWOImportErrorOverlay = value != nil
+        }
         .onChange(of: rideLaunchMode) { _, newMode in
             if newMode == .outdoor {
                 selectedCustomTemplateID = nil
@@ -1678,7 +1705,7 @@ struct ConnectionView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(accentBlue)
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, MangoxSpacing.page)
                 .padding(.vertical, 10)
                 .background(accentBlue.opacity(0.1))
                 .clipShape(Capsule())
@@ -2079,7 +2106,7 @@ struct ConnectionView: View {
                     .foregroundStyle(.white.opacity(0.35))
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, MangoxSpacing.page)
         .padding(.top, 16)
         .padding(.bottom, 12)
         .background {

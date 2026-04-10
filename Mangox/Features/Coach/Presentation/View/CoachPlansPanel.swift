@@ -218,6 +218,7 @@ struct CoachPlansPanel: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
         )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     // MARK: - Section Header

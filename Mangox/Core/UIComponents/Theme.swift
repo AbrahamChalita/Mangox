@@ -25,8 +25,20 @@ enum AppColor {
     static let discord = Color(red: 88/255, green: 101/255, blue: 242/255)
     static let bg = Color(red: 0.03, green: 0.04, blue: 0.06)
 
+    static let surfaceTint = Color.white.opacity(0.08)
+    static let surfaceBorder = Color.white.opacity(0.12)
+    static let subtleTint = Color.white.opacity(0.03)
+
     /// Heart-rate accent (slightly different from the zone red).
     static let heartRate = Color(red: 245/255, green: 96/255, blue: 108/255)
+
+    static func tint(for color: Color) -> Color {
+        color.opacity(0.15)
+    }
+
+    static func wash(for color: Color) -> Color {
+        color.opacity(0.12)
+    }
 }
 
 // MARK: - Training Zone Target Color
@@ -304,5 +316,3 @@ extension Color {
 }
 
 // MARK: - Cached Training Plan
-
-

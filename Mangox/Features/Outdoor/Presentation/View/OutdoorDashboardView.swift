@@ -155,7 +155,7 @@ struct OutdoorDashboardView: View {
                 .transition(.move(edge: .trailing))
             }
         }
-        .animation(.easeInOut(duration: 0.22), value: viewModel.showDestinationSearch)
+        .animation(MangoxMotion.standard, value: viewModel.showDestinationSearch)
         .onAppear {
             viewModel.handleAppear(
                 locationManager: ls,
@@ -212,12 +212,12 @@ struct OutdoorDashboardView: View {
         .onChange(of: ls.newLapJustCompleted) {
             guard ls.newLapJustCompleted else { return }
             ls.newLapJustCompleted = false
-            withAnimation(.spring(duration: 0.3)) {
+            withAnimation(MangoxMotion.smooth) {
                 viewModel.presentLapToast(for: ls.completedLaps.last)
             }
             Task {
                 try? await Task.sleep(for: .seconds(3))
-                withAnimation(.easeOut(duration: 0.3)) { viewModel.dismissLapToast() }
+                withAnimation(MangoxMotion.smooth) { viewModel.dismissLapToast() }
             }
         }
         .onChange(of: ls.authorizationStatus) {
@@ -251,7 +251,7 @@ struct OutdoorDashboardView: View {
                         }
                     } else {
                         await MainActor.run {
-                            withAnimation(.easeInOut(duration: 0.35)) {}
+                            withAnimation(MangoxMotion.standard) {}
                         }
                     }
                 }
@@ -259,32 +259,39 @@ struct OutdoorDashboardView: View {
                 viewModel.presentRouteImportError(error.localizedDescription)
             }
         }
-        .alert(
-            "Route Import Failed",
-            isPresented: Binding(
-                get: { viewModel.routeImportError != nil },
-                set: { if !$0 { viewModel.clearRouteImportError() } }
-            ),
-            actions: {
-                Button("OK") { viewModel.clearRouteImportError() }
-            },
-            message: {
-                Text(viewModel.routeImportError ?? "")
+        .overlay {
+            if let error = viewModel.routeImportError {
+                MangoxConfirmOverlay(
+                    title: "Route Import Failed",
+                    message: error,
+                    onDismiss: { viewModel.clearRouteImportError() }
+                ) {
+                    Button {
+                        viewModel.clearRouteImportError()
+                    } label: {
+                        Text("OK")
+                            .mangoxButtonChrome(.hero)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-        )
-        .alert(
-            "Couldn’t build route",
-            isPresented: Binding(
-                get: { viewModel.routeBuildError != nil },
-                set: { if !$0 { viewModel.clearRouteBuildError() } }
-            ),
-            actions: {
-                Button("OK", role: .cancel) { viewModel.clearRouteBuildError() }
-            },
-            message: {
-                Text(viewModel.routeBuildError ?? "")
+
+            if let error = viewModel.routeBuildError {
+                MangoxConfirmOverlay(
+                    title: "Couldn’t build route",
+                    message: error,
+                    onDismiss: { viewModel.clearRouteBuildError() }
+                ) {
+                    Button {
+                        viewModel.clearRouteBuildError()
+                    } label: {
+                        Text("OK")
+                            .mangoxButtonChrome(.hero)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-        )
+        }
         // Hide the NavigationStack bar — we use a fully custom chrome.
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: prefs.outdoorAutoLapIntervalMeters) {
@@ -316,7 +323,7 @@ struct OutdoorDashboardView: View {
     private var routeStatusCard: some View {
         routeStatusCardContent
             .padding(14)
-            .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
+            .mangoxSurface(.mapOverlay, shape: .rounded(18))
             .padding(.horizontal, 16)
     }
 
@@ -360,10 +367,9 @@ struct OutdoorDashboardView: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white.opacity(0.85))
-                        .frame(width: 32, height: 32)
+                        .mangoxButtonChrome(.mapIconSmall)
                 }
                 .buttonStyle(.plain)
-                .background(.ultraThinMaterial, in: Circle())
             }
         }
     }
@@ -431,14 +437,13 @@ struct OutdoorDashboardView: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white.opacity(0.85))
-                        .frame(width: 32, height: 32)
+                        .mangoxButtonChrome(.mapIconSmall)
                 }
                 .buttonStyle(.plain)
-                .background(.ultraThinMaterial, in: Circle())
             }
         }
         .padding(14)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
+        .mangoxSurface(.mapOverlay, shape: .rounded(18))
         .padding(.horizontal, 16)
     }
 
@@ -468,7 +473,7 @@ struct OutdoorDashboardView: View {
             routeStatusCardContent
         }
         .padding(14)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
+        .mangoxSurface(.mapOverlay, shape: .rounded(18))
         .padding(.horizontal, 16)
     }
 
@@ -576,10 +581,9 @@ struct OutdoorDashboardView: View {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
+                            .mangoxButtonChrome(.mapIcon)
                     }
                     .buttonStyle(.plain)
-                    .background(.ultraThinMaterial, in: Circle())
                     Spacer()
                 }
                 .padding(.horizontal, 16)
@@ -601,10 +605,9 @@ struct OutdoorDashboardView: View {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
+                            .mangoxButtonChrome(.mapIcon)
                     }
                     .buttonStyle(.plain)
-                    .background(.ultraThinMaterial, in: Circle())
 
                     Spacer()
                     gpsStatusBadge
@@ -701,7 +704,7 @@ struct OutdoorDashboardView: View {
         }
 
         return Button {
-            withAnimation(.easeInOut(duration: 0.16)) { viewModel.selectSetupMode(mode) }
+            withAnimation(MangoxMotion.micro) { viewModel.selectSetupMode(mode) }
             if mode == .gpx && !viewModel.hasRoute { viewModel.presentRouteImporter() }
         } label: {
             HStack(spacing: 14) {
@@ -908,7 +911,7 @@ struct OutdoorDashboardView: View {
 
                     if sensorResults.count > 3 {
                         Button {
-                            withAnimation(.easeInOut(duration: 0.2)) { showAllSensors.toggle() }
+                            withAnimation(MangoxMotion.micro) { showAllSensors.toggle() }
                         } label: {
                             HStack(spacing: 4) {
                                 Text(
@@ -1015,7 +1018,7 @@ struct OutdoorDashboardView: View {
         switch viewModel.setupMode {
         case .freeRide:
             Button {
-                withAnimation(.easeInOut(duration: 0.35)) { viewModel.commitSetupPhase() }
+                withAnimation(MangoxMotion.standard) { viewModel.commitSetupPhase() }
             } label: {
                 ctaLabel("Start Free Ride")
             }
@@ -1024,7 +1027,7 @@ struct OutdoorDashboardView: View {
         case .gpx:
             if viewModel.hasRoute {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.35)) { viewModel.commitSetupPhase() }
+                    withAnimation(MangoxMotion.standard) { viewModel.commitSetupPhase() }
                 } label: {
                     ctaLabel("Start Route")
                 }
@@ -1105,9 +1108,9 @@ struct OutdoorDashboardView: View {
         }
         .rotationEffect(.degrees(deg))
         .frame(width: 38, height: 38)
-        .background(.ultraThinMaterial, in: Circle())
+        .mangoxSurface(.mapOverlay, shape: .circle)
         .overlay(Circle().strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
-        .animation(.easeOut(duration: 0.25), value: deg)
+        .animation(MangoxMotion.standard, value: deg)
     }
 
     /// Full-screen bike-computer when the map is hidden (compact iPhone): works pre-ride and while recording.
@@ -1148,30 +1151,16 @@ struct OutdoorDashboardView: View {
         switch (style, shape) {
         case (.frostedGlass, .roundedRect):
             content()
-                .glassEffect(.regular, in: .rect(cornerRadius: 14, style: .continuous))
+                .mangoxSurface(.mapOverlay, shape: .rounded(14))
         case (.frostedGlass, .capsule):
             content()
-                .glassEffect(.regular, in: .capsule)
+                .mangoxSurface(.mapOverlay, shape: .capsule)
         case (.bikeComputerSheet, .roundedRect):
             content()
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-                )
+                .mangoxSurface(.flat, shape: .rounded(12))
         case (.bikeComputerSheet, .capsule):
             content()
-                .background(
-                    Capsule()
-                        .fill(Color.white.opacity(0.08))
-                )
-                .overlay(
-                    Capsule()
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-                )
+                .mangoxSurface(.flat, shape: .capsule)
         }
     }
 
@@ -1201,7 +1190,7 @@ struct OutdoorDashboardView: View {
                             ))
                 }
             }
-            .animation(.spring(response: 0.42, dampingFraction: 0.86), value: bikeComputer)
+            .animation(MangoxMotion.expansive, value: bikeComputer)
             .overlay(alignment: .top) {
                 // The overlay already starts at the safe-area boundary (below Dynamic Island),
                 // so we only need a small breathing-room inset, not the full safeAreaInsets.top.
@@ -1213,7 +1202,7 @@ struct OutdoorDashboardView: View {
                         // Lap toast — floats above the card
                         lapToastView
                             .frame(maxWidth: .infinity, alignment: .center)
-                            .animation(.spring(duration: 0.3), value: viewModel.showLapToast)
+                            .animation(MangoxMotion.smooth, value: viewModel.showLapToast)
 
                         // Climb banner — only during active climb
                         climbBanner
@@ -1291,7 +1280,7 @@ struct OutdoorDashboardView: View {
                 lapToastView
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 8)
-                    .animation(.spring(duration: 0.3), value: viewModel.showLapToast)
+                    .animation(MangoxMotion.smooth, value: viewModel.showLapToast)
             }
 
             Spacer(minLength: 12)
@@ -1373,17 +1362,14 @@ struct OutdoorDashboardView: View {
                     Spacer(minLength: 0)
 
                     Button {
-                        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+                        withAnimation(MangoxMotion.expansive) {
                             viewModel.showCompactMap()
                         }
                     } label: {
                         Image(systemName: "map")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.45))
-                            .frame(width: 40, height: 40)
-                            .background(Color.white.opacity(0.1))
-                            .clipShape(Circle())
-                            .overlay(Circle().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+                            .mangoxButtonChrome(.icon)
                     }
                     .buttonStyle(MangoxPressStyle())
                     .contentShape(Circle())
@@ -1403,17 +1389,14 @@ struct OutdoorDashboardView: View {
                     .buttonStyle(MangoxPressStyle())
 
                     Button {
-                        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+                        withAnimation(MangoxMotion.expansive) {
                             viewModel.showCompactMap()
                         }
                     } label: {
                         Image(systemName: "map")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.45))
-                            .frame(width: 40, height: 40)
-                            .background(Color.white.opacity(0.1))
-                            .clipShape(Circle())
-                            .overlay(Circle().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+                            .mangoxButtonChrome(.icon)
                     }
                     .buttonStyle(MangoxPressStyle())
                     .accessibilityLabel("Show map")
@@ -1639,10 +1622,9 @@ struct OutdoorDashboardView: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(chromeIcon(surface))
-                        .frame(width: 40, height: 40)
+                        .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .background(.ultraThinMaterial, in: Circle())
             }
             .padding(.vertical, 4)
         }
@@ -1657,34 +1639,32 @@ struct OutdoorDashboardView: View {
 
             Button {
                 viewModel.presentRouteSheet()
-            } label: {
-                Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(chromeIcon(surface))
-                    .frame(width: 40, height: 40)
-            }
-            .buttonStyle(MangoxPressStyle())
-            .background(.ultraThinMaterial, in: Circle())
-            .accessibilityLabel("Route")
+                } label: {
+                    Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(chromeIcon(surface))
+                        .mangoxButtonChrome(.mapIcon)
+                }
+                .buttonStyle(MangoxPressStyle())
+                .accessibilityLabel("Route")
 
             Button {
                 mapCameraService.centerMapOnUser()
-            } label: {
-                Image(systemName: "location.circle.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(chromeIcon(surface))
-                    .frame(width: 40, height: 40)
-            }
-            .buttonStyle(MangoxPressStyle())
-            .background(.ultraThinMaterial, in: Circle())
-            .accessibilityLabel("Center on location")
+                } label: {
+                    Image(systemName: "location.circle.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(chromeIcon(surface))
+                        .mangoxButtonChrome(.mapIcon)
+                }
+                .buttonStyle(MangoxPressStyle())
+                .accessibilityLabel("Center on location")
             .disabled(ls.currentLocation == nil)
             .opacity(ls.currentLocation == nil ? 0.35 : 1)
 
             // Map visibility toggle (compact / iPhone only) — hidden on mapless bike screen (duplicates bottom control)
             if hSizeClass == .compact, surface != .bikeComputerDark {
                 Button {
-                    withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+                    withAnimation(MangoxMotion.expansive) {
                         viewModel.toggleCompactMapVisibility()
                     }
                 } label: {
@@ -1694,10 +1674,9 @@ struct OutdoorDashboardView: View {
                             viewModel.showMapInCompact
                                 ? AppColor.mango : chromeIcon(surface).opacity(0.7)
                         )
-                        .frame(width: 40, height: 40)
+                        .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .background(.ultraThinMaterial, in: Circle())
                 .accessibilityLabel(viewModel.showMapInCompact ? "Hide map" : "Show map")
             }
 
@@ -1709,10 +1688,9 @@ struct OutdoorDashboardView: View {
                     Image(systemName: "mappin.and.ellipse")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(chromeIcon(surface))
-                        .frame(width: 40, height: 40)
+                        .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .background(.ultraThinMaterial, in: Circle())
                 .accessibilityLabel("Drop waypoint at current location")
                 .disabled(ls.currentLocation == nil)
                 .opacity(ls.currentLocation == nil ? 0.35 : 1)
@@ -1724,10 +1702,9 @@ struct OutdoorDashboardView: View {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.85))
-                            .frame(width: 40, height: 40)
+                            .mangoxButtonChrome(.mapIcon)
                     }
                     .buttonStyle(MangoxPressStyle())
-                    .background(.ultraThinMaterial, in: Circle())
                     .accessibilityLabel("Clear waypoints")
                 }
             }
@@ -1739,10 +1716,9 @@ struct OutdoorDashboardView: View {
                     Image(systemName: "trash")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(AppColor.red)
-                        .frame(width: 40, height: 40)
+                        .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .background(.ultraThinMaterial, in: Circle())
                 .accessibilityLabel("Discard ride")
 
                 if surface != .bikeComputerDark {
@@ -1750,11 +1726,7 @@ struct OutdoorDashboardView: View {
                         viewModel.presentEndConfirmation()
                     } label: {
                         Text("END")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
-                            .background(AppColor.red)
-                            .clipShape(Circle())
+                            .mangoxButtonChrome(.endIcon)
                     }
                     .buttonStyle(MangoxPressStyle())
                     .accessibilityLabel("End ride")
@@ -2066,11 +2038,11 @@ struct OutdoorDashboardView: View {
             }
         }
         .animation(
-            .spring(response: 0.26, dampingFraction: 0.9),
+            MangoxMotion.smooth,
             value: viewModel.isShowingEndConfirmation
         )
         .animation(
-            .spring(response: 0.26, dampingFraction: 0.9),
+            MangoxMotion.smooth,
             value: viewModel.isShowingDiscardConfirmation
         )
         .zIndex(200)
@@ -2214,10 +2186,9 @@ struct OutdoorDashboardView: View {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
+                    .mangoxButtonChrome(.mapIcon)
             }
             .buttonStyle(MangoxPressStyle())
-            .background(.ultraThinMaterial, in: Circle())
 
             // Simple spacer — nav card is now a dedicated full-width row below the button bar.
             Spacer()
@@ -2232,10 +2203,9 @@ struct OutdoorDashboardView: View {
                     Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
+                        .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .background(.ultraThinMaterial, in: Circle())
                 .accessibilityLabel("Route")
 
                 Button {
@@ -2244,10 +2214,9 @@ struct OutdoorDashboardView: View {
                     Image(systemName: "location.circle.fill")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
+                        .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .background(.ultraThinMaterial, in: Circle())
                 .accessibilityLabel("Center on location")
                 .disabled(ls.currentLocation == nil)
                 .opacity(ls.currentLocation == nil ? 0.35 : 1)
@@ -2255,7 +2224,7 @@ struct OutdoorDashboardView: View {
                 // Map visibility toggle (compact / iPhone only)
                 if hSizeClass == .compact {
                     Button {
-                        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+                        withAnimation(MangoxMotion.expansive) {
                             viewModel.toggleCompactMapVisibility()
                         }
                     } label: {
@@ -2264,10 +2233,9 @@ struct OutdoorDashboardView: View {
                             .foregroundStyle(
                                 viewModel.showMapInCompact ? AppColor.mango : .white.opacity(0.7)
                             )
-                            .frame(width: 40, height: 40)
+                            .mangoxButtonChrome(.mapIcon)
                     }
                     .buttonStyle(MangoxPressStyle())
-                    .background(.ultraThinMaterial, in: Circle())
                     .accessibilityLabel(viewModel.showMapInCompact ? "Hide map" : "Show map")
                 }
 
@@ -2278,10 +2246,9 @@ struct OutdoorDashboardView: View {
                     Image(systemName: "mappin.and.ellipse")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
+                        .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .background(.ultraThinMaterial, in: Circle())
                 .accessibilityLabel("Drop waypoint at current location")
                 .disabled(ls.currentLocation == nil)
                 .opacity(ls.currentLocation == nil ? 0.35 : 1)
@@ -2293,10 +2260,9 @@ struct OutdoorDashboardView: View {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.85))
-                            .frame(width: 40, height: 40)
+                            .mangoxButtonChrome(.mapIcon)
                     }
                     .buttonStyle(MangoxPressStyle())
-                    .background(.ultraThinMaterial, in: Circle())
                     .accessibilityLabel("Clear waypoints")
                 }
 
@@ -2307,21 +2273,16 @@ struct OutdoorDashboardView: View {
                         Image(systemName: "trash")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(AppColor.red)
-                            .frame(width: 40, height: 40)
+                            .mangoxButtonChrome(.mapIcon)
                     }
                     .buttonStyle(MangoxPressStyle())
-                    .background(.ultraThinMaterial, in: Circle())
                     .accessibilityLabel("Discard ride")
 
                     Button {
                         viewModel.presentEndConfirmation()
                     } label: {
                         Text("END")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
-                            .background(AppColor.red)
-                            .clipShape(Circle())
+                            .mangoxButtonChrome(.endIcon)
                     }
                     .buttonStyle(MangoxPressStyle())
                     .accessibilityLabel("End ride")
@@ -2493,7 +2454,7 @@ struct OutdoorDashboardView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .glassEffect(.regular, in: .capsule)
+        .mangoxSurface(.mapOverlay, shape: .capsule)
     }
 
     private var gpsColor: Color {
@@ -2853,7 +2814,7 @@ struct OutdoorDashboardView: View {
             switch chromeStyle {
             case .frostedGlass:
                 rowContent
-                    .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
+                    .mangoxSurface(.mapOverlay, shape: .rounded(18))
                     .overlay(
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .strokeBorder(AppColor.orange.opacity(0.4), lineWidth: 1)
@@ -2906,7 +2867,7 @@ struct OutdoorDashboardView: View {
             switch chromeStyle {
             case .frostedGlass:
                 rowContent
-                    .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
+                    .mangoxSurface(.mapOverlay, shape: .rounded(18))
                     .overlay(
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .strokeBorder(AppColor.yellow.opacity(0.35), lineWidth: 1)
@@ -2942,7 +2903,7 @@ struct OutdoorDashboardView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .glassEffect(.regular, in: .rect(cornerRadius: 14, style: .continuous))
+            .mangoxSurface(.mapOverlay, shape: .rounded(14))
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .strokeBorder(AppColor.yellow.opacity(0.30), lineWidth: 1)
@@ -2971,7 +2932,7 @@ struct OutdoorDashboardView: View {
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 10)
-            .glassEffect(.regular, in: .capsule)
+            .mangoxSurface(.mapOverlay, shape: .capsule)
             .transition(.move(edge: .top).combined(with: .opacity))
         }
     }

@@ -91,10 +91,15 @@ struct CalendarView: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 20)
 
-                calendarQueryScopeFootnote
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
+                if allWorkouts.count >= CalendarWorkoutQuery.maxRows {
+                    calendarQueryScopeFootnote
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                        .padding(.bottom, 12)
+                } else {
+                    Color.clear
+                        .frame(height: 20)
+                }
 
                 if screenMode == .monthGrid {
                     monthCalendarContent
@@ -107,6 +112,15 @@ struct CalendarView: View {
         .onChange(of: screenModeRaw) { _, _ in
             if screenMode == .list {
                 selectedDay = nil
+            } else if selectedDay == nil {
+                selectedDay = Date()
+                currentMonth = Date()
+            }
+        }
+        .onAppear {
+            if screenMode == .monthGrid, selectedDay == nil {
+                selectedDay = Date()
+                currentMonth = Date()
             }
         }
         .onChange(of: allWorkouts, initial: true) { _, workouts in
@@ -149,24 +163,14 @@ struct CalendarView: View {
         workoutsGroupedByDay = byDay.keys.sorted(by: >).map { day in (day, byDay[day]!) }
     }
 
-    /// Surfaces the same bounds as `CalendarWorkoutQuery` so the calendar tradeoffs aren’t hidden.
+    /// Shows a warning only when the query cap is reached.
     private var calendarQueryScopeFootnote: some View {
         VStack(spacing: 6) {
-            Text(
-                "Shows rides from about the last \(CalendarWorkoutQuery.includedHistoryYears) years, up to \(CalendarWorkoutQuery.maxRows.formatted()) entries."
-            )
-            .font(.system(size: 10))
-            .foregroundStyle(.white.opacity(0.3))
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: .infinity)
-
-            if allWorkouts.count >= CalendarWorkoutQuery.maxRows {
-                Text("You’re at that entry cap—some rides in this window may not appear.")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(AppColor.mango.opacity(0.85))
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-            }
+            Text("You’re at that entry cap—some rides in this window may not appear.")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(AppColor.mango.opacity(0.85))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
         }
         .accessibilityElement(children: .combine)
     }
@@ -259,6 +263,7 @@ struct CalendarView: View {
         Group {
             if allWorkouts.isEmpty {
                 emptyRidesPlaceholder
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
@@ -320,7 +325,7 @@ struct CalendarView: View {
                 .foregroundStyle(.white.opacity(0.28))
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 56)
+        .padding(.horizontal, 20)
     }
 
     // MARK: - Header

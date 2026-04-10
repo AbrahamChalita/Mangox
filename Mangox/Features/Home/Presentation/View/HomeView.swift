@@ -65,7 +65,7 @@ struct HomeView: View {
 
             VStack(spacing: 0) {
                 minimalTopBar
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, MangoxSpacing.page)
                     .padding(.top, 12)
                     .padding(.bottom, 8)
 
@@ -82,9 +82,9 @@ struct HomeView: View {
                         }
                         recentRidesSection
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, MangoxSpacing.lg.rawValue)
                     .padding(.top, 8)
-                    .padding(.bottom, 20)
+                    .padding(.bottom, MangoxSpacing.page)
                 }
                 .scrollIndicators(.hidden)
             }
@@ -147,10 +147,7 @@ struct HomeView: View {
         return VStack(alignment: .leading, spacing: 14) {
             // Header with form badge
             HStack(spacing: 10) {
-                Text("TRAINING STATUS")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(textTertiary)
-                    .tracking(1.0)
+                MangoxSectionLabel(title: "Training Status", horizontalPadding: 0)
 
                 Spacer()
 
@@ -441,10 +438,7 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 10) {
             // Header
             HStack {
-                Text("RECENT RIDES")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(textTertiary)
-                    .tracking(1.0)
+                MangoxSectionLabel(title: "Recent Rides", horizontalPadding: 0)
 
                 Spacer()
 

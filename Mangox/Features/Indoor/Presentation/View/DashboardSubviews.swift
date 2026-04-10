@@ -1550,52 +1550,6 @@ struct PhonePowerDisplay: View {
     }
 }
 
-// MARK: - Reduce Transparency (header chrome)
-
-struct IndoorHeaderBarChrome: ViewModifier {
-    let reduceTransparency: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if reduceTransparency {
-            content.background(Color(red: 0.04, green: 0.05, blue: 0.08))
-        } else {
-            content.glassEffect(.regular, in: .rect(cornerRadius: 0))
-        }
-    }
-}
-
-struct IndoorGlassOrOpaqueCircle: ViewModifier {
-    let useOpaque: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if useOpaque {
-            content.background(Circle().fill(Color.white.opacity(0.12)))
-        } else {
-            content.glassEffect(.regular.interactive(), in: .circle)
-        }
-    }
-}
-
-struct IndoorMilestoneToastChrome: ViewModifier {
-    let reduceTransparency: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if reduceTransparency {
-            content
-                .background(Capsule().fill(Color(red: 0.08, green: 0.09, blue: 0.12)))
-                .overlay(
-                    Capsule()
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-                )
-        } else {
-            content.glassEffect(.regular, in: .capsule)
-        }
-    }
-}
-
 #Preview("Free Ride") {
     let ble = BLEManager()
     let wifi = WiFiTrainerService()
