@@ -1,6 +1,5 @@
 // Features/Training/Domain/Entities/TrainingPlan.swift
 import Foundation
-import SwiftData
 
 // MARK: - Suggested Trainer Mode
 
@@ -562,74 +561,6 @@ struct TrainingPlan: Codable, Identifiable, Sendable {
             weeks: newWeeks
         )
     }
-}
-
-// MARK: - Plan Progress (persisted via SwiftData)
-
-@Model
-final class TrainingPlanProgress {
-    @Attribute(.unique) var planID: String
-    var startDate: Date                          // when user started the plan
-    var completedDayIDs: [String] = []           // IDs of completed PlanDays
-    var skippedDayIDs: [String] = []
-    var ftpAtStart: Int = 0
-    var currentFTP: Int = 0
-    var notes: [String: String] = [:]            // dayID → user note
-    /// Optional display title for progress rows (Classicissima uses `CachedPlan` event name when empty).
-    var aiPlanTitle: String = ""
-    /// Scales guided ERG targets (1.0 = plan as written). Updated when plan-linked rides complete.
-    var adaptiveLoadMultiplier: Double = 1.0
-
-    init(planID: String, startDate: Date, ftp: Int, aiPlanTitle: String = "") {
-        self.planID = planID
-        self.startDate = startDate
-        self.ftpAtStart = ftp
-        self.currentFTP = ftp
-        self.aiPlanTitle = aiPlanTitle
-    }
-
-    func isCompleted(_ dayID: String) -> Bool {
-        completedDayIDs.contains(dayID)
-    }
-
-    func isSkipped(_ dayID: String) -> Bool {
-        skippedDayIDs.contains(dayID)
-    }
-
-    func status(for dayID: String) -> PlanDayStatus {
-        if completedDayIDs.contains(dayID) { return .completed }
-        if skippedDayIDs.contains(dayID) { return .skipped }
-        return .upcoming
-    }
-
-    func markCompleted(_ dayID: String) {
-        if !completedDayIDs.contains(dayID) {
-            completedDayIDs.append(dayID)
-        }
-        skippedDayIDs.removeAll { $0 == dayID }
-    }
-
-    func markSkipped(_ dayID: String) {
-        if !skippedDayIDs.contains(dayID) {
-            skippedDayIDs.append(dayID)
-        }
-        completedDayIDs.removeAll { $0 == dayID }
-    }
-
-    func unmark(_ dayID: String) {
-        completedDayIDs.removeAll { $0 == dayID }
-        skippedDayIDs.removeAll { $0 == dayID }
-    }
-
-    /// Returns the calendar date for a given plan day based on the plan start date.
-    func calendarDate(for day: PlanDay) -> Date {
-        let dayOffset = (day.weekNumber - 1) * 7 + (day.dayOfWeek - 1)
-        return Calendar.current.date(byAdding: .day, value: dayOffset, to: startDate) ?? startDate
-    }
-
-    /// Completion stats
-    var completedCount: Int { completedDayIDs.count }
-    var skippedCount: Int { skippedDayIDs.count }
 }
 
 // MARK: - Wedding Weight Loss 2026 Plan Factory
@@ -1542,55 +1473,6 @@ enum WeddingWeightLossPlan {
     }
 }
 
-// MARK: - Plan resolution (built-in template)
-
-enum PlanLibrary {
-    /// Resolves a `TrainingPlan` by ID. Checks the built-in Classicissima plan first,
-    /// then AI-generated plans in SwiftData when a `ModelContext` is provided.
-    static func resolvePlan(planID: String?, modelContext: ModelContext? = nil) -> TrainingPlan? {
-        guard let planID else { return nil }
-        if planID == CachedPlan.shared.id { return CachedPlan.shared }
-        if let ctx = modelContext {
-            let descriptor = FetchDescriptor<AIGeneratedPlan>(
-                predicate: #Predicate { $0.id == planID }
-            )
-            if let aiPlan = try? ctx.fetch(descriptor).first {
-                return aiPlan.plan
-            }
-        }
-        return nil
-    }
-
-    static func resolveDay(planID: String?, dayID: String?, modelContext: ModelContext? = nil) -> PlanDay? {
-        guard let dayID, let plan = resolvePlan(planID: planID, modelContext: modelContext) else { return nil }
-        return plan.day(id: dayID)
-    }
-
-    /// Next incomplete workout or FTP test day, preferring the most recently started plan.
-    /// Chooses by **mapped calendar date** so a missed day in week 1 does not block “next” once the user is in a later week.
-    static func nextScheduledWorkout(
-        allProgress: [TrainingPlanProgress],
-        modelContext: ModelContext
-    ) -> (planID: String, plan: TrainingPlan, day: PlanDay, progress: TrainingPlanProgress)? {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let sorted = allProgress.sorted { $0.startDate > $1.startDate }
-        for p in sorted {
-            guard let plan = resolvePlan(planID: p.planID, modelContext: modelContext) else { continue }
-            let candidates = plan.allDays.filter { d in
-                !p.isCompleted(d.id) && !p.isSkipped(d.id)
-                    && (d.dayType == .workout || d.dayType == .ftpTest)
-            }
-            let futureOrToday = candidates.filter {
-                calendar.startOfDay(for: p.calendarDate(for: $0)) >= today
-            }
-            if let day = futureOrToday.min(by: { p.calendarDate(for: $0) < p.calendarDate(for: $1) }) {
-                return (p.planID, plan, day, p)
-            }
-            if let day = candidates.min(by: { p.calendarDate(for: $0) < p.calendarDate(for: $1) }) {
-                return (p.planID, plan, day, p)
-            }
-        }
-        return nil
-    }
-}
+// NOTE: PlanLibrary has been moved to the Data layer
+// (Training/Data/DataSources/PlanLibrary.swift) to preserve Domain purity —
+// it depends on SwiftData ModelContext / FetchDescriptor.

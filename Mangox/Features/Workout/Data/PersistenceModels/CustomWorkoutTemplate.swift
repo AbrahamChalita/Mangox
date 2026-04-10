@@ -1,4 +1,4 @@
-// Features/Workout/Domain/Entities/CustomWorkoutTemplate.swift
+// Features/Workout/Data/PersistenceModels/CustomWorkoutTemplate.swift
 import Foundation
 import SwiftData
 

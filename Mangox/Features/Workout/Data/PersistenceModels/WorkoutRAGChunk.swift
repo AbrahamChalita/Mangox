@@ -1,4 +1,4 @@
-// Features/Workout/Domain/Entities/WorkoutRAGChunk.swift
+// Features/Workout/Data/PersistenceModels/WorkoutRAGChunk.swift
 import Foundation
 import SwiftData
 

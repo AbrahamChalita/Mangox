@@ -1,6 +1,5 @@
 // Features/Social/Domain/Entities/InstagramStoryCardOptions.swift
 import Foundation
-import SwiftUI
 
 /// User-tunable layout and export options for the ride summary Instagram Story card.
 struct InstagramStoryCardOptions: Equatable, Codable, Sendable {
@@ -17,10 +16,14 @@ struct InstagramStoryCardOptions: Equatable, Codable, Sendable {
             }
         }
 
-        var swiftUIColor: Color {
+        /// Semantic key that the Presentation layer maps to a `Color`.
+        /// No SwiftUI dependency in Domain — the actual `Color` is resolved
+        /// via the ``InstagramStoryCardOptions/Accent/color`` extension in
+        /// `Social/Presentation/View/InstagramStoryAccent+Color.swift`.
+        var colorKey: String {
             switch self {
-            case .dominantZone: return AppColor.orange
-            case .brandMango: return AppColor.mango
+            case .dominantZone: return "orange"
+            case .brandMango: return "mango"
             }
         }
     }

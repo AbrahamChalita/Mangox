@@ -14,13 +14,7 @@ private let stravaLogger = Logger(subsystem: "com.abchalita.Mangox", category: "
 @Observable
 @MainActor
 final class StravaService: StravaServiceProtocol {
-    struct UploadResult {
-        let uploadID: Int
-        let activityID: Int?
-        let status: String
-        /// Strava said the file matched an existing activity; we parsed its id from the error text.
-        let isDuplicateRecovery: Bool
-    }
+    typealias UploadResult = StravaUploadResult
 
     /// Values for Strava’s `sport_type` upload field (case-sensitive). See upload API docs.
     enum SportType {
@@ -34,10 +28,7 @@ final class StravaService: StravaServiceProtocol {
     }
 
     /// A bike from the athlete profile (`gear_id` on activities). See `GET /athlete`.
-    struct AthleteBike: Identifiable, Hashable, Sendable {
-        let id: String
-        let name: String
-    }
+    typealias AthleteBike = StravaAthleteBike
 
     private struct Session: Codable {
         var accessToken: String
@@ -289,7 +280,8 @@ final class StravaService: StravaServiceProtocol {
         try await Task.sleep(nanoseconds: 1_200_000_000)
 
         do {
-            return try await postActivityPhotoOnce(activityID: activityID, jpegData: jpegData)
+            try await uploadActivityPhoto(activityID: activityID, jpegData: jpegData)
+            return PhotoUploadResult(activityID: activityID, success: true)
         } catch StravaError.photoUploadNotSupportedByAPI {
             throw StravaError.photoUploadNotSupportedByAPI
         } catch StravaError.photoUploadFailed(let message) {
@@ -308,6 +300,30 @@ final class StravaService: StravaServiceProtocol {
         #else
         throw StravaError.photoUploadFailed("Photo upload requires iOS/iPadOS.")
         #endif
+    }
+
+    func uploadActivityPhoto(activityID: Int, jpegData: Data) async throws {
+        guard isConfigured else { throw StravaError.notConfigured }
+
+        try await Task.sleep(nanoseconds: 1_200_000_000)
+
+        do {
+            _ = try await postActivityPhotoOnce(activityID: activityID, jpegData: jpegData)
+        } catch StravaError.photoUploadNotSupportedByAPI {
+            throw StravaError.photoUploadNotSupportedByAPI
+        } catch StravaError.photoUploadFailed(let message) {
+            let looksTransient = message.localizedCaseInsensitiveContains("500")
+                || message.localizedCaseInsensitiveContains("502")
+                || message.localizedCaseInsensitiveContains("503")
+                || message.localizedCaseInsensitiveContains("429")
+            if looksTransient {
+                stravaLogger.warning("Strava photo upload retry after transient error")
+                try await Task.sleep(nanoseconds: 2_000_000_000)
+                _ = try await postActivityPhotoOnce(activityID: activityID, jpegData: jpegData)
+                return
+            }
+            throw StravaError.photoUploadFailed(message)
+        }
     }
 
     #if canImport(UIKit)

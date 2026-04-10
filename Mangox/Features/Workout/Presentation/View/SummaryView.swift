@@ -19,21 +19,6 @@ private enum SummaryRiderNaming {
     }
 }
 
-private struct SummaryDataSignature: Equatable {
-    let workoutStatus: String
-    let duration: TimeInterval
-    let distance: Double
-    let avgPower: Double
-    let normalizedPower: Double
-    let tss: Double
-    let elevationGain: Double
-    let savedRouteName: String?
-    let sampleCount: Int
-    let lapCount: Int
-    let lastSampleElapsed: Int
-    let lastLapNumber: Int
-}
-
 // MARK: - Wide Layout Environment Key
 
 private struct IsWideSummaryKey: EnvironmentKey {
@@ -51,31 +36,13 @@ extension EnvironmentValues {
 
 struct SummaryView: View {
     let workoutID: UUID
-    @Environment(RouteManager.self) private var routeManager
-    @Environment(HealthKitManager.self) private var healthKitManager
-    @Environment(StravaService.self) private var stravaService
-    @Environment(PersonalRecords.self) private var personalRecords
+    @State private var viewModel: WorkoutViewModel
     @Binding var navigationPath: NavigationPath
 
     @Environment(\.openURL) private var openURL
     @Environment(\.modelContext) private var modelContext
     @Query private var workouts: [Workout]
 
-    @State private var shareItems: [Any] = []
-    @State private var lastExportedFileURL: URL?
-    @State private var showShareSheet = false
-    @State private var showDeleteConfirmation = false
-    @State private var showExportModal = false
-    @State private var actionError: String?
-    @State private var selectedExportFormat: ExportFormat = .tcx
-    @State private var stravaStatus: String?
-    @State private var lastUploadedActivityID: Int?
-    @State private var stravaTitleInput: String = ""
-    @State private var stravaDescriptionInput: String = ""
-    @State private var stravaDraftWorkoutID: UUID?
-    @State private var uploadAsVirtualRide: Bool = true
-    @State private var uploadPhotoAfterUpload: Bool = true
-    @State private var showDescriptionPreview: Bool = false
     /// When false, generated Strava description omits the duration line (Strava still shows elapsed time on the activity).
     @AppStorage("stravaUploadDescriptionIncludeDuration") private
         var stravaIncludeDurationInDescription = true
@@ -84,26 +51,9 @@ struct SummaryView: View {
     @AppStorage("stravaUploadDescriptionIncludeCalories") private
         var stravaIncludeCaloriesInDescription = true
     @AppStorage("stravaUploadPreferredGearID") private var stravaPreferredGearID = ""
-    @State private var commuteStravaUpload = false
     @State private var heroAppeared = false
-    @State private var showStravaCard = false
-    /// When Strava rejects API photo upload, user can share the rendered summary image from here.
-    @State private var showStravaPhotoFallbackDialog = false
-    @State private var stravaPhotoFallbackImage: Any?
-    @State private var showInstagramStoryStudio = false
-    @State private var aiStravaDescriptionTask: Task<Void, Never>?
-    /// Set after saving a free ride as a `CustomWorkoutTemplate` in this session (enables repeat).
-    @State private var customRepeatTemplateID: UUID?
     @Environment(\.horizontalSizeClass) private var hSizeClass
     private var isWide: Bool { hSizeClass != .compact }
-
-    // Cached computed data (populated once in .task)
-    @State private var cachedSortedSamples: [WorkoutSampleData]?
-    @State private var cachedSortedLaps: [LapSplit]?
-    @State private var cachedZoneBuckets: [ZoneBucket]?
-    @State private var cachedHRZoneBuckets: [HRZoneBucket]?
-    @State private var dataReady = false
-    @State private var preparedSignature: SummaryDataSignature?
 
     private let bg = AppColor.bg
     /// Toolbar size for third-party brand marks (Instagram, Strava) — matches typical bar button metrics.
@@ -111,10 +61,12 @@ struct SummaryView: View {
 
     init(
         workoutID: UUID,
-        navigationPath: Binding<NavigationPath>
+        navigationPath: Binding<NavigationPath>,
+        viewModel: WorkoutViewModel
     ) {
         self.workoutID = workoutID
         self._navigationPath = navigationPath
+        self._viewModel = State(initialValue: viewModel)
         let id = workoutID
         self._workouts = Query(
             filter: #Predicate<Workout> { workout in
@@ -132,11 +84,11 @@ struct SummaryView: View {
     }
 
     private var sortedSamples: [WorkoutSampleData] {
-        cachedSortedSamples ?? []
+        viewModel.sortedSamples
     }
 
     private var sortedLaps: [LapSplit] {
-        cachedSortedLaps ?? []
+        viewModel.sortedLaps
     }
 
     private var dominantZone: PowerZone {
@@ -162,12 +114,21 @@ struct SummaryView: View {
         )
     }
 
+    private func binding<Value>(_ keyPath: ReferenceWritableKeyPath<WorkoutViewModel, Value>)
+        -> Binding<Value>
+    {
+        Binding(
+            get: { viewModel[keyPath: keyPath] },
+            set: { viewModel[keyPath: keyPath] = $0 }
+        )
+    }
+
     @ViewBuilder
     private var stravaButtonLabel: some View {
-        if stravaService.isBusy {
+        if viewModel.isStravaBusy {
             ProgressView()
                 .tint(.white)
-        } else if lastUploadedActivityID != nil {
+        } else if viewModel.lastUploadedActivityID != nil {
             Image(systemName: "checkmark.circle.fill")
         } else {
             Image("BrandStrava")
@@ -180,9 +141,9 @@ struct SummaryView: View {
     }
 
     private var stravaButtonTint: Color {
-        if lastUploadedActivityID != nil {
+        if viewModel.lastUploadedActivityID != nil {
             return AppColor.success
-        } else if stravaService.isConnected {
+        } else if viewModel.isStravaConnected {
             return .white
         } else {
             return AppColor.orange
@@ -191,125 +152,47 @@ struct SummaryView: View {
 
     private var stravaToolbarButton: some View {
         Button {
-            if lastUploadedActivityID != nil {
-                openStravaActivity()
+            if viewModel.lastUploadedActivityID != nil {
+                viewModel.requestOpenUploadedStravaActivity()
             } else {
-                showStravaCard = true
+                viewModel.presentStravaSheet()
             }
         } label: {
             stravaButtonLabel
         }
-        .disabled(stravaService.isBusy)
+        .disabled(viewModel.isStravaBusy)
         .tint(stravaButtonTint)
         .accessibilityLabel(stravaToolbarAccessibilityLabel)
     }
 
     private var stravaToolbarAccessibilityLabel: String {
-        if stravaService.isBusy {
+        if viewModel.isStravaBusy {
             return "Uploading to Strava"
         }
-        if lastUploadedActivityID != nil {
+        if viewModel.lastUploadedActivityID != nil {
             return "Open in Strava"
         }
         return "Upload to Strava"
     }
 
-    private func invalidatePreparedData(resetHero: Bool = false) {
-        dataReady = false
-        preparedSignature = nil
-        stravaDraftWorkoutID = nil
+    private func resetPreparedSummary(resetHero: Bool = false) {
+        viewModel.invalidatePreparedSummaryData()
+        viewModel.clearStravaDraft()
         if resetHero {
             heroAppeared = false
         }
-        cachedSortedSamples = nil
-        cachedSortedLaps = nil
-        cachedZoneBuckets = nil
-        cachedHRZoneBuckets = nil
     }
 
-    private func prepareData(force: Bool = false) async {
-        guard let workout else {
-            invalidatePreparedData(resetHero: true)
+    private func prepareSummaryData(force: Bool = false) async {
+        guard workout != nil else {
+            resetPreparedSummary(resetHero: true)
             return
         }
-        guard let signature = workoutDataSignature else { return }
-        guard force || preparedSignature != signature else { return }
-
-        // Keep sorting laps on main actor, as LapSplit is a @Model
-        let sortedLaps = workout.laps.sorted { $0.lapNumber < $1.lapNumber }
-        cachedSortedLaps = sortedLaps
-
-        let modelContainer = modelContext.container
-        let workoutID = workout.persistentModelID
-        let ftp = PowerZone.ftp
-        let hrMax = HeartRateZone.maxHR
-        let hrResting = HeartRateZone.restingHR
-        let hrUsesKarvonen = HeartRateZone.hasRestingHR
-
-        let (sortedSamplesData, pc, hc, hrCount) = await Task.detached(priority: .userInitiated) {
-            let bgContext = ModelContext(modelContainer)
-            guard let bgWorkout = bgContext.model(for: workoutID) as? Workout else {
-                return ([WorkoutSampleData](), [Int: Int](), [Int: Int](), 0)
-            }
-
-            // sort samples and convert to Sendable WorkoutSampleData
-            let sortedS = bgWorkout.samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds }
-            let sData = sortedS.map { s in
-                WorkoutSampleData(
-                    timestamp: s.timestamp,
-                    elapsedSeconds: s.elapsedSeconds,
-                    power: s.power,
-                    cadence: s.cadence,
-                    speed: s.speed,
-                    heartRate: s.heartRate
-                )
-            }
-
-            // compute zones
-            var pc = [Int: Int]()
-            var hc = [Int: Int]()
-            var hrCount = 0
-
-            for s in sData {
-                pc[SummaryZoneAggregation.powerZoneId(forWatts: s.power, ftp: ftp), default: 0] += 1
-                if s.heartRate > 0 {
-                    hc[
-                        SummaryZoneAggregation.heartRateZoneId(
-                            forBpm: s.heartRate,
-                            maxHR: hrMax,
-                            restingHR: hrResting,
-                            usesKarvonen: hrUsesKarvonen
-                        ), default: 0
-                    ] += 1
-                    hrCount += 1
-                }
-            }
-
-            return (sData, pc, hc, hrCount)
-        }.value
-
-        // Discard if the workout changed while we were computing
-        guard workoutDataSignature == signature else { return }
-
-        let total = max(sortedSamplesData.count, 1)
-        let computedPowerBuckets = PowerZone.zones.map { zone in
-            let count = pc[zone.id, default: 0]
-            return ZoneBucket(zone: zone, seconds: count, percent: Double(count) / Double(total))
-        }
-
-        let totalHR = max(hrCount, 1)
-        let computedHRBuckets = HeartRateZone.zones.map { zone in
-            let count = hc[zone.id, default: 0]
-            return HRZoneBucket(
-                zone: zone, seconds: count, percent: Double(count) / Double(totalHR)
-            )
-        }
-
-        cachedSortedSamples = sortedSamplesData
-        cachedZoneBuckets = computedPowerBuckets
-        cachedHRZoneBuckets = computedHRBuckets
-        preparedSignature = signature
-        dataReady = true
+        await viewModel.prepareSummaryData(
+            workout: workout,
+            signature: workoutDataSignature,
+            force: force
+        )
     }
 
     // MARK: - Body
@@ -319,27 +202,29 @@ struct SummaryView: View {
             bg.ignoresSafeArea()
 
             if let workout {
-                if dataReady {
+                if viewModel.isSummaryDataReady {
                     SummaryContentView(
                         workout: workout,
-                        linkedPlanDay: PlanLibrary.resolveDay(
+                        linkedPlanDay: viewModel.resolvePlanDay(
                             planID: workout.planID,
-                            dayID: workout.planDayID,
-                            modelContext: modelContext
+                            dayID: workout.planDayID
                         ),
                         sortedLaps: sortedLaps,
                         zoneBuckets: zoneBuckets,
                         hrZoneBuckets: hrZoneBuckets,
                         dominantZone: dominantZone,
                         heroAppeared: heroAppeared,
-                        showExportModal: $showExportModal,
-                        selectedExportFormat: $selectedExportFormat,
-                        lastExportedFileURL: lastExportedFileURL,
+                        showExportModal: binding(\.showExportModal),
+                        selectedExportFormat: binding(\.selectedExportFormat),
+                        lastExportedFileURL: viewModel.lastExportedFileURL,
+                        stravaAthleteDisplayName: viewModel.stravaAthleteDisplayName,
+                        syncWorkoutsToAppleHealth: viewModel.syncWorkoutsToAppleHealth,
+                        workoutSyncToHealthLastError: viewModel.workoutSyncToHealthLastError,
                         onDone: popFromSummary,
-                        onDelete: deleteWorkout,
-                        onOpenStravaUploader: openStravaUploader,
+                        onDelete: promptDeleteWorkout,
+                        onOpenStravaUploader: viewModel.requestOpenStravaUploader,
                         onRepeatStructuredWorkout: repeatStructuredWorkout,
-                        customRepeatTemplateID: customRepeatTemplateID,
+                        customRepeatTemplateID: viewModel.customRepeatTemplateID,
                         onSaveAsCustomWorkout: saveWorkoutAsCustomTemplate,
                         onRepeatSavedCustomWorkout: repeatSavedCustomWorkout
                     )
@@ -354,7 +239,7 @@ struct SummaryView: View {
         .navigationTitle("Ride Summary")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if stravaService.isConfigured {
+            if viewModel.isStravaConfigured {
                 ToolbarItem(placement: .topBarTrailing) {
                     stravaToolbarButton
                 }
@@ -362,8 +247,8 @@ struct SummaryView: View {
 
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    guard workout != nil, dataReady else { return }
-                    showInstagramStoryStudio = true
+                    guard workout != nil, viewModel.isSummaryDataReady else { return }
+                    viewModel.presentInstagramStoryStudio()
                 } label: {
                     Image("BrandInstagram")
                         .renderingMode(.template)
@@ -372,7 +257,7 @@ struct SummaryView: View {
                         .frame(width: toolbarBrandIconSize, height: toolbarBrandIconSize)
                         .accessibilityHidden(true)
                 }
-                .disabled(!dataReady)
+                .disabled(!viewModel.isSummaryDataReady)
                 .tint(
                     Color(
                         red: 0.88,
@@ -385,45 +270,45 @@ struct SummaryView: View {
 
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    showExportModal = true
+                    viewModel.showExportModal = true
                 } label: {
                     Image(systemName: "square.and.arrow.up")
                 }
             }
         }
-        .sheet(isPresented: $showInstagramStoryStudio) {
-            if let workout, dataReady {
+        .sheet(isPresented: binding(\.showInstagramStoryStudio)) {
+            if let workout, viewModel.isSummaryDataReady {
                 InstagramStoryStudioView(
                     workout: workout,
-                    routeName: workout.savedRouteName ?? routeManager.routeName,
+                    routeName: workout.savedRouteName ?? viewModel.routeName,
                     totalElevationGain: workout.elevationGain > 0
-                        ? workout.elevationGain : routeManager.totalElevationGain,
+                        ? workout.elevationGain : viewModel.totalElevationGain,
                     personalRecordNames: stravaPersonalRecordNames(for: workout),
-                    onDismiss: { showInstagramStoryStudio = false },
+                    onDismiss: { viewModel.dismissInstagramStoryStudio() },
                     onShareError: { message in
-                        showInstagramStoryStudio = false
-                        actionError = message
-                    }
+                        viewModel.dismissInstagramStoryStudio()
+                        viewModel.presentError(message)
+                    },
+                    viewModel: SocialViewModel()
                 )
             }
         }
-        .sheet(isPresented: $showShareSheet) {
-            ShareSheet(activityItems: shareItems)
+        .sheet(isPresented: binding(\.showShareSheet)) {
+            ShareSheet(activityItems: viewModel.shareItems)
         }
         .confirmationDialog(
             "Summary image",
-            isPresented: $showStravaPhotoFallbackDialog,
+            isPresented: binding(\.showStravaPhotoFallbackDialog),
             titleVisibility: .visible
         ) {
             Button("Share image") {
-                if let img = stravaPhotoFallbackImage {
-                    shareItems = [img]
-                    showShareSheet = true
+                if let img = viewModel.stravaPhotoFallbackImage {
+                    viewModel.presentShareItems([img])
                 }
-                stravaPhotoFallbackImage = nil
+                viewModel.clearStravaPhotoFallback()
             }
             Button("Not now", role: .cancel) {
-                stravaPhotoFallbackImage = nil
+                viewModel.clearStravaPhotoFallback()
             }
         } message: {
             Text(
@@ -431,17 +316,17 @@ struct SummaryView: View {
                     + "Share this image to save it to Photos or add it from the Strava app."
             )
         }
-        .sheet(isPresented: $showExportModal) {
+        .sheet(isPresented: binding(\.showExportModal)) {
             if let workout {
                 exportSheet(for: workout)
             }
         }
-        .sheet(isPresented: $showStravaCard) {
+        .sheet(isPresented: binding(\.showStravaCard)) {
             if let workout {
                 stravaSheet(for: workout)
             }
         }
-        .alert("Delete Ride?", isPresented: $showDeleteConfirmation) {
+        .alert("Delete Ride?", isPresented: binding(\.showDeleteConfirmation)) {
             Button("Delete", role: .destructive) { deleteWorkout() }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -452,34 +337,40 @@ struct SummaryView: View {
         .alert(
             "Error",
             isPresented: Binding(
-                get: { actionError != nil },
-                set: { if !$0 { actionError = nil } }
+                get: { viewModel.actionError != nil },
+                set: { if !$0 { viewModel.clearError() } }
             )
         ) {
-            Button("OK") { actionError = nil }
+            Button("OK") { viewModel.clearError() }
         } message: {
-            Text(actionError ?? "")
+            Text(viewModel.actionError ?? "")
         }
         .task {
-            await prepareData()
+            await prepareSummaryData()
             withAnimation(.easeOut(duration: 0.6).delay(0.1)) {
                 heroAppeared = true
             }
         }
         .onChange(of: workoutDataSignature) { _, newSignature in
             guard newSignature != nil else {
-                invalidatePreparedData(resetHero: true)
+                resetPreparedSummary(resetHero: true)
                 return
             }
-            Task { await prepareData(force: true) }
+            Task { await prepareSummaryData(force: true) }
         }
         .onChange(of: workouts) { _, newWorkouts in
             // After deletion the filtered @Query is empty — drop cached graphs so we never
             // flash stale content if the view is reused or navigation is odd.
             if newWorkouts.isEmpty {
-                invalidatePreparedData(resetHero: true)
+                resetPreparedSummary(resetHero: true)
             }
         }
+        .onChange(of: viewModel.pendingExternalNavigation) { _, request in
+            guard let request else { return }
+            openURL(request.url)
+            viewModel.clearPendingExternalNavigation()
+        }
+        .environment(viewModel)
     }
 
     // MARK: - Loading / Not Found
@@ -515,12 +406,11 @@ struct SummaryView: View {
     // MARK: - Zone Bucket Calculations
 
     private var zoneBuckets: [ZoneBucket] {
-        cachedZoneBuckets ?? PowerZone.zones.map { ZoneBucket(zone: $0, seconds: 0, percent: 0) }
+        viewModel.zoneBuckets
     }
 
     private var hrZoneBuckets: [HRZoneBucket] {
-        cachedHRZoneBuckets
-            ?? HeartRateZone.zones.map { HRZoneBucket(zone: $0, seconds: 0, percent: 0) }
+        viewModel.hrZoneBuckets
     }
 
     // MARK: - Export Sheet
@@ -532,13 +422,14 @@ struct SummaryView: View {
                 ScrollView {
                     ExportSheetContent(
                         workout: workout,
-                        selectedExportFormat: $selectedExportFormat,
-                        lastExportedFileURL: lastExportedFileURL,
+                        selectedExportFormat: binding(\.selectedExportFormat),
+                        hasRoute: viewModel.hasRoute,
+                        lastExportedFileURL: viewModel.lastExportedFileURL,
                         onExport: { fmt in
                             exportWorkout(workout: workout, format: fmt)
-                            showExportModal = false
+                            viewModel.showExportModal = false
                         },
-                        onOpenStravaUploader: { openStravaUploader() }
+                        onOpenStravaUploader: { viewModel.requestOpenStravaUploader() }
                     )
                     .padding(20)
                 }
@@ -549,7 +440,7 @@ struct SummaryView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { showExportModal = false }
+                    Button("Close") { viewModel.showExportModal = false }
                         .foregroundStyle(.white.opacity(0.6))
                 }
             }
@@ -567,23 +458,23 @@ struct SummaryView: View {
                 ScrollView {
                     StravaSheetContentView(
                         workout: workout,
-                        stravaTitleInput: $stravaTitleInput,
-                        stravaDescriptionInput: $stravaDescriptionInput,
+                        stravaTitleInput: binding(\.stravaTitleInput),
+                        stravaDescriptionInput: binding(\.stravaDescriptionInput),
                         includeDurationInDescription: $stravaIncludeDurationInDescription,
                         includeDistanceInDescription: $stravaIncludeDistanceInDescription,
                         includeCaloriesInDescription: $stravaIncludeCaloriesInDescription,
-                        commuteStravaUpload: $commuteStravaUpload,
+                        commuteStravaUpload: binding(\.commuteStravaUpload),
                         preferredGearID: $stravaPreferredGearID,
-                        uploadAsVirtualRide: $uploadAsVirtualRide,
-                        uploadPhotoAfterUpload: $uploadPhotoAfterUpload,
-                        showDescriptionPreview: $showDescriptionPreview,
-                        stravaStatus: stravaStatus,
-                        lastUploadedActivityID: lastUploadedActivityID,
+                        uploadAsVirtualRide: binding(\.uploadAsVirtualRide),
+                        uploadPhotoAfterUpload: binding(\.uploadPhotoAfterUpload),
+                        showDescriptionPreview: binding(\.showDescriptionPreview),
+                        stravaStatus: viewModel.stravaStatus,
+                        lastUploadedActivityID: viewModel.lastUploadedActivityID,
                         onResetDescriptionTemplate: {
                             applyStravaDescriptionTemplate(for: workout)
                         },
                         onUpload: { uploadToStrava(workout: workout) },
-                        onOpenActivity: { openStravaActivity() }
+                        onOpenActivity: { viewModel.requestOpenUploadedStravaActivity() }
                     )
                     .padding(20)
                 }
@@ -594,7 +485,7 @@ struct SummaryView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { showStravaCard = false }
+                    Button("Close") { viewModel.dismissStravaSheet() }
                         .foregroundStyle(.white.opacity(0.6))
                 }
             }
@@ -603,15 +494,15 @@ struct SummaryView: View {
         .presentationDragIndicator(.visible)
         .onAppear { ensureStravaDraft(for: workout) }
         .onChange(of: stravaIncludeDurationInDescription) { _, _ in
-            guard stravaDraftWorkoutID == workout.id else { return }
+            guard viewModel.stravaDraftWorkoutID == workout.id else { return }
             applyStravaDescriptionTemplate(for: workout)
         }
         .onChange(of: stravaIncludeDistanceInDescription) { _, _ in
-            guard stravaDraftWorkoutID == workout.id else { return }
+            guard viewModel.stravaDraftWorkoutID == workout.id else { return }
             applyStravaDescriptionTemplate(for: workout)
         }
         .onChange(of: stravaIncludeCaloriesInDescription) { _, _ in
-            guard stravaDraftWorkoutID == workout.id else { return }
+            guard viewModel.stravaDraftWorkoutID == workout.id else { return }
             applyStravaDescriptionTemplate(for: workout)
         }
     }
@@ -619,92 +510,47 @@ struct SummaryView: View {
     // MARK: - Actions
 
     private func exportWorkout(workout: Workout, format: ExportFormat) {
-        do {
-            let fileURL = try WorkoutExportService.export(
-                workout: workout,
-                format: format,
-                routeManager: routeManager
-            )
-            lastExportedFileURL = fileURL
-            shareItems = [fileURL]
-            showShareSheet = true
-        } catch {
-            actionError = error.localizedDescription
-        }
+        viewModel.exportWorkout(workout: workout, format: format)
     }
 
-    private func openStravaUploader() {
-        guard let url = URL(string: "https://www.strava.com/upload/select") else { return }
-        openURL(url)
-    }
-
-    private func openStravaActivity() {
-        guard let activityID = lastUploadedActivityID,
-            let url = URL(string: "https://www.strava.com/activities/\(activityID)")
-        else { return }
-        openURL(url)
-    }
-
-    private func stravaDescriptionOptions() -> StravaPostBuilder.DescriptionOptions {
-        StravaPostBuilder.DescriptionOptions(
+    private func stravaDescriptionOptions() -> StravaDescriptionTemplateOptions {
+        StravaDescriptionTemplateOptions(
             includeDuration: stravaIncludeDurationInDescription,
             includeDistance: stravaIncludeDistanceInDescription,
             includeCalories: stravaIncludeCaloriesInDescription
         )
     }
 
-    private func stravaPersonalRecordNames(for workout: Workout) -> [String] {
-        let samples = sortedSamples
-        guard !samples.isEmpty else { return [] }
-        guard let mmp = PersonalRecords.computeMMP(for: samples, workoutID: workout.id) else {
-            return []
-        }
-        return personalRecords.newPRs(for: mmp).map { "\($0.duration.label) @ \($0.watts)W" }
-    }
-
-    private func applyStravaDescriptionTemplate(for workout: Workout) {
-        let zoneBuckets = self.zoneBuckets.map { (zone: $0.zone, percent: $0.percent) }
-        stravaDescriptionInput = StravaPostBuilder.buildDescription(
-            workout: workout,
-            routeName: workout.savedRouteName ?? routeManager.routeName,
+    private func stravaTemplateInput(for workout: Workout) -> StravaDescriptionTemplateInput {
+        StravaDescriptionTemplateInput(
+            routeName: workout.savedRouteName ?? viewModel.routeName,
             totalElevationGain: workout.elevationGain > 0
-                ? workout.elevationGain : routeManager.totalElevationGain,
+                ? workout.elevationGain : viewModel.totalElevationGain,
             dominantPowerZone: PowerZone.zone(for: Int(workout.avgPower.rounded())),
-            zoneBuckets: zoneBuckets,
+            zoneBuckets: zoneBuckets.map { (zone: $0.zone, percent: $0.percent) },
             personalRecordNames: stravaPersonalRecordNames(for: workout),
             options: stravaDescriptionOptions()
         )
     }
 
-    private func ensureStravaDraft(for workout: Workout) {
-        guard stravaDraftWorkoutID != workout.id else { return }
-        let prNames = stravaPersonalRecordNames(for: workout)
-        stravaTitleInput =
-            workout.smartTitle
-            ?? StravaPostBuilder.buildTitle(
-                workout: workout,
-                routeName: workout.savedRouteName ?? routeManager.routeName,
-                dominantPowerZone: PowerZone.zone(for: Int(workout.avgPower.rounded())),
-                personalRecordNames: prNames
-            )
-        applyStravaDescriptionTemplate(for: workout)
-        stravaDraftWorkoutID = workout.id
-        scheduleAIStravaDescription(for: workout)
+    private func stravaPersonalRecordNames(for workout: Workout) -> [String] {
+        let samples = sortedSamples
+        guard !samples.isEmpty else { return [] }
+        guard let mmp = viewModel.computeMMP(for: samples, workoutID: workout.id) else {
+            return []
+        }
+        return viewModel.newPRs(for: mmp).map { "\($0.duration.label) @ \($0.watts)W" }
     }
 
-    private func scheduleAIStravaDescription(for workout: Workout) {
-        aiStravaDescriptionTask?.cancel()
-        let zoneLine = zoneBuckets.map { "Z\($0.zone.id) \(Int(($0.percent * 100).rounded()))%" }.joined(separator: ", ")
-        let ftpWatts = PowerZone.ftp
-        let capturedWorkoutID = workout.id
-        aiStravaDescriptionTask = Task { @MainActor in
-            let ai = await WorkoutSummaryOnDeviceInsight.generateStravaDescription(
-                workout: workout, powerZoneLine: zoneLine, ftpWatts: ftpWatts)
-            guard !Task.isCancelled, stravaDraftWorkoutID == capturedWorkoutID, let ai else { return }
-            // Only overwrite if the user hasn't manually edited the description yet
-            // (compare against the template output to detect edits)
-            stravaDescriptionInput = ai
-        }
+    private func applyStravaDescriptionTemplate(for workout: Workout) {
+        viewModel.applyStravaDescriptionTemplate(
+            for: workout,
+            template: stravaTemplateInput(for: workout)
+        )
+    }
+
+    private func ensureStravaDraft(for workout: Workout) {
+        viewModel.ensureStravaDraft(for: workout, template: stravaTemplateInput(for: workout))
     }
 
     /// Uploads the summary card JPEG when **Attach summary card** is on. Used after a fresh Strava upload
@@ -714,13 +560,13 @@ struct SummaryView: View {
         workout: Workout,
         duplicateRecovery: Bool
     ) async {
-        guard uploadPhotoAfterUpload else { return }
+        guard viewModel.uploadPhotoAfterUpload else { return }
 
         let dominantZone = PowerZone.zone(for: Int(workout.avgPower.rounded()))
         let buckets = zoneBuckets.map { (zone: $0.zone, percent: $0.percent) }
         let samples = sortedSamples
-        let mmp = PersonalRecords.computeMMP(for: samples, workoutID: workout.id)
-        let prFlags: [NewPRFlag] = mmp.map { personalRecords.newPRs(for: $0) } ?? []
+        let mmp = viewModel.computeMMP(for: samples, workoutID: workout.id)
+        let prFlags: [NewPRFlag] = mmp.map { viewModel.newPRs(for: $0) } ?? []
 
         guard
             let image = StravaPostBuilder.renderSummaryCard(
@@ -729,9 +575,9 @@ struct SummaryView: View {
                 sortedSamples: samples,
                 mmp: mmp,
                 newPRFlags: prFlags,
-                routeName: workout.savedRouteName ?? routeManager.routeName,
+                routeName: workout.savedRouteName ?? viewModel.routeName,
                 totalElevationGain: workout.elevationGain > 0
-                    ? workout.elevationGain : routeManager.totalElevationGain,
+                    ? workout.elevationGain : viewModel.totalElevationGain,
                 zoneBuckets: buckets
             )
         else {
@@ -739,251 +585,94 @@ struct SummaryView: View {
             return
         }
 
-        do {
-            _ = try await stravaService.uploadActivityPhoto(activityID: activityID, image: image)
-            stravaStatus =
-                duplicateRecovery
-                ? "Ride was already on Strava — summary card added."
-                : "Uploaded to Strava with summary card! 🎉"
-        } catch {
-            if let stravaErr = error as? StravaService.StravaError,
-                case .photoUploadNotSupportedByAPI = stravaErr
-            {
-                stravaStatus =
-                    duplicateRecovery
-                    ? "Updated on Strava — API won’t attach photos automatically."
-                    : "Uploaded to Strava — API won’t attach photos automatically."
-                stravaPhotoFallbackImage = image
-                showStravaPhotoFallbackDialog = true
-                return
-            }
-            summaryLogger.warning("Photo upload failed (non-fatal): \(error.localizedDescription)")
-            stravaStatus =
-                duplicateRecovery
-                ? "Details updated (photo failed)"
-                : "Uploaded to Strava! 🎉 (photo failed)"
+        guard let jpegData = image.jpegData(compressionQuality: 0.88) else {
+            summaryLogger.warning("Summary card JPEG encoding failed; Strava photo skipped.")
+            return
+        }
+
+        switch await viewModel.uploadStravaSummaryCardPhoto(
+            activityID: activityID,
+            duplicateRecovery: duplicateRecovery,
+            jpegData: jpegData
+        ) {
+        case .uploaded:
+            break
+        case .fallbackRequired:
+            viewModel.presentStravaPhotoFallback(image)
+        case .failed:
+            summaryLogger.warning("Photo upload failed (non-fatal).")
         }
     }
 
     private func uploadToStrava(workout: Workout) {
         Task {
-            do {
-                guard stravaService.isConnected else {
-                    actionError = "Connect your Strava account first."
-                    return
-                }
-                let canExport = WorkoutExportService.canExport(
-                    format: selectedExportFormat,
-                    hasRoute: routeManager.hasRoute
-                )
-                guard canExport else {
-                    actionError = "Selected format requires a loaded route."
-                    return
-                }
-                let fileURL = try WorkoutExportService.export(
+            if let completion = await viewModel.uploadToStrava(
+                request: StravaUploadRequest(
                     workout: workout,
-                    format: selectedExportFormat,
-                    routeManager: routeManager
+                    exportFormat: viewModel.selectedExportFormat,
+                    hasRoute: viewModel.hasRoute,
+                    routeService: viewModel.routeService,
+                    routeName: workout.savedRouteName ?? viewModel.routeName,
+                    totalElevationGain: workout.elevationGain > 0
+                        ? workout.elevationGain : viewModel.totalElevationGain,
+                    dominantPowerZone: PowerZone.zone(for: Int(workout.avgPower.rounded())),
+                    zoneBuckets: zoneBuckets.map { (zone: $0.zone, percent: $0.percent) },
+                    personalRecordNames: stravaPersonalRecordNames(for: workout),
+                    descriptionOptions: stravaDescriptionOptions(),
+                    preferredGearID: stravaPreferredGearID.isEmpty ? nil : stravaPreferredGearID
                 )
-                lastExportedFileURL = fileURL
-                ensureStravaDraft(for: workout)
-                let resolvedTitle = stravaTitleInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                let resolvedDescription = stravaDescriptionInput.trimmingCharacters(
-                    in: .whitespacesAndNewlines)
-                let prNames = stravaPersonalRecordNames(for: workout)
-                let rideName =
-                    resolvedTitle.isEmpty
-                    ? StravaPostBuilder.buildTitle(
-                        workout: workout,
-                        routeName: workout.savedRouteName ?? routeManager.routeName,
-                        dominantPowerZone: PowerZone.zone(for: Int(workout.avgPower.rounded())),
-                        personalRecordNames: prNames
-                    )
-                    : resolvedTitle
-                let rideDescription =
-                    resolvedDescription.isEmpty
-                    ? StravaPostBuilder.buildDescription(
-                        workout: workout,
-                        routeName: workout.savedRouteName ?? routeManager.routeName,
-                        totalElevationGain: workout.elevationGain > 0
-                            ? workout.elevationGain : routeManager.totalElevationGain,
-                        dominantPowerZone: PowerZone.zone(for: Int(workout.avgPower.rounded())),
-                        zoneBuckets: self.zoneBuckets.map { (zone: $0.zone, percent: $0.percent) },
-                        personalRecordNames: prNames,
-                        options: stravaDescriptionOptions()
-                    )
-                    : resolvedDescription
-
-                let sportType =
-                    uploadAsVirtualRide
-                    ? StravaService.SportType.virtualRide
-                    : StravaService.SportType.outdoorRide
-
-                let gearID = stravaPreferredGearID.isEmpty ? nil : stravaPreferredGearID
-
-                // Check for duplicate before uploading
-                if let existingID = await stravaService.checkForDuplicate(
-                    startDate: workout.startDate,
-                    elapsedSeconds: Int(workout.duration)
-                ) {
-                    lastUploadedActivityID = existingID
-                    stravaStatus = "Already on Strava — opening activity"
-                    // Still update metadata in case the user wants richer description
-                    try await stravaService.updateActivity(
-                        activityID: existingID,
-                        name: rideName,
-                        description: rideDescription,
-                        sportType: sportType,
-                        trainer: uploadAsVirtualRide,
-                        commute: commuteStravaUpload,
-                        gearID: gearID
-                    )
-                    // Same path as a re-tap upload: attach summary card when opted in (was missing before).
-                    await uploadStravaSummaryCardPhoto(
-                        activityID: existingID,
-                        workout: workout,
-                        duplicateRecovery: true
-                    )
-                } else {
-                    let stravaExternalID = StravaService.externalIDForWorkout(workoutID: workout.id)
-                    let result: StravaService.UploadResult
-                    do {
-                        result = try await stravaService.uploadWorkoutFile(
-                            fileURL: fileURL,
-                            name: rideName,
-                            description: rideDescription,
-                            trainer: uploadAsVirtualRide,
-                            externalID: stravaExternalID,
-                            sportType: sportType
-                        )
-                    } catch {
-                        if case StravaService.StravaError.uploadTimedOut = error {
-                            if let recoveredId = await stravaService.checkForDuplicate(
-                                startDate: workout.startDate,
-                                elapsedSeconds: Int(workout.duration)
-                            ) {
-                                lastUploadedActivityID = recoveredId
-                                do {
-                                    try await stravaService.updateActivity(
-                                        activityID: recoveredId,
-                                        name: rideName,
-                                        description: rideDescription,
-                                        sportType: sportType,
-                                        trainer: uploadAsVirtualRide,
-                                        commute: commuteStravaUpload,
-                                        gearID: gearID
-                                    )
-                                    stravaStatus =
-                                        "Strava was slow — activity found on your profile."
-                                    await uploadStravaSummaryCardPhoto(
-                                        activityID: recoveredId,
-                                        workout: workout,
-                                        duplicateRecovery: true
-                                    )
-                                } catch {
-                                    actionError =
-                                        (error as? LocalizedError)?.errorDescription
-                                        ?? error.localizedDescription
-                                }
-                                return
-                            }
-                        }
-                        throw error
-                    }
-                    if let activityID = result.activityID {
-                        lastUploadedActivityID = activityID
-
-                        // PUT after upload so title/description/sport match Mangox (file-derived defaults can win earlier).
-                        try await stravaService.updateActivity(
-                            activityID: activityID,
-                            name: rideName,
-                            description: rideDescription,
-                            sportType: sportType,
-                            trainer: uploadAsVirtualRide,
-                            commute: commuteStravaUpload,
-                            gearID: gearID
-                        )
-
-                        if result.isDuplicateRecovery {
-                            stravaStatus = "Strava already had this file — details refreshed."
-                        } else {
-                            stravaStatus = "Uploaded to Strava! 🎉"
-                        }
-
-                        await uploadStravaSummaryCardPhoto(
-                            activityID: activityID,
-                            workout: workout,
-                            duplicateRecovery: result.isDuplicateRecovery
-                        )
-                    } else {
-                        stravaStatus = "Upload queued: \(result.status)"
-                    }
-                }
-            } catch {
-                actionError =
-                    (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            ) {
+                await uploadStravaSummaryCardPhoto(
+                    activityID: completion.activityID,
+                    workout: workout,
+                    duplicateRecovery: completion.duplicateRecovery
+                )
             }
         }
     }
 
     // MARK: - Delete & Navigation
 
+    private func promptDeleteWorkout() {
+        viewModel.presentDeleteConfirmation()
+    }
+
     private func saveWorkoutAsCustomTemplate() {
         guard let w = workout else { return }
-        guard w.planDayID == nil else { return }
-        guard let tpl = WorkoutCustomTemplateBuilder.makeTemplate(from: w) else { return }
-        modelContext.insert(tpl)
-        do {
-            try modelContext.save()
-            customRepeatTemplateID = tpl.id
-            HapticManager.shared.onboardingStepCompleted()
-        } catch {
-            actionError = error.localizedDescription
-        }
+        viewModel.saveWorkoutAsCustomTemplate(from: w)
     }
 
     private func repeatSavedCustomWorkout() {
-        guard let id = customRepeatTemplateID else { return }
-        navigationPath = NavigationPath()
-        navigationPath.append(AppRoute.customWorkoutRide(templateID: id))
+        guard let action = viewModel.navigationActionForRepeatSavedCustomWorkout() else { return }
+        applyNavigationAction(action)
     }
 
     private func deleteWorkout() {
         guard let workout else { return }
-        if let dayID = workout.planDayID {
-            let planID = workout.planID ?? CachedPlan.shared.id
-            DashboardView.unmarkPlanDay(dayID, planID: planID, in: modelContext)
-        }
-        modelContext.delete(workout)
-        do {
-            try modelContext.save()
-            MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
-            navigationPath = NavigationPath()
-        } catch {
-            actionError = error.localizedDescription
-        }
+        guard let action = viewModel.deleteWorkout(workout) else { return }
+        applyNavigationAction(action)
     }
 
     private func repeatStructuredWorkout() {
         guard let w = workout else { return }
-        guard let did = w.planDayID else { return }
-        if did.hasPrefix("custom-") {
-            let rest = String(did.dropFirst("custom-".count))
-            guard let tid = UUID(uuidString: rest) else { return }
-            navigationPath = NavigationPath()
-            navigationPath.append(AppRoute.customWorkoutRide(templateID: tid))
-            return
-        }
-        guard let pid = w.planID else { return }
-        navigationPath = NavigationPath()
-        navigationPath.append(AppRoute.connectionForPlan(planID: pid, dayID: did))
+        guard let action = viewModel.navigationActionForRepeatStructuredWorkout(w) else { return }
+        applyNavigationAction(action)
     }
 
     private func popFromSummary() {
-        if !navigationPath.isEmpty {
+        applyNavigationAction(
+            viewModel.navigationActionForClosingSummary(pathIsEmpty: navigationPath.isEmpty))
+    }
+
+    private func applyNavigationAction(_ action: WorkoutSummaryNavigationAction) {
+        switch action {
+        case .pop:
             navigationPath.removeLast()
-        } else {
+        case .resetRoot:
             navigationPath = NavigationPath()
+        case .route(let route):
+            navigationPath = NavigationPath()
+            navigationPath.append(route)
         }
     }
 }
@@ -1004,9 +693,9 @@ private struct SummaryContentView: View {
     @Binding var showExportModal: Bool
     @Binding var selectedExportFormat: ExportFormat
     let lastExportedFileURL: URL?
-    @Environment(StravaService.self) private var stravaService
-    @Environment(HealthKitManager.self) private var healthKitManager
-    @Environment(RouteManager.self) private var routeManager
+    let stravaAthleteDisplayName: String?
+    let syncWorkoutsToAppleHealth: Bool
+    let workoutSyncToHealthLastError: String?
     let onDone: () -> Void
     let onDelete: () -> Void
     let onOpenStravaUploader: () -> Void
@@ -1121,8 +810,8 @@ private struct SummaryContentView: View {
                             .padding(.top, 16)
                     }
 
-                    if healthKitManager.syncWorkoutsToAppleHealth,
-                        let hkErr = healthKitManager.workoutSyncToHealthLastError
+                    if syncWorkoutsToAppleHealth,
+                        let hkErr = workoutSyncToHealthLastError
                     {
                         appleHealthSyncWarningBanner(message: hkErr)
                             .padding(.horizontal, hPad)
@@ -1131,6 +820,7 @@ private struct SummaryContentView: View {
 
                     SummaryHeroHeader(
                         workout: workout,
+                        linkedPlanDay: linkedPlanDay,
                         heroAppeared: heroAppeared,
                         onDone: onDone,
                         onDelete: onDelete
@@ -1155,7 +845,7 @@ private struct SummaryContentView: View {
                             },
                             ftpWatts: PowerZone.ftp,
                             riderCallName: SummaryRiderNaming.stravaFirstName(
-                                from: stravaService.athleteDisplayName),
+                                from: stravaAthleteDisplayName),
                             onDeviceInsightFailed: $onDeviceInsightFailed
                         )
                         .id(workout.id)
@@ -1193,25 +883,32 @@ private struct SummaryContentView: View {
                     if workout.planDayID == nil, workout.status == .completed, workout.isValid {
                         VStack(spacing: 10) {
                             Button(action: onSaveAsCustomWorkout) {
-                                Label("Save as custom workout", systemImage: "square.and.arrow.down.on.square")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.9))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .background(Color.white.opacity(0.08))
-                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                Label(
+                                    "Save as custom workout",
+                                    systemImage: "square.and.arrow.down.on.square"
+                                )
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color.white.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             }
                             .buttonStyle(.plain)
 
                             if customRepeatTemplateID != nil {
                                 Button(action: onRepeatSavedCustomWorkout) {
-                                    Label("Repeat saved workout", systemImage: "arrow.clockwise.circle.fill")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(.black)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 12)
-                                        .background(AppColor.mango)
-                                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    Label(
+                                        "Repeat saved workout",
+                                        systemImage: "arrow.clockwise.circle.fill"
+                                    )
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.black)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(AppColor.mango)
+                                    .clipShape(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous))
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -1248,7 +945,8 @@ private struct SummaryContentView: View {
                 // RIGHT — Zones, Laps
                 VStack(spacing: cardGap) {
                     if showStandalonePowerZoneCard {
-                        SummaryZoneCard(title: "POWER ZONES", icon: "bolt.fill", buckets: zoneBuckets)
+                        SummaryZoneCard(
+                            title: "POWER ZONES", icon: "bolt.fill", buckets: zoneBuckets)
                     }
                     if workout.maxHR > 0 {
                         SummaryHRZoneCard(buckets: hrZoneBuckets)
@@ -1418,6 +1116,7 @@ private struct SummaryInvalidBanner: View {
 
 private struct SummaryHeroHeader: View {
     let workout: Workout
+    let linkedPlanDay: PlanDay?
     let heroAppeared: Bool
     let onDone: () -> Void
     let onDelete: () -> Void
@@ -1546,21 +1245,18 @@ private struct SummaryHeroHeader: View {
 
     @ViewBuilder
     private var planDayBadge: some View {
-        if let dayID = workout.planDayID {
-            let plan = PlanLibrary.resolvePlan(planID: workout.planID) ?? CachedPlan.shared
-            if let day = plan.day(id: dayID) {
-                HStack(spacing: 6) {
-                    Image(systemName: "calendar.badge.checkmark")
-                        .font(.system(size: isWide ? 12 : 10))
-                    Text("W\(day.weekNumber)D\(day.dayOfWeek) · \(day.title)")
-                        .font(.system(size: isWide ? 13 : 11, weight: .semibold))
-                }
-                .foregroundStyle(AppColor.yellow)
-                .padding(.horizontal, isWide ? 16 : 12)
-                .padding(.vertical, isWide ? 7 : 5)
-                .background(AppColor.yellow.opacity(0.1))
-                .clipShape(Capsule())
+        if let day = linkedPlanDay {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar.badge.checkmark")
+                    .font(.system(size: isWide ? 12 : 10))
+                Text("W\(day.weekNumber)D\(day.dayOfWeek) · \(day.title)")
+                    .font(.system(size: isWide ? 13 : 11, weight: .semibold))
             }
+            .foregroundStyle(AppColor.yellow)
+            .padding(.horizontal, isWide ? 16 : 12)
+            .padding(.vertical, isWide ? 7 : 5)
+            .background(AppColor.yellow.opacity(0.1))
+            .clipShape(Capsule())
         }
     }
 
@@ -2120,7 +1816,7 @@ private struct SummaryLapTable: View {
 private struct ExportSheetContent: View {
     let workout: Workout
     @Binding var selectedExportFormat: ExportFormat
-    @Environment(RouteManager.self) private var routeManager
+    let hasRoute: Bool
     let lastExportedFileURL: URL?
     let onExport: (ExportFormat) -> Void
     let onOpenStravaUploader: () -> Void
@@ -2148,7 +1844,7 @@ private struct ExportSheetContent: View {
             }
             .foregroundStyle(.white.opacity(0.3))
 
-            if selectedExportFormat == .gpx, routeManager.hasRoute,
+            if selectedExportFormat == .gpx, hasRoute,
                 RidePreferences.shared.gpxPrivacyTrimStartMeters > 0
                     || RidePreferences.shared.gpxPrivacyTrimEndMeters > 0
             {
@@ -2189,7 +1885,7 @@ private struct ExportSheetContent: View {
 
     private func formatButton(for format: ExportFormat) -> some View {
         let canExport = WorkoutExportService.canExport(
-            format: format, hasRoute: routeManager.hasRoute)
+            format: format, hasRoute: hasRoute)
         let isSelected = selectedExportFormat == format
         let titleColor: Color =
             isSelected ? .white : (canExport ? .white.opacity(0.5) : .white.opacity(0.2))
@@ -2198,7 +1894,7 @@ private struct ExportSheetContent: View {
         let borderColor: Color =
             isSelected ? AppColor.orange.opacity(0.3) : Color.white.opacity(0.05)
         let subtitleText: String =
-            format == .tcx ? "Indoor" : (routeManager.hasRoute ? "Route loaded" : "Needs route")
+            format == .tcx ? "Indoor" : (hasRoute ? "Route loaded" : "Needs route")
 
         return Button {
             selectedExportFormat = format
@@ -2231,7 +1927,7 @@ private struct ExportSheetContent: View {
 
     private var exportActionButton: some View {
         let canExportSelected = WorkoutExportService.canExport(
-            format: selectedExportFormat, hasRoute: routeManager.hasRoute)
+            format: selectedExportFormat, hasRoute: hasRoute)
         let fgColor: Color = canExportSelected ? .white : .white.opacity(0.3)
         let bgOpacity: Double = canExportSelected ? 0.12 : 0.04
         let borderOpacity: Double = canExportSelected ? 0.3 : 0.1
@@ -2263,7 +1959,7 @@ private struct ExportSheetContent: View {
 
 private struct StravaSheetContentView: View {
     let workout: Workout
-    @Environment(StravaService.self) private var stravaService
+    @Environment(WorkoutViewModel.self) private var viewModel
     @Binding var stravaTitleInput: String
     @Binding var stravaDescriptionInput: String
     @Binding var includeDurationInDescription: Bool
@@ -2280,32 +1976,16 @@ private struct StravaSheetContentView: View {
     let onUpload: () -> Void
     let onOpenActivity: () -> Void
 
-    @State private var stravaBikes: [StravaService.AthleteBike] = []
-    @State private var stravaBikesLoading = false
-    @State private var stravaBikesLoadFailed = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if !stravaService.isConnected {
+            if !viewModel.isStravaConnected {
                 notConnectedView
             } else {
                 connectedForm
             }
         }
-        .task(id: stravaService.isConnected) {
-            guard stravaService.isConnected else {
-                stravaBikes = []
-                return
-            }
-            stravaBikesLoading = true
-            stravaBikesLoadFailed = false
-            defer { stravaBikesLoading = false }
-            do {
-                stravaBikes = try await stravaService.fetchAthleteBikes()
-            } catch {
-                stravaBikes = []
-                stravaBikesLoadFailed = true
-            }
+        .task(id: viewModel.isStravaConnected) {
+            await viewModel.refreshStravaBikesIfNeeded()
         }
     }
 
@@ -2419,7 +2099,7 @@ private struct StravaSheetContentView: View {
                     .foregroundStyle(.white.opacity(0.25))
                     .tracking(1)
 
-                if stravaBikesLoading {
+                if viewModel.stravaBikesLoading {
                     HStack(spacing: 8) {
                         ProgressView()
                             .scaleEffect(0.85)
@@ -2427,13 +2107,13 @@ private struct StravaSheetContentView: View {
                             .font(.system(size: 12))
                             .foregroundStyle(.white.opacity(0.4))
                     }
-                } else if stravaBikesLoadFailed {
+                } else if viewModel.stravaBikesLoadFailed {
                     Text(
                         "Could not load bikes. Disconnect and connect Strava again to grant profile access."
                     )
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.35))
-                } else if stravaBikes.isEmpty {
+                } else if viewModel.stravaBikes.isEmpty {
                     Text(
                         "No bikes on your Strava profile. Add a bike on strava.com to link activities."
                     )
@@ -2442,7 +2122,7 @@ private struct StravaSheetContentView: View {
                 } else {
                     Picker("Bike", selection: $preferredGearID) {
                         Text("None").tag("")
-                        ForEach(stravaBikes) { bike in
+                        ForEach(viewModel.stravaBikes) { bike in
                             Text(bike.name).tag(bike.id)
                         }
                     }
@@ -2462,7 +2142,7 @@ private struct StravaSheetContentView: View {
             Circle()
                 .fill(AppColor.success)
                 .frame(width: 6, height: 6)
-            Text(stravaService.athleteDisplayName ?? "Connected")
+            Text(viewModel.stravaAthleteDisplayName ?? "Connected")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.white.opacity(0.5))
             Spacer()
@@ -2580,7 +2260,7 @@ private struct StravaSheetContentView: View {
     private var uploadButton: some View {
         Button(action: onUpload) {
             HStack(spacing: 8) {
-                if stravaService.isBusy {
+                if viewModel.isStravaBusy {
                     ProgressView()
                         .tint(.white)
                         .scaleEffect(0.8)
@@ -2588,7 +2268,7 @@ private struct StravaSheetContentView: View {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 16))
                 }
-                Text(stravaService.isBusy ? "Uploading…" : "Upload to Strava")
+                Text(viewModel.isStravaBusy ? "Uploading…" : "Upload to Strava")
                     .font(.system(size: 15, weight: .bold))
             }
             .foregroundStyle(.white)
@@ -2603,8 +2283,8 @@ private struct StravaSheetContentView: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        .disabled(stravaService.isBusy)
-        .opacity(stravaService.isBusy ? 0.7 : 1)
+        .disabled(viewModel.isStravaBusy)
+        .opacity(viewModel.isStravaBusy ? 0.7 : 1)
     }
 
     @ViewBuilder
@@ -2621,7 +2301,7 @@ private struct StravaSheetContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
 
-        if let err = stravaService.lastError, !err.isEmpty {
+        if let err = viewModel.stravaLastError, !err.isEmpty {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(.system(size: 11))
@@ -2647,28 +2327,29 @@ private struct StravaSheetContentView: View {
     }
 }
 
-// MARK: - Supporting Types
-
-private struct ZoneBucket: Identifiable {
-    let zone: PowerZone
-    let seconds: Int
-    let percent: Double
-    var id: Int { zone.id }
-}
-
-private struct HRZoneBucket: Identifiable {
-    let zone: HeartRateZone
-    let seconds: Int
-    let percent: Double
-    var id: Int { zone.id }
-}
-
 // MARK: - Preview
+
+@MainActor
+private final class _SummaryPreviewPersistenceRepository: WorkoutPersistenceRepositoryProtocol {
+    func saveWorkoutAsCustomTemplate(from workout: Workout) throws -> UUID? { nil }
+    func deleteWorkout(_ workout: Workout) throws {}
+    func saveOutdoorRide(workout: Workout, splits: [LapSplit]) throws {}
+    func fetchCustomWorkoutTemplate(id: UUID) throws -> PlanDay? { nil }
+    func fetchSortedSamples(forWorkoutID id: PersistentIdentifier) async -> [WorkoutSampleData] { [] }
+}
 
 #Preview {
     SummaryView(
         workoutID: UUID(),
-        navigationPath: .constant(NavigationPath())
+        navigationPath: .constant(NavigationPath()),
+        viewModel: WorkoutViewModel(
+            stravaService: StravaService(),
+            routeService: RouteManager(),
+            personalRecordsService: PersonalRecords.shared,
+            healthKitService: HealthKitManager(),
+            trainingPlanLookupService: TrainingPlanLookupService(),
+            workoutPersistenceRepository: _SummaryPreviewPersistenceRepository()
+        )
     )
     .modelContainer(
         for: [

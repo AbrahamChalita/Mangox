@@ -1,10 +1,11 @@
 // App/ContentView.swift
 import CoreLocation
 import MapKit
+import SwiftData
 import SwiftUI
 
 struct ContentView: View {
-    @Environment(LocationManager.self) private var locationManager
+    @Environment(DIContainer.self) private var di
     @Environment(\.launchOverlayVisible) private var launchOverlayVisible
 
     @State private var selectedTab = 0
@@ -36,56 +37,75 @@ struct ContentView: View {
             TabView(selection: $selectedTab) {
                 Tab("Home", systemImage: "house.fill", value: 0) {
                     NavigationStack(path: $homePath) {
-                        HomeView(navigationPath: $homePath, selectedTab: $selectedTab)
-                            .toolbar(.hidden, for: .navigationBar)
-                            .navigationDestination(for: AppRoute.self) { route in
-                                appRouteDestination(route, path: $homePath)
-                            }
+                        HomeView(
+                            navigationPath: $homePath,
+                            selectedTab: $selectedTab,
+                            viewModel: di.makeHomeViewModel()
+                        )
+                        .toolbar(.hidden, for: .navigationBar)
+                        .navigationDestination(for: AppRoute.self) { route in
+                            appRouteDestination(route, path: $homePath, di: di)
+                        }
                     }
                 }
 
                 Tab("Calendar", systemImage: "calendar", value: 1) {
-                    LazyTabRootContent(tabIndex: 1, selectedTab: selectedTab, placeholderStyle: .calendar) {
+                    LazyTabRootContent(
+                        tabIndex: 1, selectedTab: selectedTab, placeholderStyle: .calendar
+                    ) {
                         NavigationStack(path: $calendarPath) {
                             CalendarView(navigationPath: $calendarPath)
                                 .toolbar(.hidden, for: .navigationBar)
                                 .navigationDestination(for: AppRoute.self) { route in
-                                    appRouteDestination(route, path: $calendarPath)
+                                    appRouteDestination(route, path: $calendarPath, di: di)
                                 }
                         }
                     }
                 }
 
                 Tab("Coach", systemImage: "sparkles", value: 2) {
-                    LazyTabRootContent(tabIndex: 2, selectedTab: selectedTab, placeholderStyle: .coach) {
+                    LazyTabRootContent(
+                        tabIndex: 2, selectedTab: selectedTab, placeholderStyle: .coach
+                    ) {
                         NavigationStack(path: $coachPath) {
-                            CoachTabRootView(navigationPath: $coachPath)
-                                .navigationDestination(for: AppRoute.self) { route in
-                                    appRouteDestination(route, path: $coachPath)
-                                }
+                            CoachTabRootView(
+                                navigationPath: $coachPath,
+                                viewModel: di.makeCoachViewModel()
+                            )
+                            .navigationDestination(for: AppRoute.self) { route in
+                                appRouteDestination(route, path: $coachPath, di: di)
+                            }
                         }
                     }
                 }
 
                 Tab("Stats", systemImage: "chart.line.uptrend.xyaxis", value: 3) {
-                    LazyTabRootContent(tabIndex: 3, selectedTab: selectedTab, placeholderStyle: .stats) {
+                    LazyTabRootContent(
+                        tabIndex: 3, selectedTab: selectedTab, placeholderStyle: .stats
+                    ) {
                         NavigationStack(path: $statsPath) {
-                            PMChartView(navigationPath: $statsPath)
-                                .toolbar(.hidden, for: .navigationBar)
-                                .navigationDestination(for: AppRoute.self) { route in
-                                    appRouteDestination(route, path: $statsPath)
-                                }
+                            PMChartView(
+                                navigationPath: $statsPath, viewModel: di.makeFitnessViewModel()
+                            )
+                            .toolbar(.hidden, for: .navigationBar)
+                            .navigationDestination(for: AppRoute.self) { route in
+                                appRouteDestination(route, path: $statsPath, di: di)
+                            }
                         }
                     }
                 }
 
                 Tab("Settings", systemImage: "gearshape.fill", value: 4) {
-                    LazyTabRootContent(tabIndex: 4, selectedTab: selectedTab, placeholderStyle: .settings) {
+                    LazyTabRootContent(
+                        tabIndex: 4, selectedTab: selectedTab, placeholderStyle: .settings
+                    ) {
                         NavigationStack(path: $settingsPath) {
-                            SettingsView(navigationPath: $settingsPath)
-                                .navigationDestination(for: AppRoute.self) { route in
-                                    appRouteDestination(route, path: $settingsPath)
-                                }
+                            SettingsView(
+                                navigationPath: $settingsPath, viewModel: di.makeProfileViewModel()
+                            )
+                            .navigationDestination(for: AppRoute.self) { route in
+                                appRouteDestination(route, path: $settingsPath, di: di)
+                            }
                         }
                     }
                 }
@@ -104,18 +124,22 @@ struct ContentView: View {
                 .allowsHitTesting(false)
         }
         .task {
-            locationManager.warmUpLocationIfAuthorized()
+            di.locationService.warmUpLocationIfAuthorized()
         }
         .task(id: launchOverlayVisible) {
             await MangoxDebugPerformance.runInterval("Content.tabPrewarm") {
                 await runSecondaryTabPrewarmTask()
             }
         }
-        .onChange(of: locationManager.authorizationStatus) { _, newStatus in
-            if newStatus == .authorizedWhenInUse || newStatus == .authorizedAlways {
-                locationManager.warmUpLocationIfAuthorized()
+        .onChange(of: di.locationService.authorizationStatus) { _, newStatus in
+            if shouldWarmLocation(for: newStatus) {
+                di.locationService.warmUpLocationIfAuthorized()
             }
         }
+    }
+
+    private func shouldWarmLocation(for status: CLAuthorizationStatus) -> Bool {
+        status == .authorizedWhenInUse || status == .authorizedAlways
     }
 
     private func runSecondaryTabPrewarmTask() async {
@@ -135,9 +159,11 @@ struct ContentView: View {
 }
 
 #Preview {
+    let di = DIContainer()
     let ble = BLEManager()
     let wifi = WiFiTrainerService()
     return ContentView()
+        .environment(di)
         .environment(ble)
         .environment(wifi)
         .environment(DataSourceCoordinator(bleManager: ble, wifiService: wifi))
@@ -147,10 +173,5 @@ struct ContentView: View {
         .environment(StravaService())
         .environment(WhoopService())
         .environment(FTPRefreshTrigger.shared)
-        .modelContainer(
-            for: [
-                Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self,
-                CustomWorkoutTemplate.self, FitnessSettingsSnapshot.self, WorkoutRAGChunk.self,
-            ],
-            inMemory: true)
+        .modelContainer(try! PersistenceContainer.makeContainer(inMemory: true))
 }

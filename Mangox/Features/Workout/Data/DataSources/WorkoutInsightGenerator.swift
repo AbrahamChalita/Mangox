@@ -296,6 +296,19 @@ extension WorkoutSummaryOnDeviceInsight {
     @MainActor static func generateSmartTitleIfNeeded(
         workout: Workout,
         powerZoneLine: String,
+        ftpWatts: Int
+    ) async {
+        await generateSmartTitleIfNeeded(
+            workout: workout,
+            powerZoneLine: powerZoneLine,
+            ftpWatts: ftpWatts,
+            modelContext: PersistenceContainer.shared.mainContext
+        )
+    }
+
+    @MainActor static func generateSmartTitleIfNeeded(
+        workout: Workout,
+        powerZoneLine: String,
         ftpWatts: Int,
         modelContext: ModelContext
     ) async {

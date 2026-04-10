@@ -794,6 +794,18 @@ enum OnDeviceCoachEngine {
 
 extension AIService {
 
+    func coachFactSheetText() -> String {
+        coachFactSheetText(modelContext: persistenceContext)
+    }
+
+    func loadCoachEmptyStartersContent() async -> CoachEmptyStartersContent {
+        await loadCoachEmptyStartersContent(modelContext: persistenceContext)
+    }
+
+    func contextualQuickPrompts() -> [QuickPrompt] {
+        contextualQuickPrompts(modelContext: persistenceContext)
+    }
+
     /// Compact context for on-device prompts (token-aware; keep under ~1.5k chars).
     func coachFactSheetText(modelContext: ModelContext) -> String {
         let ctx = buildUserContext(modelContext: modelContext)

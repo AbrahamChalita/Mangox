@@ -5,14 +5,9 @@ import os.log
 private let planLogger = Logger(subsystem: "com.abchalita.Mangox", category: "TrainingPlan")
 
 struct TrainingPlanView: View {
-    @Environment(BLEManager.self) private var bleManager
-    @Environment(HealthKitManager.self) private var healthKitManager
-    @Environment(WhoopService.self) private var whoopService
-    @Environment(PurchasesManager.self) private var purchases
+    @State private var viewModel: TrainingViewModel
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Binding var navigationPath: NavigationPath
-
-    @Environment(\.modelContext) private var modelContext
 
     private static let planProgressDescriptor: FetchDescriptor<TrainingPlanProgress> = {
         var d = FetchDescriptor<TrainingPlanProgress>(
@@ -30,14 +25,6 @@ struct TrainingPlanView: View {
 
     @Query(Self.planProgressDescriptor) private var allProgress: [TrainingPlanProgress]
 
-    @State private var selectedWeek: Int = 1
-    @State private var showStartPlanSheet = false
-    @State private var showResetConfirmation = false
-    @State private var showDeleteConfirmation = false
-    @State private var showICSExportShare = false
-    @State private var icsExportURL: URL?
-    @State private var planStartDate = Date()
-
     @Query(Self.aiPlansDescriptor) private var aiPlans: [AIGeneratedPlan]
 
     private static let recentWorkoutsForPlanDescriptor: FetchDescriptor<Workout> = {
@@ -52,9 +39,14 @@ struct TrainingPlanView: View {
 
     private let plan: TrainingPlan
 
-    init(navigationPath: Binding<NavigationPath>, plan: TrainingPlan = CachedPlan.shared) {
+    init(
+        navigationPath: Binding<NavigationPath>,
+        plan: TrainingPlan,
+        viewModel: TrainingViewModel
+    ) {
         _navigationPath = navigationPath
         self.plan = plan
+        self._viewModel = State(initialValue: viewModel)
     }
 
     private let accentGreen = AppColor.success
@@ -66,7 +58,7 @@ struct TrainingPlanView: View {
 
     /// True when this plan was AI-generated (not the built-in Classicissima).
     private var isAIPlan: Bool {
-        plan.id != CachedPlan.shared.id
+        true
     }
 
     private var progress: TrainingPlanProgress? {
@@ -74,7 +66,16 @@ struct TrainingPlanView: View {
     }
 
     private var currentWeek: PlanWeek? {
-        plan.weeks.first { $0.weekNumber == selectedWeek }
+        plan.weeks.first { $0.weekNumber == viewModel.selectedWeek }
+    }
+
+    private func binding<Value>(_ keyPath: ReferenceWritableKeyPath<TrainingViewModel, Value>)
+        -> Binding<Value>
+    {
+        Binding(
+            get: { viewModel[keyPath: keyPath] },
+            set: { viewModel[keyPath: keyPath] = $0 }
+        )
     }
 
     private var overallProgress: Double {
@@ -115,9 +116,9 @@ struct TrainingPlanView: View {
 
                 VStack(spacing: 0) {
                     header
-                        .padding(.bottom, whoopService.isConnected ? 2 : 4)
+                        .padding(.bottom, viewModel.showsWhoopBanner ? 2 : 4)
 
-                    if whoopService.isConnected, whoopService.isConfigured {
+                    if viewModel.showsWhoopBanner {
                         whoopPlanBanner
                             .padding(.horizontal, 20)
                             .padding(.bottom, 8)
@@ -132,10 +133,10 @@ struct TrainingPlanView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(isPresented: $showStartPlanSheet) {
+        .sheet(isPresented: binding(\.showStartPlanSheet)) {
             startPlanSheet
         }
-        .alert("Reset Progress?", isPresented: $showResetConfirmation) {
+        .alert("Reset Progress?", isPresented: binding(\.showResetConfirmation)) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) {
                 resetPlan()
@@ -143,7 +144,7 @@ struct TrainingPlanView: View {
         } message: {
             Text("This will erase all progress for \(plan.name). This cannot be undone.")
         }
-        .alert("Delete Plan?", isPresented: $showDeleteConfirmation) {
+        .alert("Delete Plan?", isPresented: binding(\.showDeleteConfirmation)) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
                 deleteAIPlan()
@@ -151,16 +152,28 @@ struct TrainingPlanView: View {
         } message: {
             Text("The plan and all progress will be permanently deleted.")
         }
-        .sheet(isPresented: $showICSExportShare) {
-            if let icsExportURL {
+        .sheet(isPresented: binding(\.showICSExportShare)) {
+            if let icsExportURL = viewModel.icsExportURL {
                 ShareSheet(activityItems: [icsExportURL])
             }
         }
         .onAppear {
-            autoSelectCurrentWeek()
+            viewModel.autoSelectCurrentWeek(progress: progress, totalWeeks: plan.totalWeeks)
         }
         .task {
-            await whoopService.refreshLinkedDataIfStale()
+            await viewModel.refreshWhoopIfNeeded()
+        }
+        .onChange(of: viewModel.pendingNavigation) { _, action in
+            guard let action else { return }
+            switch action {
+            case .paywall:
+                navigationPath.append(AppRoute.paywall)
+            case .connectionForPlan(let planID, let dayID):
+                navigationPath.append(AppRoute.connectionForPlan(planID: planID, dayID: dayID))
+            case .ftpSetup:
+                navigationPath.append(AppRoute.ftpSetup)
+            }
+            viewModel.clearPendingNavigation()
         }
     }
 
@@ -171,10 +184,10 @@ struct TrainingPlanView: View {
             HStack(spacing: 8) {
                 Image(systemName: "waveform.path.ecg")
                     .foregroundStyle(AppColor.whoop)
-                if let pct = whoopService.latestRecoveryScore {
+                if let pct = viewModel.whoopRecoveryScore {
                     Text(String(format: "Recovery %.0f%%", pct))
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(whoopService.readinessAccentColor)
+                        .foregroundStyle(viewModel.whoopReadinessAccentColor)
                 } else {
                     Text("WHOOP linked")
                         .font(.system(size: 14, weight: .semibold))
@@ -182,7 +195,7 @@ struct TrainingPlanView: View {
                 }
                 Spacer()
             }
-            Text(whoopService.readinessTrainingHint)
+            Text(viewModel.whoopReadinessHint)
                 .font(.system(size: 11))
                 .foregroundStyle(.white.opacity(0.42))
                 .fixedSize(horizontal: false, vertical: true)
@@ -229,12 +242,12 @@ struct TrainingPlanView: View {
                     }
                     if progress != nil {
                         Button("Reset Progress", role: .destructive) {
-                            showResetConfirmation = true
+                            viewModel.showResetConfirmation = true
                         }
                     }
                     if isAIPlan {
                         Button("Delete Plan", role: .destructive) {
-                            showDeleteConfirmation = true
+                            viewModel.showDeleteConfirmation = true
                         }
                     }
                 } label: {
@@ -315,7 +328,7 @@ struct TrainingPlanView: View {
 
                 // Start button
                 Button {
-                    showStartPlanSheet = true
+                    viewModel.showStartPlanSheet = true
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "play.fill")
@@ -329,9 +342,9 @@ struct TrainingPlanView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
 
-                if !purchases.isPro {
+                if viewModel.shouldShowUpgradeCTA {
                     Button {
-                        navigationPath.append(AppRoute.paywall)
+                        viewModel.requestPaywall()
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "crown.fill")
@@ -425,8 +438,7 @@ struct TrainingPlanView: View {
 
                         if abs(progress.adaptiveLoadMultiplier - 1.0) > 0.009 {
                             Button {
-                                progress.adaptiveLoadMultiplier = 1.0
-                                try? modelContext.save()
+                                viewModel.resetAdaptiveLoadMultiplier(progress: progress)
                             } label: {
                                 Text("Reset adaptive to 100%")
                                     .font(.system(size: 10, weight: .semibold))
@@ -469,15 +481,15 @@ struct TrainingPlanView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(plan.weeks) { week in
-                        let isSelected = selectedWeek == week.weekNumber
+                        let isSelected = viewModel.selectedWeek == week.weekNumber
                         let weekProgress = weekCompletionFraction(week: week)
 
                         Button {
                             if accessibilityReduceMotion {
-                                selectedWeek = week.weekNumber
+                                viewModel.selectedWeek = week.weekNumber
                             } else {
                                 withAnimation(.easeInOut(duration: 0.2)) {
-                                    selectedWeek = week.weekNumber
+                                    viewModel.selectedWeek = week.weekNumber
                                 }
                             }
                         } label: {
@@ -521,7 +533,7 @@ struct TrainingPlanView: View {
                 }
                 .padding(.horizontal, 20)
             }
-            .onChange(of: selectedWeek) { _, newValue in
+            .onChange(of: viewModel.selectedWeek) { _, newValue in
                 if accessibilityReduceMotion {
                     proxy.scrollTo(newValue, anchor: .center)
                 } else {
@@ -806,8 +818,7 @@ struct TrainingPlanView: View {
             case .workout, .optionalWorkout, .commute:
                 if status == .completed {
                     Button {
-                        progress?.unmark(day.id)
-                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
+                        viewModel.unmark(day.id, progress: progress)
                     } label: {
                         Label("Undo", systemImage: "arrow.uturn.backward")
                             .font(.system(size: 11, weight: .medium))
@@ -819,8 +830,7 @@ struct TrainingPlanView: View {
                     }
                 } else if status == .skipped {
                     Button {
-                        progress?.unmark(day.id)
-                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
+                        viewModel.unmark(day.id, progress: progress)
                     } label: {
                         Label("Undo Skip", systemImage: "arrow.uturn.backward")
                             .font(.system(size: 11, weight: .medium))
@@ -832,7 +842,7 @@ struct TrainingPlanView: View {
                     }
                 } else {
                     Button {
-                        navigationPath.append(AppRoute.connectionForPlan(planID: plan.id, dayID: day.id))
+                        viewModel.requestPlanWorkout(planID: plan.id, dayID: day.id)
                     } label: {
                         Label("Start Ride", systemImage: "play.fill")
                             .font(.system(size: 12, weight: .semibold))
@@ -844,8 +854,7 @@ struct TrainingPlanView: View {
                     }
 
                     Button {
-                        progress?.markCompleted(day.id)
-                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
+                        viewModel.markCompleted(day.id, progress: progress)
                     } label: {
                         Label("Done", systemImage: "checkmark")
                             .font(.system(size: 11, weight: .medium))
@@ -861,8 +870,7 @@ struct TrainingPlanView: View {
                     }
 
                     Button {
-                        progress?.markSkipped(day.id)
-                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
+                        viewModel.markSkipped(day.id, progress: progress)
                     } label: {
                         Label("Skip", systemImage: "forward.fill")
                             .font(.system(size: 11, weight: .medium))
@@ -885,8 +893,7 @@ struct TrainingPlanView: View {
                     }
 
                     Button {
-                        progress?.unmark(day.id)
-                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
+                        viewModel.unmark(day.id, progress: progress)
                     } label: {
                         Label("Undo", systemImage: "arrow.uturn.backward")
                             .font(.system(size: 11, weight: .medium))
@@ -898,7 +905,7 @@ struct TrainingPlanView: View {
                     }
                 } else {
                     Button {
-                        navigationPath.append(AppRoute.ftpSetup)
+                        viewModel.requestFTPSetup()
                     } label: {
                         Label("Take FTP Test", systemImage: "bolt.heart.fill")
                             .font(.system(size: 12, weight: .semibold))
@@ -910,8 +917,7 @@ struct TrainingPlanView: View {
                     }
 
                     Button {
-                        progress?.markCompleted(day.id)
-                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
+                        viewModel.markCompleted(day.id, progress: progress)
                     } label: {
                         Label("Done", systemImage: "checkmark")
                             .font(.system(size: 11, weight: .medium))
@@ -926,8 +932,7 @@ struct TrainingPlanView: View {
             case .rest:
                 if status != .completed {
                     Button {
-                        progress?.markCompleted(day.id)
-                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
+                        viewModel.markCompleted(day.id, progress: progress)
                     } label: {
                         Label("Rest Day Complete", systemImage: "checkmark.circle")
                             .font(.system(size: 11, weight: .medium))
@@ -950,8 +955,7 @@ struct TrainingPlanView: View {
             case .race:
                 if status != .completed {
                     Button {
-                        progress?.markCompleted(day.id)
-                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
+                        viewModel.markCompleted(day.id, progress: progress)
                     } label: {
                         Label("I Finished the Race!", systemImage: "flag.checkered")
                             .font(.system(size: 12, weight: .semibold))
@@ -974,8 +978,7 @@ struct TrainingPlanView: View {
             case .event:
                 if status != .completed {
                     Button {
-                        progress?.markCompleted(day.id)
-                        do { try modelContext.save() } catch { planLogger.error("plan progress save failed: \(error)") }
+                        viewModel.markCompleted(day.id, progress: progress)
                     } label: {
                         Label("Done", systemImage: "checkmark")
                             .font(.system(size: 11, weight: .medium))
@@ -1026,7 +1029,7 @@ struct TrainingPlanView: View {
 
                         DatePicker(
                             "Start Date (Monday)",
-                            selection: $planStartDate,
+                            selection: binding(\.planStartDate),
                             displayedComponents: .date
                         )
                         .datePickerStyle(.graphical)
@@ -1061,7 +1064,7 @@ struct TrainingPlanView: View {
 
                         Button {
                             startPlan()
-                            showStartPlanSheet = false
+                            viewModel.showStartPlanSheet = false
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "play.fill")
@@ -1084,7 +1087,7 @@ struct TrainingPlanView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
-                        showStartPlanSheet = false
+                        viewModel.showStartPlanSheet = false
                     }
                     .foregroundStyle(.white.opacity(0.6))
                 }
@@ -1257,66 +1260,23 @@ struct TrainingPlanView: View {
     // MARK: - Actions
 
     private func startPlan() {
-        // Snap to Monday if needed
-        let calendar = Calendar.current
-        var start = planStartDate
-        // Plan starts on the chosen day; Day 1 maps to `startDate`.
-        start = calendar.startOfDay(for: start)
-
-        let newProgress = TrainingPlanProgress(
-            planID: plan.id,
-            startDate: start,
-            ftp: PowerZone.ftp,
-            aiPlanTitle: plan.eventName
-        )
-        modelContext.insert(newProgress)
-        do { try modelContext.save() } catch { planLogger.error("startPlan save failed: \(error)") }
-
-        selectedWeek = 1
+        viewModel.startPlan(plan: plan)
     }
 
     private func resetPlan() {
-        if let existing = progress {
-            modelContext.delete(existing)
-            do { try modelContext.save() } catch { planLogger.error("resetPlan save failed: \(error)") }
-        }
+        viewModel.resetPlan(progress: progress)
     }
 
     private func exportPlanICS(progress: TrainingPlanProgress) {
-        let body = PlanICSExport.buildICS(plan: plan, progress: progress)
-        do {
-            icsExportURL = try PlanICSExport.writeTempICSFile(planName: plan.name, icsBody: body)
-            showICSExportShare = true
-        } catch {
-            planLogger.error("ICS export failed: \(error.localizedDescription)")
-        }
+        viewModel.exportPlanICS(plan: plan, progress: progress)
     }
 
     private func deleteAIPlan() {
-        if let existing = progress {
-            modelContext.delete(existing)
-        }
-        if let aiPlan = aiPlans.first(where: { $0.id == plan.id }) {
-            modelContext.delete(aiPlan)
-        }
-        do { try modelContext.save() } catch { planLogger.error("deleteAIPlan save failed: \(error)") }
+        viewModel.deleteAIPlan(
+            progress: progress,
+            aiPlan: aiPlans.first(where: { $0.id == plan.id })
+        )
         navigationPath.removeLast()
-    }
-
-    private func autoSelectCurrentWeek() {
-        guard let progress else { return }
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let planStart = calendar.startOfDay(for: progress.startDate)
-
-        let daysSinceStart = calendar.dateComponents([.day], from: planStart, to: today).day ?? 0
-
-        if daysSinceStart < 0 {
-            selectedWeek = 1
-        } else {
-            let week = (daysSinceStart / 7) + 1
-            selectedWeek = min(max(week, 1), plan.totalWeeks)
-        }
     }
 }
 
@@ -1324,7 +1284,14 @@ struct TrainingPlanView: View {
 
 #Preview {
     TrainingPlanView(
-        navigationPath: .constant(NavigationPath())
+        navigationPath: .constant(NavigationPath()),
+        viewModel: TrainingViewModel(
+            whoopService: WhoopService(),
+            purchasesService: PurchasesManager.shared,
+            persistenceRepository: TrainingPlanPersistenceRepository(
+                modelContainer: try! PersistenceContainer.makeContainer(inMemory: true)
+            )
+        )
     )
     .modelContainer(for: [
         Workout.self, WorkoutSample.self, LapSplit.self,

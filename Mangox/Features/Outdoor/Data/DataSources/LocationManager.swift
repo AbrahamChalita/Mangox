@@ -157,7 +157,7 @@ enum OutdoorSignalConfidence {
 /// live speed or distance.
 @Observable
 @MainActor
-final class LocationManager: NSObject {
+final class LocationManager: NSObject, LocationServiceProtocol, MapCameraServiceProtocol {
 
     // MARK: - Published State
 

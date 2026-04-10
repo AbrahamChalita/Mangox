@@ -3,51 +3,13 @@ import CoreLocation
 import SwiftData
 import SwiftUI
 
-// MARK: - Weekly TSS (home dashboard)
-
-private struct WeekDayTSS: Identifiable {
-    let id: String
-    /// Narrow weekday label for the column’s calendar date (matches locale week order).
-    let day: String
-    let tss: Double
-    let color: Color
-
-    init(id: String, day: String, tss: Double, color: Color) {
-        self.id = id
-        self.day = day
-        self.tss = tss
-        self.color = color
-    }
-}
-
 // MARK: - HomeView
 
-private struct HomeTrainingCache {
-    let weeklyTSS: Double
-    let chronicLoad: Double
-    let acwr: Double
-    let weekRides: Int
-    let weekBars: [WeekDayTSS]
-}
-
 struct HomeView: View {
-    @Environment(BLEManager.self) private var bleManager
-    @Environment(DataSourceCoordinator.self) private var dataSource
-    @Environment(LocationManager.self) private var locationManager
-    @Environment(WhoopService.self) private var whoopService
-    @Environment(\.modelContext) private var modelContext
     @Binding var navigationPath: NavigationPath
     @Binding var selectedTab: Int
 
-    @Environment(AIService.self) private var aiService
-
-    @State private var trainingCache: HomeTrainingCache?
-    @State private var trainingCacheRecomputeTask: Task<Void, Never>?
-    @State private var trainingCacheGeneration: UInt64 = 0
-    /// After an empty-workout snapshot, the next non-empty fetch should not wait on debounce.
-    @State private var trainingCacheHasSeenWorkouts = false
-    /// On-device 1–2 word readiness label for the training status header badge. Nil while generating or unavailable.
-    @State private var homeTrainingStatusLabel: String?
+    @State private var viewModel: HomeViewModel
 
     private static let recentWorkoutsDescriptor: FetchDescriptor<Workout> = {
         var d = FetchDescriptor<Workout>(sortBy: [SortDescriptor(\.startDate, order: .reverse)])
@@ -66,6 +28,16 @@ struct HomeView: View {
 
     @Query(HomeView.planProgressDescriptor) private var allProgress: [TrainingPlanProgress]
 
+    init(
+        navigationPath: Binding<NavigationPath>,
+        selectedTab: Binding<Int>,
+        viewModel: HomeViewModel
+    ) {
+        self._navigationPath = navigationPath
+        self._selectedTab = selectedTab
+        self._viewModel = State(initialValue: viewModel)
+    }
+
     // MARK: - Design System
 
     private var bg: Color { AppColor.bg }
@@ -74,6 +46,15 @@ struct HomeView: View {
     private var textPrimary: Color { .white.opacity(AppOpacity.textPrimary) }
     private var textSecondary: Color { .white.opacity(AppOpacity.textSecondary) }
     private var textTertiary: Color { .white.opacity(AppOpacity.textTertiary) }
+
+    // MARK: - Whoop readiness accent color (Presentation-layer concern)
+
+    private var whoopReadinessAccentColor: Color {
+        guard let score = viewModel.whoopRecoveryScore else { return AppColor.whoop.opacity(0.85) }
+        if score >= 67 { return AppColor.success }
+        if score >= 34 { return AppColor.yellow }
+        return AppColor.orange
+    }
 
     // MARK: - Body
 
@@ -109,118 +90,21 @@ struct HomeView: View {
             }
         }
         .onAppear {
-            locationManager.setup()
-            // Pre-warm BLE: start reconnecting to known devices as soon as the
-            // home screen appears, so the trainer is already connected (or
-            // connecting) by the time the user taps "Ride".
-            if bleManager.bluetoothState == .poweredOn,
-                !bleManager.trainerConnectionState.isConnected,
-                !dataSource.wifiConnectionState.isConnected
-            {
-                bleManager.reconnectOrScan()
-            }
+            viewModel.prewarmBLEAndLocation()
         }
         .onChange(of: workouts, initial: true) { _, _ in
-            scheduleTrainingCacheRecompute()
+            viewModel.scheduleTrainingRefresh(workouts: workouts)
         }
         .onReceive(NotificationCenter.default.publisher(for: .mangoxWorkoutAggregatesMayHaveChanged)) {
             _ in
-            scheduleTrainingCacheRecompute()
+            viewModel.scheduleTrainingRefresh(workouts: workouts)
         }
         .task {
-            await whoopService.refreshLinkedDataIfStale()
+            await viewModel.refreshWhoopIfStale()
         }
-        .task(id: trainingCacheGeneration) {
-            guard trainingCache != nil, OnDeviceCoachEngine.isSystemModelAvailable else { return }
-            let factSheet = aiService.coachFactSheetText(modelContext: modelContext)
-            homeTrainingStatusLabel = try? await OnDeviceCoachEngine.generateHomeTrainingInsight(
-                factSheet: factSheet)
+        .task(id: viewModel.trainingStatusRequestID) {
+            await viewModel.generateAITrainingInsight()
         }
-    }
-
-    /// Coalesces SwiftData churn; first populated snapshot runs immediately, then debounces.
-    private func scheduleTrainingCacheRecompute() {
-        if workouts.isEmpty {
-            trainingCacheRecomputeTask?.cancel()
-            trainingCacheGeneration += 1
-            trainingCacheHasSeenWorkouts = false
-            let dto = HomeTrainingAggregateMath.compute(
-                slices: [],
-                now: Date(),
-                timeZone: .current,
-                locale: .current
-            )
-            trainingCache = trainingCacheFromDTO(dto)
-            return
-        }
-        if !trainingCacheHasSeenWorkouts {
-            trainingCacheHasSeenWorkouts = true
-            trainingCacheRecomputeTask?.cancel()
-            Task { @MainActor in
-                await runTrainingCacheGeneration()
-            }
-            return
-        }
-        if trainingCache == nil {
-            trainingCacheRecomputeTask?.cancel()
-            Task { @MainActor in
-                await runTrainingCacheGeneration()
-            }
-        } else {
-            trainingCacheRecomputeTask?.cancel()
-            trainingCacheRecomputeTask = Task { @MainActor in
-                // 120ms debounce balances responsiveness with CPU efficiency
-                // Aggressive churn protection: coalesces rapid SwiftData notifications
-                try? await Task.sleep(for: .milliseconds(120))
-                guard !Task.isCancelled else { return }
-                await runTrainingCacheGeneration()
-            }
-        }
-    }
-
-    @MainActor
-    private func runTrainingCacheGeneration() async {
-        await MangoxDebugPerformance.runInterval("Home.trainingCache") {
-            await runTrainingCacheGenerationBody()
-        }
-    }
-
-    @MainActor
-    private func runTrainingCacheGenerationBody() async {
-        trainingCacheGeneration += 1
-        let generation = trainingCacheGeneration
-        let slices = workouts.map { HomeWorkoutMetricSlice(startDate: $0.startDate, tss: $0.tss) }
-        let now = Date()
-        let timeZone = TimeZone.current
-        let locale = Locale.current
-        let dto = await Task.detached(priority: .utility) {
-            await HomeTrainingAggregateMath.compute(
-                slices: slices,
-                now: now,
-                timeZone: timeZone,
-                locale: locale
-            )
-        }.value
-        guard generation == trainingCacheGeneration else { return }
-        trainingCache = trainingCacheFromDTO(dto)
-    }
-
-    private func trainingCacheFromDTO(_ dto: HomeTrainingCacheDTO) -> HomeTrainingCache {
-        let weekBars = dto.weekBars.map { bar in
-            WeekDayTSS(
-                id: bar.id,
-                day: bar.day,
-                tss: bar.tss,
-                color: weekBarColor(tss: bar.tss)
-            )
-        }
-        return HomeTrainingCache(
-            weeklyTSS: dto.weeklyTSS,
-            chronicLoad: dto.chronicLoad,
-            acwr: dto.acwr,
-            weekRides: dto.weekRides,
-            weekBars: weekBars
-        )
     }
 
     private func weekBarColor(tss: Double) -> Color {
@@ -254,9 +138,9 @@ struct HomeView: View {
     // MARK: - Training Status Card
 
     private var trainingStatusCard: some View {
-        let weeklyTSS = trainingCache?.weeklyTSS ?? 0
-        let chronicLoad = trainingCache?.chronicLoad ?? 300
-        let acwr = trainingCache?.acwr ?? 0
+        let weeklyTSS = viewModel.weeklyTSS
+        let chronicLoad = viewModel.chronicLoad > 0 ? viewModel.chronicLoad : 300
+        let acwr = viewModel.acwr
         let form = formData(acwr: acwr)
         let acwrText = chronicLoad > 0 && !workouts.isEmpty ? String(format: "%.1f", acwr) : "--"
 
@@ -296,13 +180,13 @@ struct HomeView: View {
                 )
                 metricDivider
                 trainingMetric(
-                    value: "\(trainingCache?.weekRides ?? 0)",
+                    value: "\(viewModel.weekRides)",
                     label: "RIDES",
                     color: AppColor.blue
                 )
                 metricDivider
                 trainingMetric(
-                    value: "\(PowerZone.ftp)",
+                    value: "\(viewModel.ftp)",
                     label: "FTP",
                     color: AppColor.orange
                 )
@@ -315,13 +199,13 @@ struct HomeView: View {
             }
 
             // Weekly micro-bars
-            let weekBars = trainingCache?.weekBars ?? []
+            let weekBars = viewModel.weekBars
             let maxTSS = weekBars.map(\.tss).max() ?? 1
             HStack(spacing: 4) {
                 ForEach(weekBars) { dayData in
                     VStack(spacing: 4) {
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(dayData.tss == 0 ? Color.white.opacity(0.06) : dayData.color)
+                            .fill(dayData.tss == 0 ? Color.white.opacity(0.06) : weekBarColor(tss: dayData.tss))
                             .frame(
                                 height: maxTSS > 0 && dayData.tss > 0
                                     ? max(3, CGFloat(dayData.tss / maxTSS) * 24)
@@ -335,7 +219,7 @@ struct HomeView: View {
             }
             .frame(height: 40, alignment: .bottom)
 
-            if whoopService.isConnected, whoopService.isConfigured {
+            if viewModel.whoopConnected, viewModel.whoopConfigured {
                 whoopTrainingStrip
             }
         }
@@ -356,10 +240,10 @@ struct HomeView: View {
                     .foregroundStyle(textTertiary)
                     .tracking(0.6)
 
-                if let pct = whoopService.latestRecoveryScore {
+                if let pct = viewModel.whoopRecoveryScore {
                     Text(String(format: "%.0f%%", pct))
                         .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundStyle(whoopService.readinessAccentColor)
+                        .foregroundStyle(whoopReadinessAccentColor)
                     Text("recovery")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(textTertiary)
@@ -369,7 +253,7 @@ struct HomeView: View {
                         .foregroundStyle(textTertiary)
                 }
 
-                if let rhr = whoopService.latestRecoveryRestingHR {
+                if let rhr = viewModel.whoopRestingHR {
                     Text("·")
                         .font(.system(size: 9))
                         .foregroundStyle(textTertiary.opacity(0.35))
@@ -377,7 +261,7 @@ struct HomeView: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(textTertiary)
                 }
-                if let hrv = whoopService.latestRecoveryHRV {
+                if let hrv = viewModel.whoopHRV {
                     Text("·")
                         .font(.system(size: 9))
                         .foregroundStyle(textTertiary.opacity(0.35))
@@ -388,7 +272,7 @@ struct HomeView: View {
 
                 Spacer(minLength: 4)
 
-                if let last = whoopService.lastSuccessfulRefreshAt {
+                if let last = viewModel.whoopLastRefreshAt {
                     Text(last.formatted(.relative(presentation: .named)))
                         .font(.system(size: 9))
                         .foregroundStyle(textTertiary.opacity(0.55))
@@ -403,9 +287,7 @@ struct HomeView: View {
 
     private var nextWorkoutFromPlanCard: some View {
         Group {
-            if let nw = PlanLibrary.nextScheduledWorkout(
-                allProgress: allProgress, modelContext: modelContext)
-            {
+            if let nw = viewModel.nextScheduledWorkout(allProgress: allProgress) {
                 Button {
                     navigationPath.append(
                         AppRoute.connectionForPlan(planID: nw.planID, dayID: nw.day.id))
@@ -486,7 +368,7 @@ struct HomeView: View {
     }
 
     private func trainingStatusBadgeText(form: (color: Color, icon: String, description: String)) -> String {
-        if let s = homeTrainingStatusLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+        if let s = viewModel.homeTrainingStatusLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
             return s
         }
         return form.description
@@ -495,8 +377,8 @@ struct HomeView: View {
     // MARK: - FTP Prompt
 
     private var needsFTPTest: Bool {
-        if !PowerZone.hasSetFTP { return true }
-        if let lastUpdate = PowerZone.lastFTPUpdate,
+        if !viewModel.hasSetFTP { return true }
+        if let lastUpdate = viewModel.lastFTPUpdate,
             Date().timeIntervalSince(lastUpdate) > 42 * 24 * 3600
         {
             return true
@@ -520,12 +402,12 @@ struct HomeView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(PowerZone.hasSetFTP ? "Recalibrate FTP" : "Set Your FTP")
+                    Text(viewModel.hasSetFTP ? "Recalibrate FTP" : "Set Your FTP")
                         .font(.headline)
                         .foregroundStyle(textPrimary)
 
                     Text(
-                        PowerZone.hasSetFTP
+                        viewModel.hasSetFTP
                             ? "It's been over 6 weeks since your last baseline."
                             : "Required for accurate power zones"
                     )
@@ -602,7 +484,10 @@ struct HomeView: View {
                             Button {
                                 navigationPath.append(AppRoute.summary(workoutID: workout.id))
                             } label: {
-                                HomeRecentRideRow(workout: workout)
+                                HomeRecentRideRow(
+                                    workout: workout,
+                                    trainingPlanLookupService: viewModel.trainingPlanLookupService
+                                )
                             }
                             .buttonStyle(MangoxPressStyle())
                         }
@@ -644,7 +529,18 @@ extension Date {
 // MARK: - Preview
 
 #Preview {
-    HomeView(navigationPath: .constant(NavigationPath()), selectedTab: .constant(0))
+    HomeView(
+        navigationPath: .constant(NavigationPath()),
+        selectedTab: .constant(0),
+        viewModel: HomeViewModel(
+            bleService: BLEManager(),
+            dataSourceService: DataSourceCoordinator(bleManager: BLEManager(), wifiService: WiFiTrainerService()),
+            locationService: LocationManager(),
+            whoopService: WhoopService(),
+            aiService: AIService(),
+            trainingPlanLookupService: TrainingPlanLookupService()
+        )
+    )
         .modelContainer(for: [Workout.self, WorkoutRAGChunk.self, TrainingPlanProgress.self])
         .environment(HealthKitManager())
         .environment(WhoopService())

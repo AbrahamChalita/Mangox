@@ -4,11 +4,7 @@ import SwiftUI
 
 /// Heart rate limits, FTP, and HealthKit — training baselines for zones.
 struct FitnessZonesProfileCard: View {
-    @Environment(HealthKitManager.self) private var healthKitManager
-    @Environment(WhoopService.self) private var whoopService
-    @Environment(FTPRefreshTrigger.self) private var ftpRefresh
-
-    @AppStorage(WhoopService.syncHeartBaselinesDefaultsKey) private var syncWhoopBaselines = true
+    let viewModel: ProfileViewModel
 
     @State private var manualMaxHRInput = ""
     @State private var manualRestingHRInput = ""
@@ -38,7 +34,7 @@ struct FitnessZonesProfileCard: View {
             loadManualOverrideInputs()
             ftpDraft = PowerZone.ftp
         }
-        .onChange(of: ftpRefresh.generation) { _, _ in
+        .onChange(of: viewModel.ftpGeneration) { _, _ in
             ftpDraft = PowerZone.ftp
         }
         .sheet(isPresented: $showFTPHistory) {
@@ -57,7 +53,7 @@ struct FitnessZonesProfileCard: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.45))
                 Spacer()
-                if healthKitManager.isAuthorized {
+                if viewModel.healthKitIsAuthorized {
                     HStack(spacing: 4) {
                         Text("Health")
                             .font(.system(size: 9))
@@ -105,14 +101,14 @@ struct FitnessZonesProfileCard: View {
                     unit: HeartRateZone.hasRestingHR ? "bpm" : "",
                     source: profileRestingHRSource
                 )
-                if let vo2 = healthKitManager.vo2Max {
+                if let vo2 = viewModel.healthKitVo2Max {
                     healthMetric(
                         label: "VO2 Max",
                         value: String(format: "%.1f", vo2),
                         unit: "",
                         source: "Health"
                     )
-                } else if whoopService.isConnected {
+                } else if viewModel.whoopConnected {
                     healthMetric(
                         label: "VO2 Max",
                         value: "—",
@@ -122,7 +118,7 @@ struct FitnessZonesProfileCard: View {
                 }
             }
 
-            if healthKitManager.vo2Max == nil && whoopService.isConnected {
+            if viewModel.healthKitVo2Max == nil && viewModel.whoopConnected {
                 Text(
                     "WHOOP’s API doesn’t include VO₂ max. Enable Apple Health above to pull VO₂ from Apple Watch or other apps."
                 )
@@ -283,7 +279,7 @@ struct FitnessZonesProfileCard: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            if !healthKitManager.isAuthorized {
+            if !viewModel.healthKitIsAuthorized {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 6) {
                         Image(systemName: "info.circle")
@@ -296,7 +292,7 @@ struct FitnessZonesProfileCard: View {
                         .foregroundStyle(.white.opacity(0.25))
                     }
                     Button {
-                        Task { await healthKitManager.requestAuthorization() }
+                        Task { await viewModel.requestHealthKitAuthorization() }
                     } label: {
                         Text("Enable HealthKit")
                             .font(.system(size: 12, weight: .semibold))
@@ -322,19 +318,19 @@ struct FitnessZonesProfileCard: View {
 
     private var profileMaxHRSource: String {
         if HeartRateZone.hasManualMaxHROverride { return "Manual" }
-        if syncWhoopBaselines, whoopService.isConnected, whoopService.latestMaxHeartRateFromProfile != nil {
+        if viewModel.whoopSyncHeartBaselinesFromWhoop, viewModel.whoopConnected, viewModel.whoopLatestMaxHeartRateFromProfile != nil {
             return "WHOOP"
         }
-        if healthKitManager.maxHeartRate != nil { return "Health" }
+        if viewModel.healthKitMaxHeartRate != nil { return "Health" }
         return "Estimated"
     }
 
     private var profileRestingHRSource: String {
         if HeartRateZone.hasManualRestingHROverride { return "Manual" }
-        if syncWhoopBaselines, whoopService.isConnected, whoopService.latestRecoveryRestingHR != nil {
+        if viewModel.whoopSyncHeartBaselinesFromWhoop, viewModel.whoopConnected, viewModel.whoopLatestRecoveryRestingHR != nil {
             return "WHOOP"
         }
-        if healthKitManager.restingHeartRate != nil { return "Health" }
+        if viewModel.healthKitRestingHeartRate != nil { return "Health" }
         return HeartRateZone.hasRestingHR ? "Default" : "Not set"
     }
 
@@ -363,20 +359,7 @@ struct FitnessZonesProfileCard: View {
     }
 
     private func syncHealthKitToZones() {
-        if whoopService.syncHeartBaselinesFromWhoop && whoopService.isConnected {
-            whoopService.applyHeartBaselinesFromLatestWhoopData()
-            return
-        }
-        let effectiveMax = healthKitManager.effectiveMaxHR
-        if effectiveMax > 0, !HeartRateZone.hasManualMaxHROverride {
-            HeartRateZone.maxHR = effectiveMax
-        }
-        if let resting = healthKitManager.restingHeartRate,
-            resting > 0,
-            !HeartRateZone.hasManualRestingHROverride
-        {
-            HeartRateZone.restingHR = resting
-        }
+        viewModel.syncHealthKitToZones()
     }
 
     private func loadManualOverrideInputs() {
@@ -425,7 +408,7 @@ struct FitnessZonesProfileCard: View {
 
 /// Strava OAuth — uploads and account link, separate from training baselines.
 struct StravaConnectionCard: View {
-    @Environment(StravaService.self) private var stravaService
+    let viewModel: ProfileViewModel
 
     @State private var stravaStatus: String?
 
@@ -440,29 +423,29 @@ struct StravaConnectionCard: View {
                     .foregroundStyle(.white.opacity(0.45))
                 Spacer()
                 Circle()
-                    .fill(stravaService.isConnected ? AppColor.success : AppColor.discord)
+                    .fill(viewModel.stravaConnected ? AppColor.success : AppColor.discord)
                     .frame(width: 8, height: 8)
-                Text(stravaService.isConnected ? "Connected" : "Not connected")
+                Text(viewModel.stravaConnected ? "Connected" : "Not connected")
                     .font(.system(size: 9))
                     .foregroundStyle(
-                        stravaService.isConnected ? AppColor.success : AppColor.discord)
+                        viewModel.stravaConnected ? AppColor.success : AppColor.discord)
             }
 
-            if !stravaService.isConfigured {
+            if !viewModel.stravaIsConfigured {
                 Text("Set STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET in build settings.")
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.32))
             } else {
                 Button {
-                    if stravaService.isConnected { disconnectStrava() } else { connectStrava() }
+                    if viewModel.stravaConnected { disconnectStrava() } else { connectStrava() }
                 } label: {
                     HStack(spacing: 8) {
                         Image(
-                            systemName: stravaService.isConnected
+                            systemName: viewModel.stravaConnected
                                 ? "link.circle" : "link.badge.plus"
                         )
                         .font(.system(size: 12, weight: .semibold))
-                        Text(stravaService.isConnected ? "Disconnect Strava" : "Connect Strava")
+                        Text(viewModel.stravaConnected ? "Disconnect Strava" : "Connect Strava")
                             .font(.system(size: 12, weight: .semibold))
                     }
                     .foregroundStyle(.white)
@@ -473,7 +456,7 @@ struct StravaConnectionCard: View {
                     .overlay(Capsule().strokeBorder(AppColor.discord.opacity(0.35), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
-                .disabled(stravaService.isBusy)
+                .disabled(viewModel.stravaIsBusy)
 
                 Text("Account-level setting: ride summaries handle upload details.")
                     .font(.system(size: 10))
@@ -485,7 +468,7 @@ struct StravaConnectionCard: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.35))
             }
-            if let serviceError = stravaService.lastError, !serviceError.isEmpty {
+            if let serviceError = viewModel.stravaLastError, !serviceError.isEmpty {
                 Text(serviceError)
                     .font(.system(size: 10))
                     .foregroundStyle(Color.orange.opacity(0.8))
@@ -503,9 +486,9 @@ struct StravaConnectionCard: View {
     private func connectStrava() {
         Task {
             do {
-                try await stravaService.connect()
+                try await viewModel.connectStrava()
                 stravaStatus =
-                    "Connected as \(stravaService.athleteDisplayName ?? "Strava athlete")."
+                    "Connected as \(viewModel.stravaDisplayName ?? "Strava athlete")."
             } catch {
                 stravaStatus =
                     (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -514,7 +497,7 @@ struct StravaConnectionCard: View {
     }
 
     private func disconnectStrava() {
-        stravaService.disconnect()
+        viewModel.disconnectStrava()
         stravaStatus = "Strava disconnected."
     }
 }

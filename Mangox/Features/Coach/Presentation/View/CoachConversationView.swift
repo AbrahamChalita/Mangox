@@ -17,9 +17,7 @@ private enum CoachChatColumnWidthKey: PreferenceKey {
 /// Primary coach chat surface: streaming replies and plan-builder entry.
 /// Avoids a root `GeometryReader` so the system keyboard safe area correctly lifts the transcript.
 struct CoachConversationView: View {
-    @Environment(AIService.self) private var aiService
-    @Environment(PurchasesManager.self) private var purchases
-    @Environment(\.modelContext) private var modelContext
+    @Environment(CoachViewModel.self) private var coachViewModel
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     @Binding var navigationPath: NavigationPath
@@ -33,8 +31,6 @@ struct CoachConversationView: View {
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
     /// Recreates `ScrollView` when the thread first appears (empty → messages) so layout/scroll state does not stick blank until a manual scroll.
     @State private var transcriptScrollSession: Int = 0
-    @State private var didRequestPersistedLoad = false
-    @State private var starterContent: AIService.CoachEmptyStartersContent?
 
     private static let planBuilderSeed =
         "I want to build a structured training plan for an event. Ask me about my goal, target date, weekly training hours, and experience, then outline next steps."
@@ -49,7 +45,7 @@ struct CoachConversationView: View {
     }()
 
     private var latestAssistantIndex: Int? {
-        aiService.messages.lastIndex { $0.role == .assistant }
+        coachViewModel.messages.lastIndex { $0.role == .assistant }
     }
 
     private static func bubbleMaxWidth(containerWidth: CGFloat) -> CGFloat {
@@ -86,21 +82,17 @@ struct CoachConversationView: View {
         .sheet(item: $auxiliarySheet) { sheet in
             switch sheet {
             case .paywall:
-                PaywallView()
+                PaywallView(viewModel: PaywallViewModel(purchasesService: PurchasesManager.shared))
             case .plans:
                 CoachPlansSheet(
                     navigationPath: $navigationPath, dismissParentChat: $chatSheetPresented)
             }
         }
         .task {
-            guard !didRequestPersistedLoad else { return }
-            didRequestPersistedLoad = true
-            await Task.yield()
-            await aiService.loadPersistedMessages(modelContext: modelContext)
+            await coachViewModel.loadPersistedMessagesIfNeeded()
         }
-        .task(id: "\(aiService.currentSessionID?.uuidString ?? "none")") {
-            guard aiService.messages.isEmpty else { return }
-            starterContent = await aiService.loadCoachEmptyStartersContent(modelContext: modelContext)
+        .task(id: "\(coachViewModel.currentSessionID?.uuidString ?? "none")") {
+            await coachViewModel.refreshStarterContentIfNeeded()
         }
     }
 
@@ -147,10 +139,10 @@ struct CoachConversationView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(AppColor.mango)
                     .accessibilityLabel("Plan builder")
-                    .disabled(aiService.isLoading)
+                    .disabled(coachViewModel.isLoading)
 
                     Button {
-                        aiService.createNewSession(modelContext: modelContext)
+                        coachViewModel.createNewSession()
                     } label: {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 17, weight: .medium))
@@ -160,7 +152,7 @@ struct CoachConversationView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(.white.opacity(0.5))
                     .accessibilityLabel("New conversation")
-                    .disabled(aiService.isLoading)
+                    .disabled(coachViewModel.isLoading)
                 }
             }
             .padding(.horizontal, 8)
@@ -210,8 +202,8 @@ struct CoachConversationView: View {
                 metricCapsule(
                     icon: "heart.fill", label: "Max HR", value: "\(HeartRateZone.maxHR)",
                     color: AppColor.heartRate)
-                if !purchases.isPro {
-                    if AIService.bypassesDailyCoachMessageLimit {
+                if !coachViewModel.isPro {
+                    if coachViewModel.bypassesDailyLimit {
                         metricCapsule(
                             icon: "person.fill.checkmark",
                             label: "Coach",
@@ -219,7 +211,7 @@ struct CoachConversationView: View {
                             color: AppColor.mango.opacity(0.85)
                         )
                     } else {
-                        let left = max(0, AIService.freeDailyLimit - aiService.todayMessageCount)
+                        let left = coachViewModel.remainingFreeMessages(isPro: coachViewModel.isPro)
                         metricCapsule(
                             icon: "bubble.left.fill",
                             label: "Today",
@@ -261,30 +253,30 @@ struct CoachConversationView: View {
 
     private func messageScroll(maxW: CGFloat) -> some View {
         ScrollView {
-            if aiService.messages.isEmpty && !aiService.isLoading {
+            if coachViewModel.messages.isEmpty && !coachViewModel.isLoading {
                 emptyState(maxW: maxW)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .scrollTargetLayout()
             } else {
                 // `VStack` avoids LazyVStack deferring layout until scroll (blank transcript until user drags).
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(aiService.messages.enumerated()), id: \.element.id) {
+                    ForEach(Array(coachViewModel.messages.enumerated()), id: \.element.id) {
                         index, message in
                         CoachMessageRow(
                             message: message,
                             isLatestAssistant: message.role == .assistant
                                 && (latestAssistantIndex.map { $0 == index } ?? false),
                             bubbleMaxWidth: maxW,
-                            suggestionsInteractive: !aiService.isLoading,
+                            suggestionsInteractive: !coachViewModel.isLoading,
                             onRetry: { send("Try again") },
                             onSuggestedAction: handleSuggestedAction,
                             onFollowUpBatchComplete: { send($0) }
                         )
                     }
 
-                    if aiService.generatingPlan && !aiService.isLoading {
+                    if coachViewModel.generatingPlan && !coachViewModel.isLoading {
                         CoachStreamStatusRow(
-                            text: aiService.planProgress?.message ?? "Building your plan…"
+                            text: coachViewModel.planProgress?.message ?? "Building your plan…"
                         )
                         .id("planGen")
                     }
@@ -309,21 +301,21 @@ struct CoachConversationView: View {
             }
         }
         .id(transcriptScrollSession)
-        .defaultScrollAnchor(aiService.messages.isEmpty ? .top : .bottom)
+        .defaultScrollAnchor(coachViewModel.messages.isEmpty ? .top : .bottom)
         .scrollBounceBehavior(.basedOnSize, axes: .vertical)
         .scrollDismissesKeyboard(.interactively)
         .scrollIndicators(.hidden)
         .scrollPosition($scrollPosition)
-        .onChange(of: aiService.messages.count) { oldCount, newCount in
+        .onChange(of: coachViewModel.messages.count) { oldCount, newCount in
             if oldCount == 0, newCount > 0 {
                 transcriptScrollSession += 1
             }
             withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
         }
-        .onChange(of: aiService.isLoading) { _, _ in
+        .onChange(of: coachViewModel.isLoading) { _, _ in
             withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
         }
-        .onChange(of: aiService.generatingPlan) { _, g in
+        .onChange(of: coachViewModel.generatingPlan) { _, g in
             if g {
                 withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
             }
@@ -331,19 +323,19 @@ struct CoachConversationView: View {
 
         // Plan confirm / success banners live in the bottom safeAreaInset; when they appear the visible
         // transcript shifts up — nudge scroll so the last message + chips stay above the inset (same idea as keyboard).
-        .onChange(of: aiService.planConfirmationDraft?.id) { _, _ in
+        .onChange(of: coachViewModel.planConfirmationDraft?.id) { _, _ in
             withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
         }
-        .onChange(of: aiService.planSaveCelebration?.planID) { _, _ in
+        .onChange(of: coachViewModel.planSaveCelebration?.planID) { _, _ in
             withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
         }
     }
 
     private func emptyState(maxW: CGFloat) -> some View {
         let content =
-            starterContent
-            ?? AIService.CoachEmptyStartersContent(
-                prompts: aiService.contextualQuickPrompts(modelContext: modelContext),
+            coachViewModel.starterContent
+            ?? CoachEmptyStartersContent(
+                prompts: coachViewModel.contextualQuickPrompts(),
                 topicTags: []
             )
 
@@ -361,7 +353,7 @@ struct CoachConversationView: View {
             )
             .frame(maxWidth: maxW)
 
-            if aiService.hasReachedFreeLimit(isPro: purchases.isPro) {
+            if coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) {
                 dailyLimitCard
                     .padding(.top, 22)
             }
@@ -407,11 +399,11 @@ struct CoachConversationView: View {
     // MARK: Input
 
     private var showComposerLimitBanner: Bool {
-        aiService.hasReachedFreeLimit(isPro: purchases.isPro) && !aiService.messages.isEmpty
+        coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) && !coachViewModel.messages.isEmpty
     }
 
     private var coachPlanSheetActive: Bool {
-        aiService.planConfirmationDraft != nil || aiService.planSaveCelebration != nil
+        coachViewModel.planConfirmationDraft != nil || coachViewModel.planSaveCelebration != nil
     }
 
     /// Extra lift so the last coach bubble clears the plan card; smaller spacer when the inset is tall.
@@ -427,7 +419,7 @@ struct CoachConversationView: View {
             showComposerLimitBanner: showComposerLimitBanner,
             sendAction: { send($0) },
             onFocusChanged: { focused in
-                if focused && !aiService.messages.isEmpty {
+                if focused && !coachViewModel.messages.isEmpty {
                     withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
                 }
             }
@@ -443,31 +435,31 @@ struct CoachConversationView: View {
         guard !trimmed.isEmpty else { return }
         HapticManager.shared.coachMessageSent()
         Task { @MainActor in
-            await aiService.sendMessage(
-                trimmed, isPro: purchases.isPro, modelContext: modelContext, delivery: delivery)
+            await coachViewModel.sendMessage(
+                trimmed, isPro: coachViewModel.isPro, delivery: delivery)
         }
     }
 
     /// Taps on model-provided `suggestedActions` chips (same JSON contract as the Mangox Cloud coach).
     private func handleSuggestedAction(_ action: SuggestedAction) {
-        guard !aiService.isLoading else { return }
+        guard !coachViewModel.isLoading else { return }
         let kind = action.type.lowercased()
         if kind == "escalate_cloud" {
             HapticManager.shared.coachQuickReplyTapped()
             Task { @MainActor in
-                await aiService.escalateStarterOnDeviceToCloud(
-                    isPro: purchases.isPro, modelContext: modelContext)
+                await coachViewModel.escalateStarterOnDeviceToCloud(
+                    isPro: coachViewModel.isPro)
             }
             return
         }
-        guard !aiService.hasReachedFreeLimit(isPro: purchases.isPro) else {
+        guard !coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) else {
             auxiliarySheet = .paywall
             return
         }
         HapticManager.shared.coachQuickReplyTapped()
         switch kind {
         case "navigate_to_plan":
-            navigationPath.append(AppRoute.trainingPlan)
+            auxiliarySheet = .plans
         case "navigate_to_my_plans", "open_my_plans":
             auxiliarySheet = .plans
         default:
@@ -477,26 +469,26 @@ struct CoachConversationView: View {
 }
 
 struct CoachStreamingSection: View {
-    @Environment(AIService.self) private var aiService
+    @Environment(CoachViewModel.self) private var coachViewModel
     @Binding var lastStreamScrollDate: Date
     let scheduleScrollToBottom: () -> Void
 
     var body: some View {
-        if aiService.isLoading {
+        if coachViewModel.isLoading {
             Group {
-                if !aiService.streamDraftText.isEmpty {
+                if !coachViewModel.streamDraftText.isEmpty {
                     CoachStreamingBubble(
-                        text: aiService.streamDraftText,
-                        style: aiService.streamUsesOnDeviceAppearance ? .onDevice : .cloud
+                        text: coachViewModel.streamDraftText,
+                        style: coachViewModel.streamUsesOnDeviceAppearance ? .onDevice : .cloud
                     )
                     .id("streaming")
-                } else if aiService.streamIsThinking {
+                } else if coachViewModel.streamIsThinking {
                     CoachStreamStatusRow(
-                        text: aiService.streamUsesOnDeviceAppearance
+                        text: coachViewModel.streamUsesOnDeviceAppearance
                             ? "Structuring on-device answer…" : "Reasoning…"
                     )
                     .id("thinking")
-                } else if let status = aiService.streamStatusText, !status.isEmpty {
+                } else if let status = coachViewModel.streamStatusText, !status.isEmpty {
                     CoachStreamStatusRow(text: status)
                         .id("status")
                 } else {
@@ -506,8 +498,8 @@ struct CoachStreamingSection: View {
             }
             // Same contract as `CoachMessageRow`: occupy the row width, keep stream/typing rows leading-aligned.
             .frame(maxWidth: .infinity, alignment: .leading)
-            .onChange(of: aiService.streamDraftText) { _, _ in
-                guard aiService.isLoading, !aiService.streamDraftText.isEmpty else { return }
+            .onChange(of: coachViewModel.streamDraftText) { _, _ in
+                guard coachViewModel.isLoading, !coachViewModel.streamDraftText.isEmpty else { return }
                 let now = Date()
                 guard now.timeIntervalSince(lastStreamScrollDate) >= 0.22 else { return }
                 lastStreamScrollDate = now
@@ -525,16 +517,15 @@ struct CoachInputBarWrapper: View {
     let sendAction: (String) -> Void
     let onFocusChanged: (Bool) -> Void
 
-    @Environment(AIService.self) private var aiService
-    @Environment(PurchasesManager.self) private var purchases
+    @Environment(CoachViewModel.self) private var coachViewModel
 
     @State private var inputText = ""
     @FocusState private var inputFocused: Bool
 
     private var canSendFromKeyboard: Bool {
         let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty && !aiService.isLoading
-            && !aiService.hasReachedFreeLimit(isPro: purchases.isPro)
+        return !trimmed.isEmpty && !coachViewModel.isLoading
+            && !coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro)
     }
 
     var body: some View {
@@ -589,8 +580,7 @@ struct CoachInputBarWrapper: View {
 }
 
 struct InputBarView: View {
-    @Environment(AIService.self) private var aiService
-    @Environment(PurchasesManager.self) private var purchases
+    @Environment(CoachViewModel.self) private var coachViewModel
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     @Binding var navigationPath: NavigationPath
@@ -603,12 +593,12 @@ struct InputBarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let draft = aiService.planConfirmationDraft {
+            if let draft = coachViewModel.planConfirmationDraft {
                 CoachPlanConfirmBanner(draft: draft, navigationPath: $navigationPath)
                     .padding(.horizontal, 14)
                     .padding(.top, 8)
                     .padding(.bottom, 6)
-            } else if let celeb = aiService.planSaveCelebration {
+            } else if let celeb = coachViewModel.planSaveCelebration {
                 CoachPlanSuccessBanner(
                     celebration: celeb,
                     navigationPath: $navigationPath,
@@ -687,8 +677,8 @@ struct InputBarView: View {
         let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let canSend =
             !trimmed.isEmpty
-            && !aiService.isLoading
-            && !aiService.hasReachedFreeLimit(isPro: purchases.isPro)
+            && !coachViewModel.isLoading
+            && !coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro)
 
         return Button {
             sendAction(inputText)
@@ -704,9 +694,9 @@ struct InputBarView: View {
         }
         .buttonStyle(MangoxPressStyle())
         .disabled(!canSend)
-        .accessibilityLabel(aiService.isLoading ? "Sending message" : "Send message")
+        .accessibilityLabel(coachViewModel.isLoading ? "Sending message" : "Send message")
         .accessibilityHintIf(
-            !canSend && aiService.hasReachedFreeLimit(isPro: purchases.isPro)
+            !canSend && coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro)
                 ? "Daily message limit reached. Upgrade to Pro to continue."
                 : ""
         )

@@ -7,12 +7,14 @@ import SwiftData
 struct AITrainingPlanView: View {
     let planID: String
     @Binding var navigationPath: NavigationPath
+    private let viewModel: TrainingViewModel
 
     @Query private var aiPlans: [AIGeneratedPlan]
 
-    init(planID: String, navigationPath: Binding<NavigationPath>) {
+    init(planID: String, navigationPath: Binding<NavigationPath>, viewModel: TrainingViewModel) {
         self.planID = planID
         _navigationPath = navigationPath
+        self.viewModel = viewModel
         let pid = planID
         var d = FetchDescriptor<AIGeneratedPlan>(
             predicate: #Predicate<AIGeneratedPlan> { $0.id == pid }
@@ -27,7 +29,7 @@ struct AITrainingPlanView: View {
 
     var body: some View {
         if let plan = resolvedPlan {
-            TrainingPlanView(navigationPath: $navigationPath, plan: plan)
+            TrainingPlanView(navigationPath: $navigationPath, plan: plan, viewModel: viewModel)
         } else {
             ContentUnavailableView(
                 "Plan not found",

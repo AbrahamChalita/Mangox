@@ -43,6 +43,7 @@ private enum CalendarWorkoutQuery {
 /// Calendar month view showing ride history, with an optional list layout.
 /// Each day shows a colored dot for rides, with tap-to-inspect.
 struct CalendarView: View {
+    @Environment(DIContainer.self) private var di
     @Environment(\.modelContext) private var modelContext
     @Binding var navigationPath: NavigationPath
 
@@ -101,6 +102,7 @@ struct CalendarView: View {
                     listContent
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .onChange(of: screenModeRaw) { _, _ in
             if screenMode == .list {
@@ -234,7 +236,10 @@ struct CalendarView: View {
                                     Button {
                                         navigationPath.append(AppRoute.summary(workoutID: workout.id))
                                     } label: {
-                                        WorkoutRowView(workout: workout)
+                                        WorkoutRowView(
+                                            workout: workout,
+                                            trainingPlanLookupService: di.trainingPlanLookupService
+                                        )
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -263,7 +268,10 @@ struct CalendarView: View {
                                     Button {
                                         navigationPath.append(AppRoute.summary(workoutID: workout.id))
                                     } label: {
-                                        WorkoutRowView(workout: workout)
+                                        WorkoutRowView(
+                                            workout: workout,
+                                            trainingPlanLookupService: di.trainingPlanLookupService
+                                        )
                                     }
                                     .buttonStyle(.plain)
                                     .padding(.bottom, 8)

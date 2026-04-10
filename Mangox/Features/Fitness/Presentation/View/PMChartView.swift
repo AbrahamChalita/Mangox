@@ -5,13 +5,11 @@ import SwiftUI
 /// Performance Management Chart (PMC) showing CTL, ATL, and TSB over time.
 /// The industry-standard training load visualization.
 struct PMChartView: View {
-    @Environment(\.modelContext) private var modelContext
     @Binding var navigationPath: NavigationPath
+    @State private var viewModel: FitnessViewModel
 
     /// Hard cap keeps the stats tab responsive; matches footnote when the store returns a full page.
     private static let pmcFetchLimit = 600
-    /// Days before the visible window start to replay CTL/ATL so the curve isn’t reset from zero.
-    private static let pmcWarmBackDays = 180
 
     private static let pmcWorkoutsDescriptor: FetchDescriptor<Workout> = {
         var d = FetchDescriptor<Workout>(sortBy: [SortDescriptor(\.startDate, order: .reverse)])
@@ -30,15 +28,15 @@ struct PMChartView: View {
 
     @Query(Self.recentPlanProgressDescriptor) private var recentPlanProgress: [TrainingPlanProgress]
 
-    @State private var pmcData: [PMCPoint] = []
-    @State private var powerCurvePoints: [PowerCurveAnalytics.Point] = []
-    @State private var pmcRebuildTask: Task<Void, Never>?
-    @State private var rangeDays: Int = 90
-    @State private var showCTL = true
-    @State private var showATL = true
-    @State private var showTSB = true
+    @MainActor
+    private var workoutSnapshots: [WorkoutMetricsSnapshot] {
+        allWorkouts.map { WorkoutMetricsSnapshot(from: $0) }
+    }
 
-    private let rangeOptions = [30, 60, 90, 180, 365]
+    init(navigationPath: Binding<NavigationPath>, viewModel: FitnessViewModel) {
+        _navigationPath = navigationPath
+        _viewModel = State(initialValue: viewModel)
+    }
 
     var body: some View {
         ZStack {
@@ -51,14 +49,14 @@ struct PMChartView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 16)
 
-                    if let compliance = activePlanCompliance {
+                    if let compliance = viewModel.planCompliance {
                         planComplianceCard(compliance)
                             .padding(.horizontal, 20)
                             .padding(.bottom, 16)
                     }
 
                     // Training load hero card — overlaps chart
-                    if let latest = pmcData.last {
+                    if let latest = viewModel.pmcData.last {
                         trainingLoadHero(latest)
                             .padding(.horizontal, 20)
                             .padding(.bottom, 20)
@@ -66,27 +64,29 @@ struct PMChartView: View {
 
                     // Range selector
                     HStack(spacing: 0) {
-                        ForEach(rangeOptions, id: \.self) { days in
+                        ForEach(viewModel.rangeOptions, id: \.self) { days in
+                            let isSelected = days == viewModel.rangeDays
+                            let dayLabel = "\(days)d"
                             Button(action: {
                                 withAnimation {
-                                    rangeDays = days
-                                    schedulePMCRebuild()
+                                    viewModel.setRange(days)
+                                    viewModel.schedulePMCRebuild(with: workoutSnapshots)
                                 }
                             }) {
-                                Text("\(days)d")
+                                Text(dayLabel)
                                     .font(
                                         .system(
                                             size: 13,
-                                            weight: days == rangeDays ? .semibold : .medium)
+                                            weight: isSelected ? .semibold : .medium)
                                     )
                                     .foregroundStyle(
-                                        days == rangeDays ? .black : .white.opacity(0.6)
+                                        isSelected ? .black : .white.opacity(0.6)
                                     )
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 8)
                                     .background(
                                         Capsule()
-                                            .fill(days == rangeDays ? AppColor.mango : Color.clear)
+                                            .fill(isSelected ? AppColor.mango : Color.clear)
                                     )
                             }
                         }
@@ -99,9 +99,9 @@ struct PMChartView: View {
 
                     // Legend
                     HStack(spacing: 16) {
-                        legendItem(label: "Fitness", color: AppColor.blue, isOn: $showCTL)
-                        legendItem(label: "Fatigue", color: AppColor.red, isOn: $showATL)
-                        legendItem(label: "Form", color: AppColor.success, isOn: $showTSB)
+                        legendItem(label: "Fitness", color: AppColor.blue, isOn: $viewModel.showCTL)
+                        legendItem(label: "Fatigue", color: AppColor.red, isOn: $viewModel.showATL)
+                        legendItem(label: "Form", color: AppColor.success, isOn: $viewModel.showTSB)
                         Spacer()
                     }
                     .padding(.horizontal, 20)
@@ -112,7 +112,7 @@ struct PMChartView: View {
                         .padding(.bottom, 8)
 
                     // Chart
-                    if pmcData.isEmpty {
+                    if viewModel.pmcData.isEmpty {
                         emptyState
                     } else {
                         pmcChart
@@ -120,13 +120,13 @@ struct PMChartView: View {
                     }
 
                     // CTL / ATL / TSB breakdown
-                    if let latest = pmcData.last {
+                    if let latest = viewModel.pmcData.last {
                         metricStrip(latest)
                             .padding(.horizontal, 20)
                             .padding(.top, 20)
                     }
 
-                    if !powerCurvePoints.isEmpty {
+                    if !viewModel.powerCurve.isEmpty {
                         powerCurveSection
                             .padding(.horizontal, 20)
                             .padding(.top, 24)
@@ -139,18 +139,15 @@ struct PMChartView: View {
         }
         .navigationBarBackButtonHidden()
         .onChange(of: allWorkouts, initial: true) { _, _ in
-            schedulePMCRebuild()
+            viewModel.schedulePMCRebuild(with: workoutSnapshots)
         }
         .onReceive(NotificationCenter.default.publisher(for: .mangoxWorkoutAggregatesMayHaveChanged)) {
             _ in
-            schedulePMCRebuild()
+            viewModel.schedulePMCRebuild(with: workoutSnapshots)
         }
-    }
-
-    private var activePlanCompliance: PlanWeekCompliance.Snapshot? {
-        guard let p = recentPlanProgress.first else { return nil }
-        let plan = PlanLibrary.resolvePlan(planID: p.planID, modelContext: modelContext)
-        return PlanWeekCompliance.snapshot(progress: p, plan: plan, recentWorkouts: allWorkouts)
+        .onChange(of: recentPlanProgress, initial: true) { _, _ in
+            viewModel.updatePlanCompliance(progress: recentPlanProgress, workouts: workoutSnapshots)
+        }
     }
 
     private var pmcAtFetchCap: Bool {
@@ -167,7 +164,7 @@ struct PMChartView: View {
             .fixedSize(horizontal: false, vertical: true)
             if pmcAtFetchCap {
                 Text(
-                    "You’re at that cap — oldest rides in this query are omitted; fitness trend still warms up from the included history."
+                    "You're at that cap — oldest rides in this query are omitted; fitness trend still warms up from the included history."
                 )
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.48))
@@ -175,20 +172,6 @@ struct PMChartView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func schedulePMCRebuild() {
-        if allWorkouts.isEmpty || pmcData.isEmpty {
-            pmcRebuildTask?.cancel()
-            rebuild()
-            return
-        }
-        pmcRebuildTask?.cancel()
-        pmcRebuildTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(64))
-            guard !Task.isCancelled else { return }
-            rebuild()
-        }
     }
 
     // MARK: - Header
@@ -269,13 +252,13 @@ struct PMChartView: View {
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(.white.opacity(0.9))
             Text(
-                "Best average power for each duration — rides with a power meter in the last \(rangeDays) days (up to 80 sessions)."
+                "Best average power for each duration — rides with a power meter in the last \(viewModel.rangeDays) days (up to 80 sessions)."
             )
             .font(.system(size: 11))
             .foregroundStyle(.white.opacity(0.38))
             .fixedSize(horizontal: false, vertical: true)
 
-            Chart(powerCurvePoints) { pt in
+            Chart(viewModel.powerCurve) { pt in
                 BarMark(
                     x: .value("Duration", powerDurationLabel(pt.durationSeconds)),
                     y: .value("Watts", pt.watts)
@@ -382,8 +365,8 @@ struct PMChartView: View {
             .padding(.bottom, 16)
 
             // Mini sparkline showing recent TSB trend
-            if pmcData.count > 7 {
-                let recentTSB = Array(pmcData.suffix(min(30, pmcData.count)).map(\.tsb))
+            if viewModel.pmcData.count > 7 {
+                let recentTSB = Array(viewModel.pmcData.suffix(min(30, viewModel.pmcData.count)).map(\.tsb))
                 miniSparkline(values: recentTSB, color: statusColor)
                     .frame(height: 40)
                     .padding(.horizontal, 16)
@@ -541,8 +524,8 @@ struct PMChartView: View {
 
     private var pmcChart: some View {
         Chart {
-            if showTSB {
-                ForEach(pmcData) { point in
+            if viewModel.showTSB {
+                ForEach(viewModel.pmcData) { point in
                     AreaMark(
                         x: .value("Date", point.date),
                         yStart: .value("TSB Zero", 0),
@@ -562,8 +545,8 @@ struct PMChartView: View {
                 }
             }
 
-            if showCTL {
-                ForEach(pmcData) { point in
+            if viewModel.showCTL {
+                ForEach(viewModel.pmcData) { point in
                     LineMark(
                         x: .value("Date", point.date),
                         y: .value("CTL", point.ctl)
@@ -573,8 +556,8 @@ struct PMChartView: View {
                 }
             }
 
-            if showATL {
-                ForEach(pmcData) { point in
+            if viewModel.showATL {
+                ForEach(viewModel.pmcData) { point in
                     LineMark(
                         x: .value("Date", point.date),
                         y: .value("ATL", point.atl)
@@ -604,10 +587,6 @@ struct PMChartView: View {
         .padding()
         .background(Color.white.opacity(0.02))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        // Flatten chart layers for smoother scrolling / tab transitions (bounded height).
-        // drawingGroup rasterizes the complex Chart into a single CALayer.
-        // Performance note: If Instruments shows excessive off-screen passes on tab switch,
-        // consider .compositingGroup() instead. Verify with Core Animation instrument.
         .drawingGroup()
     }
 
@@ -629,116 +608,4 @@ struct PMChartView: View {
         }
         .frame(maxWidth: .infinity)
     }
-
-    // MARK: - Computation
-
-    private static func computeDataRange(_ data: [PMCPoint]) -> (
-        maxVal: Double, tsbMin: Double, tsbMax: Double
-    ) {
-        var ctlMax = -Double.greatestFiniteMagnitude
-        var atlMax = -Double.greatestFiniteMagnitude
-        var tsbMin = Double.greatestFiniteMagnitude
-        var tsbMax = -Double.greatestFiniteMagnitude
-        for pt in data {
-            if pt.ctl > ctlMax { ctlMax = pt.ctl }
-            if pt.atl > atlMax { atlMax = pt.atl }
-            if pt.tsb < tsbMin { tsbMin = pt.tsb }
-            if pt.tsb > tsbMax { tsbMax = pt.tsb }
-        }
-        return (
-            maxVal: max(max(ctlMax, atlMax) * 1.1, 50),
-            tsbMin: min(tsbMin * 1.2, -10),
-            tsbMax: max(tsbMax * 1.2, 50)
-        )
-    }
-
-    private func rebuild() {
-        MangoxDebugPerformance.runInterval("PMC.rebuild") {
-            rebuildImpl()
-        }
-    }
-
-    private func rebuildImpl() {
-        rebuildPowerCurve()
-
-        guard !allWorkouts.isEmpty else {
-            pmcData = []
-            return
-        }
-
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        guard let startDate = cal.date(byAdding: .day, value: -rangeDays, to: today)
-        else { return }
-        guard let warmStart = cal.date(byAdding: .day, value: -Self.pmcWarmBackDays, to: startDate)
-        else { return }
-
-        var tssByDay: [Date: Double] = [:]
-        for workout in allWorkouts {
-            let day = cal.startOfDay(for: workout.startDate)
-            if day < warmStart || day > today { continue }
-            tssByDay[day, default: 0] += workout.tss
-        }
-
-        let ctlConstant = 42.0
-        let atlConstant = 7.0
-        var ctl = 0.0
-        var atl = 0.0
-
-        var points: [PMCPoint] = []
-        var currentDate = warmStart
-
-        while currentDate <= today {
-            let dayTSS = tssByDay[currentDate] ?? 0
-            ctl = ctl + (dayTSS - ctl) / ctlConstant
-            atl = atl + (dayTSS - atl) / atlConstant
-
-            if currentDate >= startDate {
-                points.append(
-                    PMCPoint(
-                        date: currentDate,
-                        ctl: ctl,
-                        atl: atl,
-                        tsb: ctl - atl
-                    ))
-            }
-
-            currentDate = cal.date(byAdding: .day, value: 1, to: currentDate)!
-        }
-
-        pmcData = points
-    }
-
-    private func rebuildPowerCurve() {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        let cutoff =
-            cal.date(byAdding: .day, value: -rangeDays, to: today)
-            ?? .distantPast
-
-        var streams: [[Int]] = []
-        var used = 0
-        for w in allWorkouts {
-            guard used < 80 else { break }
-            guard w.startDate >= cutoff else { continue }
-            guard w.sampleCount >= 5, w.maxPower > 0 else { continue }
-            let sorted = w.samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds }
-            let powers = sorted.map(\.power)
-            guard powers.count >= 5 else { continue }
-            streams.append(powers)
-            used += 1
-        }
-        powerCurvePoints = PowerCurveAnalytics.compute(from: streams)
-    }
-}
-
-// MARK: - PMC Point
-
-private struct PMCPoint: Identifiable {
-    let date: Date
-    let ctl: Double
-    let atl: Double
-    let tsb: Double
-
-    var id: Date { date }
 }

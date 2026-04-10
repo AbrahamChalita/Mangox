@@ -2,18 +2,13 @@ import SwiftData
 import SwiftUI
 
 struct DashboardView: View {
-    @Environment(BLEManager.self) private var bleManager
-    @Environment(DataSourceCoordinator.self) private var dataSource
-    @Environment(RouteManager.self) private var routeManager
-    @Environment(HealthKitManager.self) private var healthKitManager
-    @Environment(RideLiveActivityManager.self) private var liveActivityManager
+    @State private var viewModel: IndoorViewModel
+    private let trainingPlanLookupService: TrainingPlanLookupServiceProtocol
     @Binding var navigationPath: NavigationPath
     var planID: String? = nil
     var planDayID: String? = nil
     /// When set, guided ERG follows this saved template; plan completion and adaptive load are skipped.
     var customWorkoutTemplateID: UUID? = nil
-
-    @Environment(\.modelContext) private var modelContext
 
     private static let planProgressDescriptor: FetchDescriptor<TrainingPlanProgress> = {
         var d = FetchDescriptor<TrainingPlanProgress>(
@@ -28,48 +23,48 @@ struct DashboardView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Environment(\.accessibilityReduceTransparency) private var accessibilityReduceTransparency
-    @State private var workoutManager = WorkoutManager()
-    @State private var hapticManager = HapticManager()
-    @State private var guidedSession = GuidedSessionManager()
-    /// Resolved from SwiftData when `customWorkoutTemplateID` is non-nil.
-    @State private var loadedCustomPlanDay: PlanDay?
-    /// Full-screen end/discard sheet (matches outdoor dashboard chrome).
-    @State private var showIndoorEndConfirmation = false
-
     // Delight state
     @State private var zonePulse = false
-    @State private var lastMilestoneKm = 0
-    /// 25 / 50 / 75 — cleared when a new recording starts.
-    @State private var crossedDistanceGoalPercents: Set<Int> = []
-    @State private var milestoneText: String? = nil
-    @State private var milestoneVisible = false
-    /// Suppresses ride tips briefly after milestone / goal overlays.
-    @State private var lastDelightOverlayAt: Date?
-    @State private var activeRideTip: RideNudgeDisplay?
-    @State private var rideNudgeSession = RideNudgeSessionState()
-    /// AI-generated pre-ride briefing; nil until generated or when Apple Intelligence is unavailable.
-    @State private var rideBriefingPending: String?
-
     private let prefs = RidePreferences.shared
 
     /// Whole-km toast + haptic when crossing each multiple (e.g. 5 → 5 km, 10 km, …).
     private static let indoorDistanceMilestoneIntervalKm = 5
 
-    private var plan: TrainingPlan {
-        PlanLibrary.resolvePlan(planID: planID ?? CachedPlan.shared.id) ?? CachedPlan.shared
+    init(
+        navigationPath: Binding<NavigationPath>,
+        planID: String? = nil,
+        planDayID: String? = nil,
+        customWorkoutTemplateID: UUID? = nil,
+        trainingPlanLookupService: TrainingPlanLookupServiceProtocol,
+        viewModel: IndoorViewModel
+    ) {
+        self._navigationPath = navigationPath
+        self.planID = planID
+        self.planDayID = planDayID
+        self.customWorkoutTemplateID = customWorkoutTemplateID
+        self.trainingPlanLookupService = trainingPlanLookupService
+        self._viewModel = State(initialValue: viewModel)
     }
 
-    /// Unified BLE / WiFi metrics (WiFi takes priority when connected).
-    private var metrics: CyclingMetrics {
-        var m = CyclingMetrics(lastUpdate: Date())
-        m.power = dataSource.power
-        m.cadence = dataSource.cadence
-        m.speed = dataSource.speed
-        m.heartRate = dataSource.heartRate
-        m.totalDistance = dataSource.totalDistance
-        m.hrSource = bleManager.metrics.hrSource
-        return m
+    private var plan: TrainingPlan? {
+        trainingPlanLookupService.resolvePlan(planID: planID)
     }
+
+    private func binding<Value>(_ keyPath: ReferenceWritableKeyPath<IndoorViewModel, Value>)
+        -> Binding<Value>
+    {
+        Binding(
+            get: { viewModel[keyPath: keyPath] },
+            set: { viewModel[keyPath: keyPath] = $0 }
+        )
+    }
+
+    private var workoutManager: WorkoutManager { viewModel.workoutManager }
+    private var guidedSession: GuidedSessionManager { viewModel.guidedSession }
+    private var hapticManager: HapticManager { .shared }
+
+    /// Unified BLE / WiFi metrics (WiFi takes priority when connected).
+    private var metrics: CyclingMetrics { viewModel.metrics }
 
     /// Mean power over the last full second (from all high-rate trainer samples). Zones and arc track effort without an extra 3s lag.
     private var smoothedWatts: Int { workoutManager.displayPower }
@@ -94,7 +89,7 @@ struct DashboardView: View {
         FTPRefreshScope {
             ZStack {
                 Group {
-                    if routeManager.hasRoute || accessibilityReduceTransparency {
+                    if viewModel.hasRoute || accessibilityReduceTransparency {
                         Color(red: 0.03, green: 0.04, blue: 0.06)
                     } else {
                         LinearGradient(
@@ -128,18 +123,18 @@ struct DashboardView: View {
                     // Control bar
                     WorkoutControlBar(
                         state: workoutManager.state,
-                        onStart: { workoutManager.startWorkout() },
-                        onPause: { workoutManager.pause() },
-                        onResume: { workoutManager.resume() },
-                        onLap: { workoutManager.lap() },
-                        showEndConfirmation: $showIndoorEndConfirmation,
+                        onStart: { viewModel.startWorkout() },
+                        onPause: { viewModel.pauseWorkout() },
+                        onResume: { viewModel.resumeWorkout() },
+                        onLap: { viewModel.lapWorkout() },
+                        showEndConfirmation: binding(\.showEndConfirmation),
                         showLap: prefs.showLaps
                     )
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
                 }
 
-                if showIndoorEndConfirmation {
+                if viewModel.showEndConfirmation {
                     indoorEndWorkoutOverlay
                         .zIndex(200)
                 }
@@ -169,38 +164,18 @@ struct DashboardView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .onAppear {
-                dataSource.updateActiveSource()
-                workoutManager.configure(
-                    bleManager: bleManager, modelContext: modelContext, dataSource: dataSource)
-                workoutManager.configureRoute(routeManager)
-
-                if let tid = customWorkoutTemplateID {
-                    let tidCapture = tid
-                    let pred = #Predicate<CustomWorkoutTemplate> { $0.id == tidCapture }
-                    var fd = FetchDescriptor(predicate: pred)
-                    fd.fetchLimit = 1
-                    loadedCustomPlanDay = try? modelContext.fetch(fd).first?.asPlanDay()
-                    workoutManager.activePlanDayID = nil
-                    workoutManager.activePlanID = nil
-                } else {
-                    loadedCustomPlanDay = nil
-                    workoutManager.activePlanDayID = planDayID
-                    workoutManager.activePlanID = planID
-                }
-
-                configureGuidedSession()
-
-                // Auto-start: the rider already committed by tapping "Ride" on
-                // the connection screen, so skip the redundant START tap.
-                // The 5-second trainer engage delay gives them time to clip in.
-                if workoutManager.state == .idle {
-                    workoutManager.startWorkout()
-                }
+                viewModel.bootstrapDashboard(
+                    customWorkoutTemplateID: customWorkoutTemplateID,
+                    planDayID: planDayID,
+                    planID: planID,
+                    allProgress: allProgress,
+                    plan: plan
+                )
             }
             .onDisappear {
                 // Clean up BLE subscriptions and timer without relying on deinit
                 // actor isolation (which is inconsistent across Swift toolchain versions).
-                workoutManager.tearDown()
+                viewModel.tearDownWorkoutSession()
             }
             .onChange(of: zone.id) { _, newZone in
                 if workoutManager.state == .recording {
@@ -217,45 +192,26 @@ struct DashboardView: View {
                 }
             }
             .onChange(of: workoutManager.state) { oldState, newState in
-                switch (oldState, newState) {
-                case (.idle, .recording):
-                    lastMilestoneKm = 0
-                    crossedDistanceGoalPercents = []
-                    rideNudgeSession.reset()
-                    activeRideTip = nil
-                    hapticManager.workoutStarted()
-                    // Present the AI pre-ride briefing (generated async in configureGuidedSession).
-                    // Small delay so haptics and the start animation settle first.
-                    if guidedSession.isActive, let briefing = rideBriefingPending {
-                        rideBriefingPending = nil
-                        Task { @MainActor in
-                            try? await Task.sleep(for: .milliseconds(1800))
-                            guard workoutManager.state == .recording else { return }
-                            presentRideTip(RideNudgeDisplay(
-                                id: "ai_ride_briefing",
-                                category: .recovery,
-                                headline: "Workout Briefing",
-                                body: briefing,
-                                audioScript: briefing
-                            ))
-                        }
+                if let briefing = viewModel.handleWorkoutStateChange(
+                    oldState: oldState,
+                    newState: newState
+                ) {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(1800))
+                        guard workoutManager.state == .recording else { return }
+                        presentRideTip(RideNudgeDisplay(
+                            id: "ai_ride_briefing",
+                            category: .recovery,
+                            headline: "Workout Briefing",
+                            body: briefing,
+                            audioScript: briefing
+                        ))
                     }
-                case (.recording, .autoPaused):
-                    hapticManager.autoPaused()
-                case (.autoPaused, .recording):
-                    hapticManager.autoResumed()
-                case (_, .finished):
-                    hapticManager.workoutEnded()
-                default:
-                    break
                 }
-                // Elapsed time does not tick after `endWorkout()` stops the timer, so Live Activity would stay "live" forever.
                 Task {
-                    await liveActivityManager.syncIndoorRecording(
+                    await viewModel.syncLiveActivity(
                         isRecording: newState == .recording,
-                        prefs: prefs,
-                        workoutManager: workoutManager,
-                        bleManager: bleManager
+                        prefs: prefs
                     )
                 }
             }
@@ -273,23 +229,24 @@ struct DashboardView: View {
             }
             .onChange(of: workoutManager.displayPower) { _, newPower in
                 // Auto-resume when the last completed second shows power again (works for BLE + Wi‑Fi).
-                if workoutManager.state == .autoPaused && newPower > 0 {
-                    workoutManager.resume()
+                if viewModel.shouldAutoResumeWorkout(
+                    displayPower: newPower,
+                    state: workoutManager.state
+                ) {
+                    viewModel.resumeWorkout()
                 }
             }
             .onChange(of: workoutManager.elapsedSeconds) { _, _ in
                 tickRideTipsIfNeeded()
                 Task {
-                    await liveActivityManager.syncIndoorRecording(
+                    await viewModel.syncLiveActivity(
                         isRecording: workoutManager.state == .recording,
-                        prefs: prefs,
-                        workoutManager: workoutManager,
-                        bleManager: bleManager
+                        prefs: prefs
                     )
                 }
             }
             .overlay(alignment: .top) {
-                if milestoneVisible, let text = milestoneText {
+                if viewModel.isMilestoneVisible, let text = viewModel.milestoneText {
                     milestoneToast(text)
                         .padding(.top, 56)
                         .transition(
@@ -300,6 +257,7 @@ struct DashboardView: View {
                 }
             }
         }
+        .environment(viewModel)
     }
 
     // MARK: - Header
@@ -351,13 +309,13 @@ struct DashboardView: View {
                     // Device badges
                     DeviceStatusBadge(
                         icon: "bicycle",
-                        state: dataSource.trainerLinkDisplayState,
+                        state: viewModel.trainerLinkDisplayState,
                         fallbackName: "Trainer",
-                        isDataStale: dataSource.isTrainerLinkDataStale
+                        isDataStale: viewModel.isTrainerLinkDataStale
                     )
                     DeviceStatusBadge(
                         icon: "heart.fill",
-                        state: bleManager.hrConnectionState,
+                        state: viewModel.hrConnectionState,
                         fallbackName: "HR"
                     )
                 }
@@ -395,7 +353,7 @@ struct DashboardView: View {
         ZStack {
             Color.black.opacity(0.52)
                 .ignoresSafeArea()
-                .onTapGesture { showIndoorEndConfirmation = false }
+                .onTapGesture { viewModel.dismissEndConfirmation() }
 
             VStack(alignment: .leading, spacing: 16) {
                 Text("End workout?")
@@ -410,7 +368,7 @@ struct DashboardView: View {
 
                 HStack(spacing: 12) {
                     Button {
-                        showIndoorEndConfirmation = false
+                        viewModel.dismissEndConfirmation()
                     } label: {
                         Text("Cancel")
                             .font(.system(size: 16, weight: .semibold))
@@ -423,7 +381,6 @@ struct DashboardView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                     Button {
-                        showIndoorEndConfirmation = false
                         endRide()
                     } label: {
                         Text("End & Save")
@@ -438,7 +395,6 @@ struct DashboardView: View {
                 }
 
                 Button {
-                    showIndoorEndConfirmation = false
                     discardRide()
                 } label: {
                     Text("Discard without saving")
@@ -505,12 +461,12 @@ struct DashboardView: View {
             return fit ? 36 : 44
         }()
         let mapH: CGFloat = {
-            guard routeManager.hasRoute else { return 0 }
+            guard viewModel.hasRoute else { return 0 }
             if !isActiveRide { return 160 }
             return fit ? 100 : 140
         }()
         let elevH: CGFloat = {
-            guard routeManager.hasRoute else { return 0 }
+            guard viewModel.hasRoute else { return 0 }
             if !isActiveRide { return 60 }
             return fit ? 44 : 52
         }()
@@ -518,16 +474,16 @@ struct DashboardView: View {
         VStack(spacing: stackSpacing) {
             phonePowerDisplay
 
-            if showRideModeBanner, routeManager.hasRoute {
+            if showRideModeBanner, viewModel.hasRoute {
                 IndoorRideModeContext(
                     hasRoute: true,
-                    routeName: routeManager.routeName,
+                    routeName: viewModel.routeName,
                     compact: fit
                 )
             }
 
             // Free ride: stats + strip up front (after banner). GPX: same controls after map + elevation so the route stays high in the stack.
-            if !routeManager.hasRoute {
+            if !viewModel.hasRoute {
                 indoorLivePerformanceBar(compact: true, layoutMode: liveLayout, collapsible: true)
 
                 PowerGraphView(
@@ -549,7 +505,7 @@ struct DashboardView: View {
                 cadenceWarningBanner
             }
 
-            if let tip = activeRideTip {
+            if let tip = viewModel.activeRideTip {
                 rideTipBanner(tip)
             }
 
@@ -562,16 +518,18 @@ struct DashboardView: View {
                 guidedSessionCard(condensed: fit)
             }
 
-            if bleManager.ftmsControl.isAvailable {
+            if viewModel.ftmsControlIsAvailable {
                 trainerControlCard(condensed: fit)
             }
 
-            if routeManager.hasRoute {
+            if viewModel.hasRoute {
                 RouteMiniMapView(
+                    routeService: viewModel.routeService,
                     distance: workoutManager.activeDistance,
                     mapHeight: mapH
                 )
                 ElevationProfileView(
+                    routeService: viewModel.routeService,
                     currentDistance: workoutManager.activeDistance,
                     height: elevH
                 )
@@ -608,10 +566,10 @@ struct DashboardView: View {
                     VStack(spacing: 10) {
                         phonePowerDisplay
 
-                        if showRideModeBanner, routeManager.hasRoute {
+                        if showRideModeBanner, viewModel.hasRoute {
                             IndoorRideModeContext(
                                 hasRoute: true,
-                                routeName: routeManager.routeName
+                                routeName: viewModel.routeName
                             )
                         }
 
@@ -621,7 +579,7 @@ struct DashboardView: View {
                     .layoutPriority(1)
 
                     VStack(spacing: 10) {
-                        if !routeManager.hasRoute {
+                        if !viewModel.hasRoute {
                             PowerArcView(
                                 watts: smoothedWatts,
                                 compact: true,
@@ -642,10 +600,12 @@ struct DashboardView: View {
                             )
                         } else {
                             RouteMiniMapView(
+                                routeService: viewModel.routeService,
                                 distance: workoutManager.activeDistance,
                                 mapHeight: 120
                             )
                             ElevationProfileView(
+                                routeService: viewModel.routeService,
                                 currentDistance: workoutManager.activeDistance,
                                 height: 48
                             )
@@ -656,7 +616,7 @@ struct DashboardView: View {
                 }
 
                 // GPX rides: map + elevation stay in the right column; stats + strip span full width below (matches portrait order).
-                if routeManager.hasRoute {
+                if viewModel.hasRoute {
                     indoorLivePerformanceBar(compact: true, layoutMode: .stacked, collapsible: true)
 
                     PowerGraphView(
@@ -676,7 +636,7 @@ struct DashboardView: View {
                     cadenceWarningBanner
                 }
 
-                if let tip = activeRideTip {
+                if let tip = viewModel.activeRideTip {
                     rideTipBanner(tip)
                 }
 
@@ -689,7 +649,7 @@ struct DashboardView: View {
                     guidedSessionCard(condensed: false)
                 }
 
-                if bleManager.ftmsControl.isAvailable {
+                if viewModel.ftmsControlIsAvailable {
                     trainerControlCard(condensed: false)
                 }
 
@@ -854,16 +814,16 @@ struct DashboardView: View {
         HStack(spacing: 0) {
             ScrollView {
                 VStack(spacing: 12) {
-                    if showRideModeBanner, routeManager.hasRoute {
+                    if showRideModeBanner, viewModel.hasRoute {
                         IndoorRideModeContext(
                             hasRoute: true,
-                            routeName: routeManager.routeName
+                            routeName: viewModel.routeName
                         )
                     }
 
                     PowerArcView(
                         watts: smoothedWatts,
-                        compact: routeManager.hasRoute,
+                        compact: viewModel.hasRoute,
                         showCenterText: true
                     )
 
@@ -871,15 +831,17 @@ struct DashboardView: View {
                         avg3s: workoutManager.avg3s,
                         avg5s: workoutManager.avg5s,
                         avg30s: workoutManager.avg30s,
-                        compact: routeManager.hasRoute
+                        compact: viewModel.hasRoute
                     )
 
-                    if routeManager.hasRoute {
+                    if viewModel.hasRoute {
                         RouteMiniMapView(
+                            routeService: viewModel.routeService,
                             distance: workoutManager.activeDistance,
                             mapHeight: 220
                         )
                         ElevationProfileView(
+                            routeService: viewModel.routeService,
                             currentDistance: workoutManager.activeDistance,
                             height: 72
                         )
@@ -919,7 +881,7 @@ struct DashboardView: View {
                         cadenceWarningBanner
                     }
 
-                    if let tip = activeRideTip {
+                    if let tip = viewModel.activeRideTip {
                         rideTipBanner(tip)
                     }
 
@@ -931,7 +893,7 @@ struct DashboardView: View {
                         )
                     }
 
-                    if bleManager.ftmsControl.isAvailable, !guidedSession.isActive {
+                    if viewModel.ftmsControlIsAvailable, !guidedSession.isActive {
                         trainerControlCard(condensed: false)
                     }
 
@@ -1054,7 +1016,7 @@ struct DashboardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Button {
-                activeRideTip = nil
+                viewModel.clearRideTip()
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))
@@ -1113,10 +1075,10 @@ struct DashboardView: View {
         let isActive = workoutManager.state == .recording || workoutManager.state == .paused
         return TrainerControlCard(
             trainerMode: workoutManager.trainerMode,
-            supportsSimulation: bleManager.ftmsControl.supportsSimulation,
-            supportsERG: bleManager.ftmsControl.supportsERG,
-            supportsResistance: bleManager.ftmsControl.supportsResistance,
-            hasRoute: routeManager.hasRoute,
+            supportsSimulation: viewModel.ftmsControlSupportsSimulation,
+            supportsERG: viewModel.ftmsControlSupportsERG,
+            supportsResistance: viewModel.ftmsControlSupportsResistance,
+            hasRoute: viewModel.hasRoute,
             isWorkoutActive: isActive,
             showRouteSimulationFooterHint: guidedSession.isActive,
             condensed: condensed,
@@ -1161,107 +1123,24 @@ struct DashboardView: View {
         GuidedSessionCard(session: guidedSession, condensed: condensed)
     }
 
-    // MARK: - Guided Session Setup
-
-    private func configureGuidedSession() {
-        let day: PlanDay?
-        if let custom = loadedCustomPlanDay {
-            day = custom
-        } else if let dayID = planDayID {
-            day = plan.day(id: dayID)
-        } else {
-            day = nil
-        }
-        guard let day else { return }
-
-        let scale: Double
-        if customWorkoutTemplateID != nil {
-            scale = 1.0
-        } else {
-            let resolvedPlanID = planID ?? CachedPlan.shared.id
-            scale =
-                allProgress.first(where: { $0.planID == resolvedPlanID })?.adaptiveLoadMultiplier
-                ?? 1.0
-        }
-        guidedSession.configure(planDay: day, adaptiveERGScale: scale)
-
-        // Generate AI pre-ride briefing in background; present it as the first ride tip.
-        let capturedTimeline = guidedSession.timeline
-        let capturedTitle = guidedSession.dayTitle
-        let capturedNotes = guidedSession.dayNotes
-        let capturedFTP = PowerZone.ftp
-        Task { @MainActor in
-            guard let text = await OnDeviceCoachEngine.generateRideBriefing(
-                dayTitle: capturedTitle,
-                dayNotes: capturedNotes,
-                timeline: capturedTimeline,
-                ftpWatts: capturedFTP
-            ) else { return }
-            rideBriefingPending = text
-        }
-
-        // Wire trainer mode changes: when the guided session advances to a new step,
-        // automatically update the trainer control mode.
-        //
-        // Engage delay: skip all trainer commands for the first 5 seconds so the
-        // rider has time to clip in and start pedalling before ERG/SIM locks in.
-        // On freeRide steps we drop to the lowest resistance level (0 %) instead
-        // of issuing a full FTMS reset — a reset forces a re-negotiate cycle that
-        // causes a brief hard lock before the trainer releases, which feels jarring.
-        guidedSession.onTrainerModeChange = { [weak workoutManager] mode, ergWatts, grade in
-            guard let wm = workoutManager else { return }
-            guard wm.elapsedSeconds >= wm.trainerEngageDelay else { return }
-
-            switch mode {
-            case .erg:
-                if let watts = ergWatts {
-                    wm.setERGMode(watts: watts)
-                }
-            case .simulation:
-                if let grade {
-                    wm.setSimulationMode(grade: grade)
-                }
-            case .freeRide:
-                // Drop resistance to zero rather than a full FTMS reset.
-                // This lets the trainer coast immediately without the
-                // re-negotiate stutter that releaseTrainerControl() causes.
-                if wm.bleManager?.ftmsControl.supportsResistance == true {
-                    wm.setResistanceMode(level: 0)
-                } else {
-                    wm.releaseTrainerControl()
-                }
-            }
-        }
-
-        // Wire the WorkoutManager's per-second tick to drive the guided session.
-        workoutManager.onTick = { [weak guidedSession] elapsed, power in
-            guidedSession?.tick(elapsed: elapsed, currentPower: power)
-        }
-    }
-
     // MARK: - Actions
 
     // MARK: - Delight Helpers
 
     private func flashMilestone(_ text: String) {
-        lastDelightOverlayAt = Date()
-        milestoneText = text
+        viewModel.showMilestone(text)
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-            milestoneVisible = true
+            viewModel.isMilestoneVisible = true
         }
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(3))
             withAnimation(.easeOut(duration: 0.4)) {
-                milestoneVisible = false
+                viewModel.hideMilestone()
             }
         }
     }
 
     private func tickRideTipsIfNeeded() {
-        guard prefs.rideTipsEnabled else { return }
-        guard workoutManager.state == .recording else { return }
-        if let t = lastDelightOverlayAt, Date().timeIntervalSince(t) < 5.5 { return }
-
         let guidedStepIndex: Int = {
             guard guidedSession.isActive, guidedSession.currentStep != nil else { return -1 }
             return guidedSession.currentStepIndex
@@ -1272,9 +1151,9 @@ struct DashboardView: View {
             return max(0, guidedSession.elapsedSeconds - step.startOffset)
         }()
 
-        let ctx = RideNudgeContext(
-            now: Date(),
-            isRecording: true,
+        if let tip = viewModel.nextRideTip(
+            rideTipsEnabled: prefs.rideTipsEnabled,
+            isRecording: workoutManager.state == .recording,
             elapsedSeconds: workoutManager.elapsedSeconds,
             displayPower: workoutManager.displayPower,
             displayCadenceRpm: workoutManager.displayCadenceRpm,
@@ -1286,67 +1165,48 @@ struct DashboardView: View {
             guidedStepIsRecovery: guidedSession.currentStep?.isRecovery ?? false,
             guidedSecondsIntoStep: guidedInto,
             guidedStepIsHardIntensity: guidedStepIsHardIntensity,
-            suppressUntil: nil
-        )
-
-        var sess = rideNudgeSession
-        if let tip = RideNudgeEngine.nextTip(
-            context: ctx,
             prefs: prefs,
-            guidedStepIndex: guidedStepIndex,
-            session: &sess
+            guidedStepIndex: guidedStepIndex
         ) {
-            rideNudgeSession = sess
             presentRideTip(tip)
         }
     }
 
     private func presentRideTip(_ tip: RideNudgeDisplay) {
-        activeRideTip = tip
+        viewModel.presentRideTip(tip)
         hapticManager.rideTipNudge()
         AudioCueManager.shared.announceRideTip(script: tip.audioScript)
         let tipID = tip.id
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(11))
-            if activeRideTip?.id == tipID { activeRideTip = nil }
+            viewModel.clearRideTip(ifMatching: tipID)
         }
     }
 
     /// Progress toward an enabled distance goal (25 / 50 / 75%); otherwise fixed 5 km markers.
     private func processIndoorDistanceMilestones(distanceMeters dist: Double) {
-        guard workoutManager.state == .recording else { return }
-        let km = dist / 1000.0
-
-        if let goal = prefs.activeGoals.first(where: { $0.kind == .distance && $0.target > 0 }) {
-            let target = goal.target
-            let progress = km / target
-            let thresholds = [25, 50, 75]
-            let newly = thresholds.filter { progress >= Double($0) / 100.0 && !crossedDistanceGoalPercents.contains($0) }
-            guard !newly.isEmpty else { return }
-            for p in newly {
-                crossedDistanceGoalPercents.insert(p)
-            }
-            let sorted = newly.sorted()
-            for (index, p) in sorted.enumerated() {
-                let delay = Double(index) * 3.5
-                Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(delay))
-                    guard workoutManager.state == .recording else { return }
+        let distanceGoalKm = prefs.activeGoals.first(where: { $0.kind == .distance && $0.target > 0 })?.target
+        let triggers = viewModel.milestoneTriggers(
+            distanceMeters: dist,
+            isRecording: workoutManager.state == .recording,
+            activeDistanceGoalKm: distanceGoalKm
+        )
+        for (index, trigger) in triggers.enumerated() {
+            let delay = Double(index) * 3.5
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(delay))
+                guard workoutManager.state == .recording else { return }
+                switch trigger {
+                case .distanceInterval(let km):
+                    flashMilestone("\(km) km")
+                case .distanceGoalProgress(let percent, _, let targetKm):
                     let curKm = workoutManager.activeDistance / 1000.0
-                    flashDistanceGoalFractionToast(percent: p, currentKm: curKm, targetKm: target)
-                    hapticManager.milestone()
+                    flashDistanceGoalFractionToast(percent: percent, currentKm: curKm, targetKm: targetKm)
+                case .distanceGoalCompleted(let targetKm):
+                    flashDistanceGoalCompleteToast(targetKm: targetKm)
                 }
+                hapticManager.milestone()
             }
-            return
-        }
-
-        let step = Self.indoorDistanceMilestoneIntervalKm
-        let kmInt = Int(dist / 1000)
-        let milestone = (kmInt / step) * step
-        if milestone >= step && milestone > lastMilestoneKm {
-            lastMilestoneKm = milestone
-            flashMilestone("\(milestone) km")
-            hapticManager.milestone()
         }
     }
 
@@ -1366,10 +1226,15 @@ struct DashboardView: View {
     }
 
     private func flashDistanceGoalCompleteToast(targetKm: Double) {
-        let imperial = prefs.isImperial
-        let tgtStr = AppFormat.distanceString(targetKm * 1000.0, imperial: imperial, decimals: 1)
-        let unit = AppFormat.distanceUnit(imperial: imperial)
-        flashMilestone("Goal reached · \(tgtStr) \(unit)")
+        switch viewModel.distanceGoalCompletedTrigger(targetKm: targetKm) {
+        case .distanceGoalCompleted(let completedTargetKm):
+            let imperial = prefs.isImperial
+            let tgtStr = AppFormat.distanceString(completedTargetKm * 1000.0, imperial: imperial, decimals: 1)
+            let unit = AppFormat.distanceUnit(imperial: imperial)
+            flashMilestone("Goal reached · \(tgtStr) \(unit)")
+        default:
+            break
+        }
     }
 
     private func milestoneToast(_ text: String) -> some View {
@@ -1390,62 +1255,43 @@ struct DashboardView: View {
 
     private func exitPreRide() {
         guard workoutManager.state == .idle else { return }
-        if !navigationPath.isEmpty {
-            navigationPath.removeLast()
-        } else {
-            navigationPath = NavigationPath()
-        }
+        applyNavigationAction(
+            viewModel.exitPreRideAction(pathIsEmpty: navigationPath.isEmpty)
+        )
     }
 
     private func discardRide() {
-        workoutManager.discardWorkout()
-        guidedSession.tearDown()
-        bleManager.disconnectAll()
-
-        // Navigate back to the root (home screen).
-        navigationPath = NavigationPath()
+        applyNavigationAction(
+            viewModel.discardRide(
+            )
+        )
     }
 
     private func endRide() {
-        workoutManager.endWorkout()
+        let completionAction = viewModel.endRide(
+            customWorkoutTemplateID: customWorkoutTemplateID,
+            planID: planID,
+            planDayID: planDayID,
+            linkedPlanDay: planDayID.flatMap { dayID in
+                plan?.day(id: dayID)
+            },
+            allProgress: allProgress
+        )
 
-        let completedWorkout = workoutManager.workout
-        let workoutIsValid = completedWorkout?.isValid ?? false
-
-        // Only mark plan day complete if the workout meets minimum duration.
-        // This prevents accidental 3-second starts from counting as "done".
-        // Custom / ZWO templates are not part of `TrainingPlanProgress`.
-        if customWorkoutTemplateID == nil, let dayID = planDayID, workoutIsValid {
-            markPlanDayCompleted(dayID: dayID)
-            if let w = completedWorkout, let day = plan.day(id: dayID) {
-                let resolvedPlanID = planID ?? CachedPlan.shared.id
-                if let progress = allProgress.first(where: { $0.planID == resolvedPlanID }) {
-                    AdaptiveTrainingAdjuster.adjustAfterCompletedPlanWorkout(
-                        workout: w, planDay: day, progress: progress)
-                    try? modelContext.save()
-                }
-            }
-        }
-
-        // Tear down guided session
-        guidedSession.tearDown()
-
-        if let w = completedWorkout {
-            Task { await healthKitManager.saveCyclingWorkoutToHealthIfEnabled(w) }
-        }
-
-        if let workoutID = workoutManager.workout?.id {
-            // Replace entire navigation stack with summary
-            navigationPath = NavigationPath()
-            navigationPath.append(AppRoute.summary(workoutID: workoutID))
+        if let completionAction {
+            applyNavigationAction(completionAction)
         }
     }
 
-    private func markPlanDayCompleted(dayID: String) {
-        let resolvedPlanID = planID ?? CachedPlan.shared.id
-        if let progress = allProgress.first(where: { $0.planID == resolvedPlanID }) {
-            progress.markCompleted(dayID)
-            try? modelContext.save()
+    private func applyNavigationAction(_ action: IndoorNavigationAction) {
+        switch action {
+        case .pop:
+            navigationPath.removeLast()
+        case .resetRoot:
+            navigationPath = NavigationPath()
+        case .route(let route):
+            navigationPath = NavigationPath()
+            navigationPath.append(route)
         }
     }
 

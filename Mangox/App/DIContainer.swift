@@ -1,5 +1,6 @@
 // App/DIContainer.swift
 import Foundation
+import SwiftData
 
 /// Assembles and owns all app-level dependencies.
 ///
@@ -26,6 +27,8 @@ final class DIContainer {
 
     let healthKitManager: HealthKitManager
     var healthKitService: HealthKitServiceProtocol { healthKitManager }
+    var locationService: LocationServiceProtocol { locationManager }
+    var mapCameraService: MapCameraServiceProtocol { locationManager }
 
     let fitnessTracker: FitnessTracker
     var fitnessTrackerService: FitnessTrackerProtocol { fitnessTracker }
@@ -49,35 +52,101 @@ final class DIContainer {
     var coachRepository: CoachRepository { aiService }
 
     let ftpRefreshTrigger: FTPRefreshTrigger
+    let trainingPlanLookupService: TrainingPlanLookupServiceProtocol
+    let workoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol
+    let trainingPlanPersistenceRepository: TrainingPlanPersistenceRepositoryProtocol
 
     // MARK: - ViewModels (lazily vended; each VM owns its own lifecycle)
 
     func makeCoachViewModel() -> CoachViewModel {
-        CoachViewModel(coach: coachRepository)
+        CoachViewModel(coach: aiService, purchasesService: purchasesServiceProtocol)
     }
 
     func makeHomeViewModel() -> HomeViewModel {
-        HomeViewModel()
+        HomeViewModel(
+            bleService: bleManager,
+            dataSourceService: dataSourceCoordinator,
+            locationService: locationManager,
+            whoopService: whoopServiceProtocol,
+            aiService: aiService,
+            trainingPlanLookupService: trainingPlanLookupService
+        )
     }
 
     func makeFitnessViewModel() -> FitnessViewModel {
-        FitnessViewModel(fitnessTracker: fitnessTrackerService, healthKit: healthKitService)
+        FitnessViewModel(
+            fitnessTracker: fitnessTrackerService,
+            healthKit: healthKitService,
+            trainingPlanLookupService: trainingPlanLookupService
+        )
     }
 
     func makeProfileViewModel() -> ProfileViewModel {
-        ProfileViewModel(whoopService: whoopServiceProtocol, purchasesService: purchasesServiceProtocol)
+        ProfileViewModel(
+            whoopService: whoopServiceProtocol,
+            purchasesService: purchasesServiceProtocol,
+            stravaService: stravaService,
+            ftpRefreshTrigger: ftpRefreshTrigger,
+            healthKitService: healthKitService
+        )
     }
 
     func makePaywallViewModel() -> PaywallViewModel {
         PaywallViewModel(purchasesService: purchasesServiceProtocol)
     }
 
-    func makeIndoorViewModel() -> IndoorViewModel { IndoorViewModel() }
-    func makeOutdoorViewModel() -> OutdoorViewModel { OutdoorViewModel() }
+    func makeIndoorViewModel() -> IndoorViewModel {
+        IndoorViewModel(
+            bleService: bleManager,
+            dataSourceService: dataSourceCoordinator,
+            routeService: routeManager,
+            healthKitService: healthKitService,
+            liveActivityService: liveActivityManager,
+            workoutPersistenceRepository: workoutPersistenceRepository,
+            trainingPlanPersistenceRepository: trainingPlanPersistenceRepository
+        )
+    }
+    func makeOutdoorViewModel() -> OutdoorViewModel {
+        OutdoorViewModel(
+            locationService: locationManager,
+            bleService: bleManager,
+            routeService: routeManager,
+            healthKitService: healthKitManager,
+            liveActivityService: liveActivityManager,
+            workoutPersistenceRepository: workoutPersistenceRepository
+        )
+    }
     func makeSocialViewModel() -> SocialViewModel { SocialViewModel() }
-    func makeTrainingViewModel() -> TrainingViewModel { TrainingViewModel() }
-    func makeWorkoutViewModel() -> WorkoutViewModel { WorkoutViewModel() }
-    func makeOnboardingViewModel() -> OnboardingViewModel { OnboardingViewModel() }
+    func makeTrainingViewModel() -> TrainingViewModel {
+        TrainingViewModel(
+            whoopService: whoopServiceProtocol,
+            purchasesService: purchasesServiceProtocol,
+            persistenceRepository: trainingPlanPersistenceRepository
+        )
+    }
+    func makeWorkoutViewModel() -> WorkoutViewModel {
+        WorkoutViewModel(
+            stravaService: stravaService,
+            routeService: routeManager,
+            personalRecordsService: personalRecords,
+            healthKitService: healthKitManager,
+            trainingPlanLookupService: trainingPlanLookupService,
+            workoutPersistenceRepository: workoutPersistenceRepository
+        )
+    }
+    func makeFTPTestViewModel() -> FTPTestViewModel {
+        FTPTestViewModel(
+            bleService: bleManager,
+            dataSourceService: dataSourceCoordinator
+        )
+    }
+    func makeOnboardingViewModel() -> OnboardingViewModel {
+        OnboardingViewModel(
+            healthKitService: healthKitService,
+            locationService: locationManager,
+            stravaService: stravaService
+        )
+    }
 
     // MARK: - Init
 
@@ -98,5 +167,13 @@ final class DIContainer {
         purchasesManager = PurchasesManager.shared
         aiService = AIService()
         ftpRefreshTrigger = FTPRefreshTrigger.shared
+        trainingPlanLookupService = TrainingPlanLookupService()
+        workoutPersistenceRepository = WorkoutPersistenceRepository(
+            modelContext: PersistenceContainer.shared.mainContext,
+            modelContainer: PersistenceContainer.shared
+        )
+        trainingPlanPersistenceRepository = TrainingPlanPersistenceRepository(
+            modelContext: PersistenceContainer.shared.mainContext
+        )
     }
 }

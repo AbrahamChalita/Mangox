@@ -5,16 +5,20 @@ import SwiftUI
 /// Calendar and Stats stay cold until first open so launch doesn't pay Charts +
 /// large workout queries twice.
 struct SecondaryTabRootsPrewarm: View {
+    @Environment(DIContainer.self) private var di
     @State private var coachPath = NavigationPath()
     @State private var settingsPath = NavigationPath()
 
     var body: some View {
         ZStack {
             NavigationStack(path: $coachPath) {
-                CoachTabRootView(navigationPath: $coachPath)
+                CoachTabRootView(
+                    navigationPath: $coachPath,
+                    viewModel: di.makeCoachViewModel()
+                )
             }
             NavigationStack(path: $settingsPath) {
-                SettingsView(navigationPath: $settingsPath)
+                SettingsView(navigationPath: $settingsPath, viewModel: di.makeProfileViewModel())
             }
         }
     }

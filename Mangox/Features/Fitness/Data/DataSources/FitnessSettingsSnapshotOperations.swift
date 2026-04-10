@@ -1,37 +1,17 @@
-// Features/Fitness/Domain/Entities/FitnessSettingsSnapshot.swift
+// Features/Fitness/Data/DataSources/FitnessSettingsSnapshotOperations.swift
 import Foundation
 import SwiftData
 
-/// Point-in-time record of FTP and HR settings (manual changes and applied tests).
-@Model
-final class FitnessSettingsSnapshot {
-    @Attribute(.unique) var id: UUID
-    var recordedAt: Date
-    var ftpWatts: Int
-    var maxHR: Int
-    var restingHR: Int
-    /// e.g. `ftp_settings`, `hr_settings`, `ftp_test`
-    var sourceRaw: String
-
-    init(
-        id: UUID = UUID(),
-        recordedAt: Date = .now,
-        ftpWatts: Int,
-        maxHR: Int,
-        restingHR: Int,
-        sourceRaw: String
-    ) {
-        self.id = id
-        self.recordedAt = recordedAt
-        self.ftpWatts = ftpWatts
-        self.maxHR = maxHR
-        self.restingHR = restingHR
-        self.sourceRaw = sourceRaw
-    }
-}
-
 enum FitnessSettingsSnapshotRecorder {
     private static let dedupeSeconds: TimeInterval = 45
+
+    @MainActor
+    static func recordFromCurrentSettings(source: String) {
+        recordFromCurrentSettings(
+            source: source,
+            modelContext: PersistenceContainer.shared.mainContext
+        )
+    }
 
     @MainActor
     static func recordFromCurrentSettings(source: String, modelContext: ModelContext) {
@@ -71,6 +51,12 @@ enum FitnessSettingsSnapshotRecorder {
 
 enum FitnessSettingsSnapshotBackfill {
     private static let doneKey = "mangox.fitness_snapshot_backfill_v1"
+
+    /// Inserts a single snapshot from current settings when the store has none (e.g. before the timeline shipped).
+    @MainActor
+    static func runIfNeeded() {
+        runIfNeeded(modelContext: PersistenceContainer.shared.mainContext)
+    }
 
     /// Inserts a single snapshot from current settings when the store has none (e.g. before the timeline shipped).
     @MainActor

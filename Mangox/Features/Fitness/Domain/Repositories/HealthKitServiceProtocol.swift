@@ -16,4 +16,7 @@ protocol HealthKitServiceProtocol: AnyObject {
     var currentAge: Int? { get }
 
     func requestAuthorization() async
+
+    // MARK: - Workout Sync
+    func saveCyclingWorkoutToHealthIfEnabled(_ workout: Workout) async
 }

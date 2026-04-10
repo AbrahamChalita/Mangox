@@ -5,79 +5,6 @@ import SwiftData
 import SwiftUI
 import os.log
 
-// MARK: - Chat Models
-
-struct ChatMessage: Identifiable, Equatable, Sendable {
-    let id: UUID
-    let role: MessageRole
-    let content: String
-    let timestamp: Date
-    let suggestedActions: [SuggestedAction]
-    let followUpQuestion: String?
-    /// When non-empty, UI shows one reply card per block; flat `followUpQuestion` / `suggestedActions` are unused for the panel.
-    let followUpBlocks: [CoachFollowUpBlock]
-    let thinkingSteps: [String]
-    let category: String?
-    let tags: [String]
-    let references: [ChatReference]
-    /// True when the coach used live web sources (API flag or link-backed references).
-    let usedWebSearch: Bool
-    var feedbackScore: Int?
-    var confidence: Double
-
-    static func user(_ text: String) -> ChatMessage {
-        ChatMessage(
-            id: UUID(), role: .user, content: text, timestamp: .now,
-            suggestedActions: [], followUpQuestion: nil, followUpBlocks: [],
-            thinkingSteps: [],
-            category: nil, tags: [], references: [], usedWebSearch: false,
-            feedbackScore: nil, confidence: 1.0
-        )
-    }
-}
-
-enum MessageRole: String, Equatable, Sendable {
-    case user, assistant
-}
-
-struct SuggestedAction: Codable, Identifiable, Equatable, Sendable {
-    var id: String { "\(type)|\(label)" }
-    let label: String
-    let type: String
-}
-
-/// One "Coach asks" card + its chips (from `followUpBlocks` on the coach API).
-struct CoachFollowUpBlock: Codable, Equatable, Sendable {
-    let question: String
-    let suggestedActions: [SuggestedAction]
-
-    enum CodingKeys: String, CodingKey {
-        case question
-        case suggestedActions
-        case suggested_actions
-    }
-
-    init(question: String, suggestedActions: [SuggestedAction]) {
-        self.question = question
-        self.suggestedActions = suggestedActions
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        question = try c.decode(String.self, forKey: .question)
-        suggestedActions =
-            (try? c.decodeIfPresent([SuggestedAction].self, forKey: .suggestedActions))
-            ?? (try? c.decodeIfPresent([SuggestedAction].self, forKey: .suggested_actions))
-            ?? []
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(question, forKey: .question)
-        try c.encode(suggestedActions, forKey: .suggestedActions)
-    }
-}
-
 // MARK: - API Request / Response Models
 
 struct ChatRequest: Encodable {
@@ -170,12 +97,6 @@ struct ChatAPIResponse: Decodable {
     }
 }
 
-struct ChatReference: Codable, Equatable, Sendable {
-    let title: String
-    let url: String?
-    let snippet: String?
-}
-
 struct UserContext: Encodable {
     let ftp: Int
     let maxHR: Int
@@ -236,45 +157,6 @@ struct PlanGenerationRequest: Encodable {
     let client_time_zone: String
 }
 
-struct PlanInputs: Codable, Equatable, Sendable {
-    let event_name: String
-    let event_date: String
-    let ftp: Int
-    let weekly_hours: Int?
-    let experience: String?
-    /// e.g. long, medium, short — when the event publishes multiple routes.
-    let route_option: String?
-    /// Official or user-stated route distance (km).
-    let target_distance_km: Double?
-    /// Total climbing (m) when known.
-    let target_elevation_m: Double?
-    let event_location: String?
-    /// Short free-text: mass start, gravel, etc.
-    let event_notes: String?
-
-    /// Lines for the confirm UI (omits empty fields).
-    var coachConfirmDetailLines: [String] {
-        var lines: [String] = []
-        if let r = route_option?.trimmingCharacters(in: .whitespacesAndNewlines), !r.isEmpty {
-            lines.append("Route: \(r)")
-        }
-        if let km = target_distance_km, km > 0 {
-            let s = km >= 100 ? String(format: "%.0f km", km) : String(format: "%.1f km", km)
-            lines.append("Distance: \(s)")
-        }
-        if let m = target_elevation_m, m > 0 {
-            lines.append("Climbing: \(Int(m.rounded())) m")
-        }
-        if let loc = event_location?.trimmingCharacters(in: .whitespacesAndNewlines), !loc.isEmpty {
-            lines.append("Location: \(loc)")
-        }
-        if let n = event_notes?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty {
-            lines.append(n)
-        }
-        return lines
-    }
-}
-
 struct PlanGenerationResponse: Decodable {
     let plan: TrainingPlan
     let credits_used: Int?
@@ -282,108 +164,6 @@ struct PlanGenerationResponse: Decodable {
     let request_id: String?
     let validation_warnings: [String]?
     let generation_metrics: PlanGenerationMetrics?
-}
-
-struct PlanLLMModelsResolved: Decodable, Sendable, Equatable {
-    let skeleton: String
-    let week: String
-    /// Taper/race week tier; absent on older API responses.
-    let weekPremium: String?
-
-    enum CodingKeys: String, CodingKey {
-        case skeleton
-        case week
-        case weekPremium = "week_premium"
-    }
-}
-
-struct PlanGenerationMetrics: Decodable, Sendable, Equatable {
-    let expectedWeeks: Int
-    let skeletonMs: Int
-    let weeksMs: Int
-    let totalMs: Int
-    let parallelConcurrency: Int
-    let weeksSucceededLlm: Int
-    let weeksUsedFallback: Int
-    let fallbackWeekNumbers: [Int]
-    let templateIntervalExpansions: Int
-    let models: PlanLLMModelsResolved?
-    let rulesVersion: String
-    let weekBatchSize: Int?
-    let weekLlmCalls: Int?
-    let planParallelVersion: String?
-    let skeletonProgressionWarnings: [String]?
-
-    enum CodingKeys: String, CodingKey {
-        case expectedWeeks = "expected_weeks"
-        case skeletonMs = "skeleton_ms"
-        case weeksMs = "weeks_ms"
-        case totalMs = "total_ms"
-        case parallelConcurrency = "parallel_concurrency"
-        case weeksSucceededLlm = "weeks_succeeded_llm"
-        case weeksUsedFallback = "weeks_used_fallback"
-        case fallbackWeekNumbers = "fallback_week_numbers"
-        case templateIntervalExpansions = "template_interval_expansions"
-        case models
-        case rulesVersion = "rules_version"
-        case weekBatchSize = "week_batch_size"
-        case weekLlmCalls = "week_llm_calls"
-        case planParallelVersion = "plan_parallel_version"
-        case skeletonProgressionWarnings = "skeleton_progression_warnings"
-    }
-}
-
-struct PlanGenerationResult: Sendable {
-    let plan: TrainingPlan
-    let requestId: String?
-    let validationWarnings: [String]
-    let creditsRemaining: Int?
-    let generationMetrics: PlanGenerationMetrics?
-}
-
-/// Progress state streamed from `/api/generate-plan/stream`.
-struct PlanGenerationProgress: Equatable {
-    let phase: String  // "skeleton", "weeks", "validating", "assembling"
-    let message: String
-    let current: Int?  // current week (during "weeks" phase)
-    let total: Int?  // total weeks
-    var fraction: Double {
-        guard phase == "weeks", let current, let total, total > 0 else {
-            switch phase {
-            case "skeleton": return 0.05
-            case "validating", "assembling": return 0.95
-            default: return 0
-            }
-        }
-        // skeleton=5%, weeks=5-90%, validate=90-100%
-        return 0.05 + 0.85 * (Double(current) / Double(total))
-    }
-}
-
-/// Shown in a sheet so the user confirms before `/api/generate-plan` runs.
-struct PlanGenerationDraft: Identifiable, Equatable {
-    let id: UUID
-    var inputs: PlanInputs
-    var summaryLine: String
-
-    init(id: UUID = UUID(), inputs: PlanInputs, summaryLine: String) {
-        self.id = id
-        self.inputs = inputs
-        self.summaryLine = summaryLine
-    }
-}
-
-struct PlanSaveCelebration: Identifiable, Equatable {
-    let planID: String
-    let planName: String
-    let warnings: [String]
-    /// Weeks that used server-side fallback days; user can retry via `/api/regenerate-plan-week`.
-    let fallbackWeekNumbers: [Int]
-    /// Latest full plan JSON (for week regeneration + persistence).
-    let planSnapshotJSON: Data?
-    let planInputs: PlanInputs?
-
-    var id: String { planID }
 }
 
 struct ToolCall: Codable, Identifiable, Equatable, Sendable {
@@ -591,6 +371,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
     /// Injected from `DIContainer` so coach context and recovery heuristics can use WHOOP when linked.
     var whoopDataSource: (any WhoopServiceProtocol)?
+    var persistenceContext: ModelContext { PersistenceContainer.shared.mainContext }
 
     // MARK: Public State
 
@@ -639,6 +420,89 @@ final class AIService: AIServiceProtocol, CoachRepository {
         let norm = raw.replacingOccurrences(of: "_", with: "").replacingOccurrences(
             of: "-", with: "")
         return norm == "admin" || norm == "superuser"
+    }
+
+    func sendMessage(
+        _ text: String,
+        isPro: Bool,
+        delivery: CoachChatDelivery = .automatic
+    ) async {
+        await sendMessage(
+            text,
+            isPro: isPro,
+            modelContext: persistenceContext,
+            delivery: delivery
+        )
+    }
+
+    @discardableResult
+    func generatePlan(
+        inputs: PlanInputs,
+        isPro: Bool,
+        idempotencyKey: String
+    ) async throws -> PlanGenerationResult {
+        try await generatePlan(
+            inputs: inputs,
+            isPro: isPro,
+            modelContext: persistenceContext,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func runConfirmedPlanGeneration(
+        draft: PlanGenerationDraft,
+        isPro: Bool
+    ) async throws {
+        try await runConfirmedPlanGeneration(
+            draft: draft,
+            isPro: isPro,
+            modelContext: persistenceContext
+        )
+    }
+
+    func regenerateFallbackPlanWeek(
+        weekNumber: Int,
+        celebration: PlanSaveCelebration,
+        isPro: Bool
+    ) async throws {
+        try await regenerateFallbackPlanWeek(
+            weekNumber: weekNumber,
+            celebration: celebration,
+            isPro: isPro,
+            modelContext: persistenceContext
+        )
+    }
+
+    func loadPersistedMessages() async {
+        await loadPersistedMessages(modelContext: persistenceContext)
+    }
+
+    func createNewSession() {
+        createNewSession(modelContext: persistenceContext)
+    }
+
+    func escalateStarterOnDeviceToCloud(isPro: Bool) async {
+        await escalateStarterOnDeviceToCloud(isPro: isPro, modelContext: persistenceContext)
+    }
+
+    func switchToSession(_ sessionID: UUID) {
+        switchToSession(sessionID, modelContext: persistenceContext)
+    }
+
+    func deleteSession(_ sessionID: UUID) {
+        deleteSession(sessionID, modelContext: persistenceContext)
+    }
+
+    func fetchSessions() -> [ChatSession] {
+        fetchSessions(modelContext: persistenceContext)
+    }
+
+    func clearMessages() {
+        clearMessages(modelContext: persistenceContext)
+    }
+
+    func regenerateLastMessage(isPro: Bool) async {
+        await regenerateLastMessage(isPro: isPro, modelContext: persistenceContext)
     }
 
     /// In-chat quick-reply chips (model `suggestedActions`). Trim, cap, drop empties.
@@ -2330,18 +2194,6 @@ final class AIService: AIServiceProtocol, CoachRepository {
     }
 
     // MARK: - Contextual Quick Prompts
-
-    struct QuickPrompt: Identifiable, Equatable {
-        var id: String { text }
-        let text: String
-        let icon: String
-    }
-
-    /// Empty-state quick starters plus optional content-tagging topic chips (Foundation Models).
-    struct CoachEmptyStartersContent: Equatable {
-        let prompts: [QuickPrompt]
-        let topicTags: [String]
-    }
 
     /// User-visible copy for plan API failures (avoids raw DecodingError strings in the confirm banner).
     static func userFacingPlanGenerationError(_ error: Error) -> String {

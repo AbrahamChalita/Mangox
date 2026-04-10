@@ -22,21 +22,21 @@ private enum SettingsRoute: Hashable {
 // MARK: - SettingsView
 
 struct SettingsView: View {
+    @State private var viewModel: ProfileViewModel
     @Binding var navigationPath: NavigationPath
-    @Environment(PurchasesManager.self) private var purchases
-    @Environment(StravaService.self) private var stravaService
-    @Environment(WhoopService.self) private var whoopService
-    @Environment(FTPRefreshTrigger.self) private var ftpRefresh
 
-    @State private var showPaywall = false
-    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
+    init(navigationPath: Binding<NavigationPath>, viewModel: ProfileViewModel) {
+        _navigationPath = navigationPath
+        _viewModel = State(initialValue: viewModel)
+    }
 
     var body: some View {
-        let ftp = PowerZone.ftp
+        let _ = viewModel.ftpGeneration
+        let ftp = viewModel.ftp
         let maxHR = HeartRateZone.maxHR
-        let stravaConnected = stravaService.isConnected
-        let whoopConnected = whoopService.isConnected
-        let isPro = purchases.isPro
+        let stravaConnected = viewModel.stravaConnected
+        let whoopConnected = viewModel.whoopConnected
+        let isPro = viewModel.isPro
 
         ZStack {
             AppColor.bg.ignoresSafeArea()
@@ -196,7 +196,7 @@ struct SettingsView: View {
                             rowDivider
 
                             Button {
-                                hasCompletedOnboarding = false
+                                viewModel.resetOnboarding()
                             } label: {
                                 HStack(spacing: 14) {
                                     settingsIconBadge("arrow.clockwise", color: .white.opacity(0.5))
@@ -240,24 +240,24 @@ struct SettingsView: View {
                 .navigationDestination(for: SettingsRoute.self) { route in
                     switch route {
                     case .riderProfile: RiderProfileSettingsView()
-                    case .powerZones: PowerZonesSettingsView()
-                    case .heartRate: HeartRateSettingsView()
-                    case .strava: StravaSettingsView()
-                    case .whoop: WhoopSettingsView()
+                    case .powerZones: PowerZonesSettingsView(viewModel: viewModel)
+                    case .heartRate: HeartRateSettingsView(viewModel: viewModel)
+                    case .strava: StravaSettingsView(viewModel: viewModel)
+                    case .whoop: WhoopSettingsView(viewModel: viewModel)
                     case .integrations: IntegrationsSettingsView()
                     case .indoorTrainer: IndoorTrainerSettingsView()
                     case .outdoorRide: OutdoorRideSettingsView()
                     case .audioHaptics: AudioHapticsSettingsView()
                     case .aiCoach: AICoachSettingsView()
-                    case .mangoxPro: MangoxProSettingsView()
+                    case .mangoxPro: MangoxProSettingsView(viewModel: viewModel)
                     case .goalEvent: GoalEventSettingsView()
                     case .gear: GearSettingsView()
-                    case .dataPrivacyHub: DataPrivacyNotificationsHubView()
+                    case .dataPrivacyHub: DataPrivacyNotificationsHubView(viewModel: viewModel)
                     }
                 }
         }
-        .sheet(isPresented: $showPaywall) {
-            PaywallView()
+        .sheet(isPresented: $viewModel.showPaywall) {
+            PaywallView(viewModel: viewModel.makePaywallViewModel())
         }
     }
 
@@ -274,7 +274,7 @@ struct SettingsView: View {
             .buttonStyle(.plain)
         } else {
             Button {
-                showPaywall = true
+                viewModel.presentPaywall()
             } label: {
                 rowContent(
                     icon: "crown.fill",
@@ -289,16 +289,15 @@ struct SettingsView: View {
     }
 
     private func mangoxProActiveRowLabel() -> some View {
-        let p = purchases
-        let plan = p.storeProPlanKind
-        let renewal = p.storeProRenewalDescription
+        let plan = viewModel.storeProPlanKind
+        let renewal = viewModel.storeProRenewalDescription
         return HStack(alignment: .center, spacing: 14) {
             settingsIconBadge("crown.fill", color: AppColor.mango)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Mangox Pro")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(.white.opacity(0.9))
-                if p.isProDevUnlockOnly {
+                if viewModel.isProDevUnlockOnly {
                     Text("Developer unlock")
                         .font(.system(size: 11))
                         .foregroundStyle(AppColor.mango.opacity(0.75))
@@ -312,12 +311,12 @@ struct SettingsView: View {
             }
             Spacer(minLength: 8)
             HStack(spacing: 6) {
-                if p.revenueCatPro {
+                if viewModel.hasStoreSubscription {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 14))
                         .foregroundStyle(AppColor.success)
                 }
-                Text(p.isProDevUnlockOnly ? "Active" : (plan ?? "Active"))
+                Text(viewModel.isProDevUnlockOnly ? "Active" : (plan ?? "Active"))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AppColor.success)
                     .lineLimit(1)
@@ -336,12 +335,10 @@ struct SettingsView: View {
     private func identityHeader(
         ftp: Int, stravaConnected: Bool, whoopConnected: Bool, isPro: Bool
     ) -> some View {
-        let _ = ftpRefresh.generation
-        return
             (HStack(alignment: .center, spacing: 14) {
                 avatarView
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(identityTitle)
+                    Text(viewModel.identityTitle)
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.95))
                     HStack(spacing: 10) {
@@ -370,20 +367,9 @@ struct SettingsView: View {
             .padding(.horizontal, 20))
     }
 
-    private var identityTitle: String {
-        if stravaService.isConnected,
-            let name = stravaService.athleteDisplayName?.trimmingCharacters(
-                in: .whitespacesAndNewlines),
-            !name.isEmpty
-        {
-            return name
-        }
-        return "Mangox"
-    }
-
     @ViewBuilder
     private var avatarView: some View {
-        if let url = stravaService.athleteProfileImageURL {
+        if let url = viewModel.stravaAvatarURL {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):

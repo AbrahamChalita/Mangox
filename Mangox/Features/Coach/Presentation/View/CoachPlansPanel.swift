@@ -5,13 +5,11 @@ import SwiftData
 private enum CoachPlansDestructiveAction: Identifiable, Equatable {
     case deleteAIPlan(id: String)
     case resetAIProgress(id: String)
-    case resetBuiltinProgress
 
     var id: String {
         switch self {
         case .deleteAIPlan(let id): return "delete-\(id)"
         case .resetAIProgress(let id): return "reset-\(id)"
-        case .resetBuiltinProgress: return "reset-builtin"
         }
     }
 }
@@ -19,11 +17,12 @@ private enum CoachPlansDestructiveAction: Identifiable, Equatable {
 /// Shared plans list for the Coach hub and the "My plans" sheet from chat.
 struct CoachPlansPanel: View {
     @Environment(\.modelContext) private var modelContext
-    @Environment(AIService.self) private var aiService
+    @Environment(CoachViewModel.self) private var coachViewModel
     @Binding var navigationPath: NavigationPath
     /// When set (chat opened as a sheet), navigating to a plan dismisses that chat sheet so the tab stack can show the plan.
     var dismissParentChat: Binding<Bool>? = nil
     var showsIntroCopy: Bool = true
+    var showsSectionHeader: Bool = true
     /// Called when the empty-state "Build a plan" CTA is tapped (hub passes `showChat = true`).
     var onOpenChat: (() -> Void)? = nil
 
@@ -48,26 +47,24 @@ struct CoachPlansPanel: View {
     @State private var destructiveAction: CoachPlansDestructiveAction?
     @State private var showRegenerateInputsMissing = false
 
-    private var builtinPlanID: String { CachedPlan.shared.id }
-
-    private var builtinProgress: TrainingPlanProgress? {
-        allPlanProgress.first { $0.planID == builtinPlanID }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if showsIntroCopy {
-                Text("Open a plan to follow structured workouts. New AI plans appear here after you generate them in chat.")
+                Text("New AI plans appear here after you generate them in chat.")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            sectionHeader("Your plans")
-            standardPlanCard(plan: CachedPlan.shared, originalAIPlan: nil)
-            
-            ForEach(aiPlans) { aiPlan in
-                standardPlanCard(plan: aiPlan.plan, originalAIPlan: aiPlan)
+            if showsSectionHeader {
+                sectionHeader("Your plans")
+            }
+            if aiPlans.isEmpty {
+                plansEmptyState
+            } else {
+                ForEach(aiPlans) { aiPlan in
+                    standardPlanCard(plan: aiPlan.plan, originalAIPlan: aiPlan)
+                }
             }
         }
         .padding(.bottom, 16)
@@ -106,15 +103,6 @@ struct CoachPlansPanel: View {
                 confirmIsRed: false,
                 onConfirm: { resetAIPlanProgress(planID: id) }
             )
-        case .resetBuiltinProgress:
-            destructiveActionChrome(
-                title: "Reset built-in plan progress?",
-                message: "Clears completions and dates; the template stays in Mangox.",
-                confirmTitle: "Reset progress",
-                confirmIsRed: false,
-                onConfirm: { resetBuiltinProgress() }
-            )
-
         }
     }
 
@@ -244,13 +232,13 @@ struct CoachPlansPanel: View {
     // MARK: - AI Plan Card
 
     private func standardPlanCard(plan: TrainingPlan?, originalAIPlan: AIGeneratedPlan?) -> some View {
-        guard let resolvedPlan = plan else { return AnyView(EmptyView()) }
-        let planID = originalAIPlan?.id ?? resolvedPlan.id
+        guard let resolvedPlan = plan, let originalAIPlan else { return AnyView(EmptyView()) }
+        let planID = originalAIPlan.id
         let progress = allPlanProgress.first { $0.planID == planID }
 
         return AnyView(VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
-                planCardGlyph(systemName: "figure.outdoor.cycle", color: originalAIPlan == nil ? AppColor.yellow : AppColor.mango)
+                planCardGlyph(systemName: "figure.outdoor.cycle", color: AppColor.mango)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(resolvedPlan.name)
@@ -275,53 +263,36 @@ struct CoachPlansPanel: View {
                         }
                     }
 
-                    if let aip = originalAIPlan {
-                        Text("Updated \(aip.generatedAt.formatted(date: .abbreviated, time: .omitted))")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                    } else {
-                        Text("Curated Evidence-Based Plan")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                    }
+                    Text("Updated \(originalAIPlan.generatedAt.formatted(date: .abbreviated, time: .omitted))")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
                 }
 
                 Spacer(minLength: 6)
 
                 Menu {
-                    if let aip = originalAIPlan {
-                        Button {
-                            if let data = aip.regenerationInputsJSON,
-                               let inputs = try? JSONDecoder().decode(PlanInputs.self, from: data) {
-                                aiService.planConfirmationDraft = PlanGenerationDraft(
-                                    inputs: inputs,
-                                    summaryLine: aip.userPrompt
-                                )
-                            } else {
-                                showRegenerateInputsMissing = true
-                            }
-                        } label: {
-                            Label("Regenerate similar", systemImage: "arrow.triangle.2.circlepath")
+                    Button {
+                        if !coachViewModel.stagePlanRegeneration(
+                            from: AIGeneratedPlanDraft(
+                                id: originalAIPlan.id,
+                                userPrompt: originalAIPlan.userPrompt,
+                                regenerationInputsJSON: originalAIPlan.regenerationInputsJSON
+                            )
+                        ) {
+                            showRegenerateInputsMissing = true
                         }
-                        Button {
-                            destructiveAction = .resetAIProgress(id: aip.id)
-                        } label: {
-                            Label("Reset Progress", systemImage: "arrow.counterclockwise")
-                        }
-                        Button(role: .destructive) {
-                            destructiveAction = .deleteAIPlan(id: aip.id)
-                        } label: {
-                            Label("Delete Plan", systemImage: "trash")
-                        }
-                    } else {
-                        if progress != nil {
-                            Button {
-                                destructiveAction = .resetBuiltinProgress
-                            } label: {
-                                Label("Reset Progress", systemImage: "arrow.counterclockwise")
-                            }
-                        }
-
+                    } label: {
+                        Label("Regenerate similar", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    Button {
+                        destructiveAction = .resetAIProgress(id: originalAIPlan.id)
+                    } label: {
+                        Label("Reset Progress", systemImage: "arrow.counterclockwise")
+                    }
+                    Button(role: .destructive) {
+                        destructiveAction = .deleteAIPlan(id: originalAIPlan.id)
+                    } label: {
+                        Label("Delete Plan", systemImage: "trash")
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle.fill")
@@ -371,11 +342,7 @@ struct CoachPlansPanel: View {
             }
 
             Button {
-                if originalAIPlan != nil {
-                    navigationPath.append(AppRoute.aiPlan(planID: planID))
-                } else {
-                    navigationPath.append(AppRoute.trainingPlan)
-                }
+                navigationPath.append(AppRoute.aiPlan(planID: planID))
                 dismissParentChatIfNeeded()
             } label: {
                 HStack(spacing: 8) {
@@ -387,7 +354,7 @@ struct CoachPlansPanel: View {
                 .foregroundStyle(AppColor.bg)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 13)
-                .background(originalAIPlan == nil ? AppColor.yellow : AppColor.mango)
+                .background(AppColor.mango)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(MangoxPressStyle())
@@ -436,14 +403,6 @@ struct CoachPlansPanel: View {
     }
 
     // MARK: - Data Actions
-
-    private func resetBuiltinProgress() {
-        guard let p = builtinProgress else { return }
-        modelContext.delete(p)
-        try? modelContext.save()
-    }
-
-
 
     private func resetAIPlanProgress(planID: String) {
         guard let p = allPlanProgress.first(where: { $0.planID == planID }) else { return }

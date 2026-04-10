@@ -1600,8 +1600,24 @@ struct IndoorMilestoneToastChrome: ViewModifier {
     let ble = BLEManager()
     let wifi = WiFiTrainerService()
     let ds = DataSourceCoordinator(bleManager: ble, wifiService: wifi)
-    return DashboardView(
-        navigationPath: .constant(NavigationPath())
+    let rm = RouteManager()
+    let hk = HealthKitManager()
+    let la = RideLiveActivityManager.shared
+    let container = try! PersistenceContainer.makeContainer(inMemory: true)
+    let workoutRepository = WorkoutPersistenceRepository(modelContainer: container)
+    let trainingRepository = TrainingPlanPersistenceRepository(modelContainer: container)
+    DashboardView(
+        navigationPath: .constant(NavigationPath()),
+        trainingPlanLookupService: TrainingPlanLookupService(modelContainer: container),
+        viewModel: IndoorViewModel(
+            bleService: ble,
+            dataSourceService: ds,
+            routeService: rm,
+            healthKitService: hk,
+            liveActivityService: la,
+            workoutPersistenceRepository: workoutRepository,
+            trainingPlanPersistenceRepository: trainingRepository
+        )
     )
     .modelContainer(
         for: [
@@ -1612,8 +1628,8 @@ struct IndoorMilestoneToastChrome: ViewModifier {
     )
     .environment(ble)
     .environment(ds)
-    .environment(RouteManager())
-    .environment(HealthKitManager())
+    .environment(rm)
+    .environment(hk)
     .environment(FTPRefreshTrigger.shared)
 }
 
@@ -1621,9 +1637,25 @@ struct IndoorMilestoneToastChrome: ViewModifier {
     let ble = BLEManager()
     let wifi = WiFiTrainerService()
     let ds = DataSourceCoordinator(bleManager: ble, wifiService: wifi)
-    return DashboardView(
+    let rm = RouteManager()
+    let hk = HealthKitManager()
+    let la = RideLiveActivityManager.shared
+    let container = try! PersistenceContainer.makeContainer(inMemory: true)
+    let workoutRepository = WorkoutPersistenceRepository(modelContainer: container)
+    let trainingRepository = TrainingPlanPersistenceRepository(modelContainer: container)
+    DashboardView(
         navigationPath: .constant(NavigationPath()),
-        planDayID: "w2d2"
+        planDayID: "w2d2",
+        trainingPlanLookupService: TrainingPlanLookupService(modelContainer: container),
+        viewModel: IndoorViewModel(
+            bleService: ble,
+            dataSourceService: ds,
+            routeService: rm,
+            healthKitService: hk,
+            liveActivityService: la,
+            workoutPersistenceRepository: workoutRepository,
+            trainingPlanPersistenceRepository: trainingRepository
+        )
     )
     .modelContainer(
         for: [
@@ -1634,7 +1666,7 @@ struct IndoorMilestoneToastChrome: ViewModifier {
     )
     .environment(ble)
     .environment(ds)
-    .environment(RouteManager())
-    .environment(HealthKitManager())
+    .environment(rm)
+    .environment(hk)
     .environment(FTPRefreshTrigger.shared)
 }

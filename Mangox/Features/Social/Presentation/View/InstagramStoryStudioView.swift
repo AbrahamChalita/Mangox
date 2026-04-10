@@ -10,21 +10,52 @@ struct InstagramStoryStudioView: View {
     let personalRecordNames: [String]
     let onDismiss: () -> Void
     let onShareError: (String) -> Void
+    @State private var viewModel: SocialViewModel
 
-    @State private var options = InstagramStoryStudioPreferences.load()
-    @State private var previewImage: UIImage?
-    @State private var isRendering = false
-    @State private var isSharing = false
-    @State private var showShareFallback = false
-    @State private var shareFallbackItems: [Any] = []
-    @State private var aiCaption: String?
-    @State private var isCaptionGenerating = false
     @State private var captionCopied = false
-    @State private var aiTitle: String?
-    @State private var isTitleGenerating = false
 
     private var dominantZone: PowerZone {
         PowerZone.zone(for: Int(workout.avgPower.rounded()))
+    }
+
+    init(
+        workout: Workout,
+        routeName: String?,
+        totalElevationGain: Double,
+        personalRecordNames: [String],
+        onDismiss: @escaping () -> Void,
+        onShareError: @escaping (String) -> Void,
+        viewModel: SocialViewModel
+    ) {
+        self.workout = workout
+        self.routeName = routeName
+        self.totalElevationGain = totalElevationGain
+        self.personalRecordNames = personalRecordNames
+        self.onDismiss = onDismiss
+        self.onShareError = onShareError
+        _viewModel = State(initialValue: viewModel)
+    }
+
+    private func binding<Value>(_ keyPath: ReferenceWritableKeyPath<SocialViewModel, Value>)
+        -> Binding<Value>
+    {
+        Binding(
+            get: { viewModel[keyPath: keyPath] },
+            set: { viewModel[keyPath: keyPath] = $0 }
+        )
+    }
+
+    private func optionBinding<Value>(_ keyPath: WritableKeyPath<InstagramStoryCardOptions, Value>)
+        -> Binding<Value>
+    {
+        Binding(
+            get: { viewModel.storyOptions[keyPath: keyPath] },
+            set: {
+                var options = viewModel.storyOptions
+                options[keyPath: keyPath] = $0
+                viewModel.saveStoryOptions(options)
+            }
+        )
     }
 
     var body: some View {
@@ -47,30 +78,51 @@ struct InstagramStoryStudioView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") {
-                        InstagramStoryStudioPreferences.save(options)
+                        InstagramStoryStudioPreferences.save(viewModel.storyOptions)
                         onDismiss()
                     }
                     .foregroundStyle(Color.white.opacity(AppOpacity.textSecondary))
                 }
             }
             .onAppear {
-                if previewImage == nil {
-                    renderPreview()
+                if viewModel.previewImage == nil {
+                    Task {
+                        await viewModel.renderPreview(
+                            workout: workout,
+                            dominantZone: dominantZone,
+                            routeName: routeName,
+                            totalElevationGain: totalElevationGain,
+                            personalRecordNames: personalRecordNames
+                        )
+                    }
                 }
             }
-            .onChange(of: options) { _, newValue in
+            .onChange(of: viewModel.storyOptions) { _, newValue in
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                InstagramStoryStudioPreferences.save(newValue)
-                renderPreview()
+                viewModel.saveStoryOptions(newValue)
+                Task {
+                    await viewModel.renderPreview(
+                        workout: workout,
+                        dominantZone: dominantZone,
+                        routeName: routeName,
+                        totalElevationGain: totalElevationGain,
+                        personalRecordNames: personalRecordNames
+                    )
+                }
             }
-            .onChange(of: aiTitle) { _, _ in
-                renderPreview()
+            .onChange(of: viewModel.aiTitle) { _, _ in
+                Task {
+                    await viewModel.renderPreview(
+                        workout: workout,
+                        dominantZone: dominantZone,
+                        routeName: routeName,
+                        totalElevationGain: totalElevationGain,
+                        personalRecordNames: personalRecordNames
+                    )
+                }
             }
             .task {
-                guard aiTitle == nil, !isTitleGenerating else { return }
-                isTitleGenerating = true
-                defer { isTitleGenerating = false }
-                aiTitle = await OnDeviceCoachEngine.generateStoryCardTitle(
+                await viewModel.generateTitle(
                     workout: workout,
                     dominantZoneName: dominantZone.name,
                     routeName: routeName,
@@ -78,11 +130,11 @@ struct InstagramStoryStudioView: View {
                 )
             }
             .preferredColorScheme(.dark)
-            .sheet(isPresented: $showShareFallback) {
-                ShareSheet(activityItems: shareFallbackItems)
+            .sheet(isPresented: binding(\.showShareFallback)) {
+                ShareSheet(activityItems: viewModel.shareFallbackItems as [Any])
             }
         }
-}
+    }
 
     private var storyPreview: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -92,7 +144,7 @@ struct InstagramStoryStudioView: View {
                     .foregroundStyle(Color.white.opacity(AppOpacity.textTertiary))
                     .tracking(1.5)
                 Spacer()
-                if isRendering {
+                if viewModel.isRendering {
                     ProgressView()
                         .scaleEffect(0.6)
                         .tint(AppColor.mango)
@@ -107,13 +159,13 @@ struct InstagramStoryStudioView: View {
                             .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
                     )
 
-                if let previewImage {
+                if let previewImage = viewModel.previewImage {
                     Image(uiImage: previewImage)
                         .resizable()
                         .scaledToFit()
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .padding(8)
-                } else if isRendering {
+                } else if viewModel.isRendering {
                     ProgressView()
                         .tint(AppColor.mango)
                 } else {
@@ -147,11 +199,11 @@ struct InstagramStoryStudioView: View {
             sectionLabel("APPEARANCE")
             Spacer()
             VStack(spacing: 12) {
-                Picker("Accent", selection: $options.accent) {
+                Picker("Accent", selection: optionBinding(\.accent)) {
                     ForEach(InstagramStoryCardOptions.Accent.allCases) { a in
                         HStack {
                             Circle()
-                                .fill(a.swiftUIColor)
+                                .fill(a.color)
                                 .frame(width: 12, height: 12)
                             Text(a.pickerTitle)
                         }
@@ -160,15 +212,15 @@ struct InstagramStoryStudioView: View {
                 }
                 .pickerStyle(.menu)
                 .tint(AppColor.mango)
-                .onChange(of: options.accent) { _, _ in
+                .onChange(of: viewModel.storyOptions.accent) { _, _ in
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }
 
                 Toggle(
-                    "Layered share (gradient + movable card)", isOn: $options.layeredShare
+                    "Layered share (gradient + movable card)", isOn: optionBinding(\.layeredShare)
                 )
                 .tint(AppColor.mango)
-                .onChange(of: options.layeredShare) { _, _ in
+                .onChange(of: viewModel.storyOptions.layeredShare) { _, _ in
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }
             }
@@ -187,27 +239,27 @@ struct InstagramStoryStudioView: View {
             sectionLabel("CONTENT")
             Spacer()
             VStack(spacing: 12) {
-                Toggle("Power / HR chart", isOn: $options.showPowerHRChart)
-                    .onChange(of: options.showPowerHRChart) { _, _ in
+                Toggle("Power / HR chart", isOn: optionBinding(\.showPowerHRChart))
+                    .onChange(of: viewModel.storyOptions.showPowerHRChart) { _, _ in
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     }
-                Toggle("Heart rate line on chart", isOn: $options.showHeartRateLineOnChart)
-                    .disabled(!options.showPowerHRChart)
-                    .tint(options.showPowerHRChart ? AppColor.mango : Color.gray)
-                Toggle("Detail line (cadence, route, …)", isOn: $options.showMetaLine)
-                    .onChange(of: options.showMetaLine) { _, _ in
+                Toggle("Heart rate line on chart", isOn: optionBinding(\.showHeartRateLineOnChart))
+                    .disabled(!viewModel.storyOptions.showPowerHRChart)
+                    .tint(viewModel.storyOptions.showPowerHRChart ? AppColor.mango : Color.gray)
+                Toggle("Detail line (cadence, route, …)", isOn: optionBinding(\.showMetaLine))
+                    .onChange(of: viewModel.storyOptions.showMetaLine) { _, _ in
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     }
-                Toggle("NP · TSS · IF row", isOn: $options.showNPAndTSS)
-                    .onChange(of: options.showNPAndTSS) { _, _ in
+                Toggle("NP · TSS · IF row", isOn: optionBinding(\.showNPAndTSS))
+                    .onChange(of: viewModel.storyOptions.showNPAndTSS) { _, _ in
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     }
-                Toggle("Elevation on card", isOn: $options.showElevation)
-                    .onChange(of: options.showElevation) { _, _ in
+                Toggle("Elevation on card", isOn: optionBinding(\.showElevation))
+                    .onChange(of: viewModel.storyOptions.showElevation) { _, _ in
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     }
-                Toggle("Mangox footer", isOn: $options.showFooterBranding)
-                    .onChange(of: options.showFooterBranding) { _, _ in
+                Toggle("Mangox footer", isOn: optionBinding(\.showFooterBranding))
+                    .onChange(of: viewModel.storyOptions.showFooterBranding) { _, _ in
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     }
             }
@@ -229,7 +281,7 @@ struct InstagramStoryStudioView: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(AppColor.mango)
                 Spacer(minLength: 0)
-                if isCaptionGenerating {
+                if viewModel.isCaptionGenerating {
                     ProgressView()
                         .scaleEffect(0.7)
                         .tint(AppColor.mango)
@@ -237,7 +289,7 @@ struct InstagramStoryStudioView: View {
             }
             Spacer()
 
-            if let caption = aiCaption {
+            if let caption = viewModel.aiCaption {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(caption)
                         .font(.system(size: 13))
@@ -262,7 +314,7 @@ struct InstagramStoryStudioView: View {
                         .foregroundStyle(captionCopied ? AppColor.mango : Color.white.opacity(0.6))
                     }
                 }
-            } else if !isCaptionGenerating {
+            } else if !viewModel.isCaptionGenerating {
                 VStack(spacing: 6) {
                     Image(systemName: "text.bubble")
                         .font(.system(size: 20))
@@ -283,10 +335,7 @@ struct InstagramStoryStudioView: View {
                 .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
         )
         .task {
-            guard aiCaption == nil, !isCaptionGenerating else { return }
-            isCaptionGenerating = true
-            defer { isCaptionGenerating = false }
-            aiCaption = await OnDeviceCoachEngine.generateInstagramCaption(
+            await viewModel.generateCaption(
                 workout: workout,
                 dominantZoneName: dominantZone.name,
                 routeName: routeName,
@@ -299,10 +348,20 @@ struct InstagramStoryStudioView: View {
     private var exportSection: some View {
         VStack(spacing: 0) {
             Button {
-                shareToInstagram()
+                Task {
+                    await viewModel.shareToInstagram(
+                        workout: workout,
+                        dominantZone: dominantZone,
+                        routeName: routeName,
+                        totalElevationGain: totalElevationGain,
+                        personalRecordNames: personalRecordNames,
+                        onError: onShareError,
+                        onDismiss: onDismiss
+                    )
+                }
             } label: {
                 HStack(spacing: 10) {
-                    if isSharing {
+                    if viewModel.isSharing {
                         ProgressView()
                             .tint(.white)
                     } else {
@@ -312,8 +371,10 @@ struct InstagramStoryStudioView: View {
                             .scaledToFit()
                             .frame(width: 20, height: 20)
                     }
-                    Text(isSharing ? "Opening Instagram…" : "Share to Instagram Stories")
-                        .font(.headline)
+                    Text(
+                        viewModel.isSharing ? "Opening Instagram..." : "Share to Instagram Stories"
+                    )
+                    .font(.headline)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
@@ -326,13 +387,21 @@ struct InstagramStoryStudioView: View {
                     blue: 0.42
                 )
             )
-            .disabled(isSharing || isRendering)
+            .disabled(viewModel.isSharing || viewModel.isRendering)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                options = .default
-                renderPreview()
+                viewModel.resetStoryOptions()
+                Task {
+                    await viewModel.renderPreview(
+                        workout: workout,
+                        dominantZone: dominantZone,
+                        routeName: routeName,
+                        totalElevationGain: totalElevationGain,
+                        personalRecordNames: personalRecordNames
+                    )
+                }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.counterclockwise")
@@ -351,100 +420,5 @@ struct InstagramStoryStudioView: View {
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(Color.white.opacity(AppOpacity.textTertiary))
             .tracking(1.5)
-    }
-
-    private func renderPreview() {
-        isRendering = true
-        Task { @MainActor in
-            await Task.yield()
-            let img = InstagramStoryShare.renderWorkoutStory(
-                workout: workout,
-                dominantZone: dominantZone,
-                routeName: routeName,
-                totalElevationGain: totalElevationGain,
-                personalRecordNames: personalRecordNames,
-                options: options,
-                whoopStrain: nil,
-                whoopRecovery: nil,
-                aiTitle: aiTitle
-            )
-            previewImage = img
-            isRendering = false
-        }
-    }
-
-    private func shareToInstagram() {
-        guard InstagramStoryShare.facebookAppID != nil else {
-            onShareError(
-                "Instagram Stories needs a Meta/Facebook App ID. Set FACEBOOK_APP_ID in Xcode build settings (see Meta: Sharing to Stories)."
-            )
-            return
-        }
-
-        isSharing = true
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-
-        Task { @MainActor in
-            await Task.yield()
-            let opts = options
-            let title = aiTitle
-            let full = InstagramStoryShare.renderWorkoutStory(
-                workout: workout,
-                dominantZone: dominantZone,
-                routeName: routeName,
-                totalElevationGain: totalElevationGain,
-                personalRecordNames: personalRecordNames,
-                options: opts,
-                whoopStrain: nil,
-                whoopRecovery: nil,
-                aiTitle: title
-            )
-
-            let bgData: Data?
-            let stickerData: Data?
-
-            if opts.layeredShare {
-                let bgImage = InstagramStoryCardRenderer.renderAtmosphericBackgroundOnly(
-                    dominantZone: dominantZone,
-                    options: opts
-                )
-                let stickerImage = InstagramStoryCardRenderer.renderStickerLayer(fullCard: full)
-                bgData = InstagramStoryShare.encodeBackgroundImageData(bgImage)
-                stickerData = InstagramStoryShare.encodeStickerImageData(stickerImage)
-            } else {
-                bgData = nil
-                stickerData = nil
-            }
-
-            defer { isSharing = false }
-
-            if opts.layeredShare {
-                guard let bgData, let stickerData else {
-                    onShareError("Could not encode story images.")
-                    return
-                }
-                if InstagramStoryShare.presentStories(
-                    backgroundPNGData: bgData,
-                    stickerPNGData: stickerData
-                ) {
-                    InstagramStoryStudioPreferences.save(opts)
-                    onDismiss()
-                    return
-                }
-            } else {
-                guard let shareData = InstagramStoryShare.encodeBackgroundImageData(full) else {
-                    onShareError("Could not encode story image.")
-                    return
-                }
-                if InstagramStoryShare.presentStories(withPNGData: shareData) {
-                    InstagramStoryStudioPreferences.save(opts)
-                    onDismiss()
-                    return
-                }
-            }
-
-            shareFallbackItems = [full]
-            showShareFallback = true
-        }
     }
 }

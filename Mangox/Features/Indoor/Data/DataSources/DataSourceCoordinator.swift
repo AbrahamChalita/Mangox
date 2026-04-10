@@ -23,7 +23,7 @@ enum PrimaryDataSource: Sendable {
 
 @Observable
 @MainActor
-final class DataSourceCoordinator {
+final class DataSourceCoordinator: DataSourceServiceProtocol {
     let bleManager: BLEManager
     let wifiService: WiFiTrainerService
 
@@ -230,6 +230,10 @@ final class DataSourceCoordinator {
 
     var wifiConnectionState: WiFiConnectionState {
         wifiService.connectionState
+    }
+
+    var connectedWiFiTrainer: DiscoveredWiFiTrainer? {
+        wifiService.connectedTrainer
     }
 
     /// Trainer link as a single BLE-style state for status badges (Wi‑Fi takes priority when active).

@@ -47,6 +47,16 @@ enum UserDataExportService {
 
     @MainActor
     static func buildExportBundle(
+        tier: ExportTier = .standard
+    ) throws -> URL {
+        try buildExportBundle(
+            modelContext: PersistenceContainer.shared.mainContext,
+            tier: tier
+        )
+    }
+
+    @MainActor
+    static func buildExportBundle(
         modelContext: ModelContext,
         tier: ExportTier = .standard
     ) throws -> URL {

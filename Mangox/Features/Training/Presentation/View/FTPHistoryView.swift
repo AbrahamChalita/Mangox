@@ -1,9 +1,7 @@
-import SwiftData
 import SwiftUI
 
 struct FTPHistoryView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
     @State private var results: [FTPTestResult] = []
     @State private var showApplyConfirmation = false
     @State private var selectedResult: FTPTestResult?
@@ -41,7 +39,7 @@ struct FTPHistoryView: View {
                 PowerZone.setFTP(result.estimatedFTP)
                 FTPTestHistory.markApplied(id: result.id)
                 FitnessSettingsSnapshotRecorder.recordFromCurrentSettings(
-                    source: "ftp_test_applied", modelContext: modelContext)
+                    source: "ftp_test_applied")
                 loadHistory()
                 selectedResult = nil
             }

@@ -1,8 +1,7 @@
 // Features/Coach/Data/Repositories/AIServiceProtocol.swift
 import Foundation
-import SwiftData
 
-/// Infrastructure-level AI service contract. Lives in Data because it depends on ModelContext.
+/// Infrastructure-level AI service contract. Lives in Data because it owns persistence and streaming.
 /// Domain-level coach contract: see `CoachRepository` in Coach/Domain/Repositories/.
 /// Concrete implementation: `AIService` in Coach/Data/Repositories/.
 @MainActor
@@ -22,12 +21,14 @@ protocol AIServiceProtocol: AnyObject {
     var currentSessionID: UUID? { get }
     var todayMessageCount: Int { get }
 
+    func coachFactSheetText() -> String
     func hasReachedFreeLimit(isPro: Bool) -> Bool
+    func loadCoachEmptyStartersContent() async -> CoachEmptyStartersContent
+    func contextualQuickPrompts() -> [QuickPrompt]
 
     func sendMessage(
         _ text: String,
         isPro: Bool,
-        modelContext: ModelContext,
         delivery: CoachChatDelivery
     ) async
 
@@ -35,24 +36,28 @@ protocol AIServiceProtocol: AnyObject {
     func generatePlan(
         inputs: PlanInputs,
         isPro: Bool,
-        modelContext: ModelContext,
         idempotencyKey: String
     ) async throws -> PlanGenerationResult
 
     func runConfirmedPlanGeneration(
         draft: PlanGenerationDraft,
-        isPro: Bool,
-        modelContext: ModelContext
+        isPro: Bool
+    ) async throws
+    func regenerateFallbackPlanWeek(
+        weekNumber: Int,
+        celebration: PlanSaveCelebration,
+        isPro: Bool
     ) async throws
 
-    func loadPersistedMessages(modelContext: ModelContext) async
-    func createNewSession(modelContext: ModelContext)
-    func switchToSession(_ sessionID: UUID, modelContext: ModelContext)
-    func deleteSession(_ sessionID: UUID, modelContext: ModelContext)
-    func fetchSessions(modelContext: ModelContext) -> [ChatSession]
-    func clearMessages(modelContext: ModelContext)
+    func loadPersistedMessages() async
+    func createNewSession()
+    func escalateStarterOnDeviceToCloud(isPro: Bool) async
+    func switchToSession(_ sessionID: UUID)
+    func deleteSession(_ sessionID: UUID)
+    func fetchSessions() -> [ChatSession]
+    func clearMessages()
     func submitFeedback(for messageID: UUID, score: Int)
-    func regenerateLastMessage(isPro: Bool, modelContext: ModelContext) async
+    func regenerateLastMessage(isPro: Bool) async
 
     var contextWindowSize: Int { get }
     var currentContextCount: Int { get }

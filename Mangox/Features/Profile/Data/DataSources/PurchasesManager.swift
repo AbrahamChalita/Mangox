@@ -127,6 +127,39 @@ final class PurchasesManager: PurchasesServiceProtocol {
     /// True when Pro comes only from the DEBUG override (no App Store entitlement).
     var isProDevUnlockOnly: Bool { isPro && !revenueCatPro }
 
+    /// RevenueCat entitlement only (no dev override).
+    var hasStoreSubscription: Bool { revenueCatPro }
+
+    /// Decoupled paywall options derived from the current RevenueCat offering.
+    var availablePaywallOptions: [PaywallOption] {
+        guard let current = offerings?.current else { return [] }
+        return current.availablePackages.map { pkg in
+            PaywallOption(
+                id: pkg.identifier,
+                productIdentifier: pkg.storeProduct.productIdentifier,
+                title: pkg.packageTitle,
+                localizedPrice: pkg.localizedPriceString,
+                isYearly: pkg.storeProduct.productIdentifier.contains("yearly")
+            )
+        }
+    }
+
+    /// Purchase by paywall-option ID. Returns `true` when the purchase succeeded and Pro is now active.
+    func purchase(optionWithID id: String) async throws -> Bool {
+        guard Purchases.isConfigured else {
+            throw PurchasesManagerError.notConfigured
+        }
+        guard let pkg = offerings?.current?.availablePackages.first(where: { $0.identifier == id }) else {
+            throw PurchasesManagerError.notConfigured
+        }
+        let result = try await Purchases.shared.purchase(package: pkg)
+        updateEntitlements(result.customerInfo)
+        if !result.userCancelled {
+            _ = try await Purchases.shared.syncPurchases()
+        }
+        return isPro
+    }
+
     /// DEBUG-only: grant Pro without a sandbox purchase. Release builds always return `false`.
     ///
     /// Enable any of:
@@ -148,6 +181,18 @@ final class PurchasesManager: PurchasesServiceProtocol {
             Task { @MainActor in
                 owner?.updateEntitlements(customerInfo)
             }
+        }
+    }
+}
+
+// MARK: - Package display helper
+
+extension Package {
+    var packageTitle: String {
+        switch packageType {
+        case .monthly: return "Monthly"
+        case .annual: return "Yearly"
+        default: return storeProduct.localizedTitle
         }
     }
 }

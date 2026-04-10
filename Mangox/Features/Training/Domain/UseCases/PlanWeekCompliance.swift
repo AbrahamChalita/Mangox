@@ -29,10 +29,25 @@ enum PlanWeekCompliance {
     }
 
     /// Uses the most recently started plan progress, matching plan, and recent rides for week TSS.
+    @MainActor
     static func snapshot(
         progress: TrainingPlanProgress?,
         plan: TrainingPlan?,
         recentWorkouts: [Workout]
+    ) -> Snapshot? {
+        let snapshots = recentWorkouts.map(WorkoutMetricsSnapshot.init(from:))
+        return snapshot(
+            progress: progress,
+            plan: plan,
+            recentWorkouts: snapshots
+        )
+    }
+
+    @MainActor
+    static func snapshot(
+        progress: TrainingPlanProgress?,
+        plan: TrainingPlan?,
+        recentWorkouts: [WorkoutMetricsSnapshot]
     ) -> Snapshot? {
         guard let progress, let plan else { return nil }
 
@@ -65,12 +80,10 @@ enum PlanWeekCompliance {
         guard scheduled > 0 else { return nil }
 
         let ftp = max(1, max(progress.currentFTP, PowerZone.ftp))
-        let actualWeekTSS = recentWorkouts
-            .filter {
-                $0.status == .completed && $0.isValid
-                    && $0.startDate >= weekStart && $0.startDate < weekEnd
-            }
-            .reduce(0.0) { $0 + $1.tss }
+        let actualWeekTSS = recentWorkouts.reduce(0.0) { partial, workout in
+            guard workout.startDate >= weekStart && workout.startDate < weekEnd else { return partial }
+            return partial + workout.tss
+        }
         let compliance = TrainingPlanCompliance.compute(
             plan: plan,
             progress: progress,

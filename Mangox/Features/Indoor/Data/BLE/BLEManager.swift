@@ -45,9 +45,28 @@ struct DiscoveredPeripheral: Identifiable {
     var deviceType: DeviceType
 }
 
+/// Connection quality based on RSSI signal strength.
+enum ConnectionQuality: String, Sendable {
+    case excellent
+    case good
+    case fair
+    case poor
+    case disconnected
+
+    var description: String {
+        switch self {
+        case .excellent: return "Excellent"
+        case .good: return "Good"
+        case .fair: return "Fair"
+        case .poor: return "Poor"
+        case .disconnected: return "Disconnected"
+        }
+    }
+}
+
 @Observable
 @MainActor
-final class BLEManager: NSObject {
+final class BLEManager: NSObject, BLEServiceProtocol {
     // Backward compatibility for existing UI logic.
     var connectionState: BLEConnectionState { trainerConnectionState }
     var isScanningForDevices: Bool { isScanning }
@@ -92,6 +111,45 @@ final class BLEManager: NSObject {
 
     /// FTMS trainer control service — handles ERG, simulation, and resistance commands.
     let ftmsControl = FTMSControlService()
+
+    // MARK: - FTMS Control Protocol Witnesses
+
+    /// Whether an FTMS control point is available on the connected trainer.
+    var ftmsControlIsAvailable: Bool { ftmsControl.isAvailable }
+
+    /// Whether the trainer supports ERG (power target) mode.
+    var ftmsControlSupportsERG: Bool { ftmsControl.supportsERG }
+
+    /// Whether the trainer supports simulation (grade/wind) mode.
+    var ftmsControlSupportsSimulation: Bool { ftmsControl.supportsSimulation }
+
+    /// Whether the trainer supports resistance level mode.
+    var ftmsControlSupportsResistance: Bool { ftmsControl.supportsResistance }
+
+    /// The currently active FTMS trainer control mode.
+    var ftmsControlActiveMode: TrainerControlMode { ftmsControl.activeMode }
+
+    // MARK: - FTMS Trainer Control Actions (BLEServiceProtocol conformance)
+
+    /// Set ERG mode — trainer locks to a specific wattage regardless of cadence.
+    func setTargetPower(watts: Int) async throws {
+        try await ftmsControl.setTargetPower(watts: watts)
+    }
+
+    /// Set resistance level (0.0–1.0 normalized, mapped to trainer's supported range).
+    func setResistanceLevel(_ fraction: Double) async throws {
+        try await ftmsControl.setResistanceLevel(fraction)
+    }
+
+    /// Set simulation mode using a grade percentage.
+    func setSimulationGrade(_ gradePercent: Double) async throws {
+        try await ftmsControl.setSimulation(grade: gradePercent)
+    }
+
+    /// Release trainer control and return to free ride.
+    func releaseTrainerControl() async {
+        await ftmsControl.releaseControl()
+    }
 
     /// Smoothed power: exponential moving average of instantaneous BLE power readings.
     /// Updated on every incoming packet (~4 Hz) — no separate timer, no drift.
@@ -180,25 +238,6 @@ final class BLEManager: NSObject {
     /// Current signal strength (updated during connection)
     var trainerRSSI: Int = 0
     var hrRSSI: Int = 0
-
-    /// Connection quality based on RSSI
-    enum ConnectionQuality: String {
-        case excellent
-        case good
-        case fair
-        case poor
-        case disconnected
-
-        var description: String {
-            switch self {
-            case .excellent: return "Excellent"
-            case .good: return "Good"
-            case .fair: return "Fair"
-            case .poor: return "Poor"
-            case .disconnected: return "Disconnected"
-            }
-        }
-    }
 
     /// Current connection quality for UI display
     var trainerConnectionQuality: ConnectionQuality {

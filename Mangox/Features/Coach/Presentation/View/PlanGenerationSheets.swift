@@ -8,9 +8,7 @@ struct CoachPlanConfirmBanner: View {
     let draft: PlanGenerationDraft
     @Binding var navigationPath: NavigationPath
 
-    @Environment(AIService.self) private var aiService
-    @Environment(PurchasesManager.self) private var purchases
-    @Environment(\.modelContext) private var modelContext
+    @Environment(CoachViewModel.self) private var coachViewModel
 
     @State private var localError: String?
     /// Collapsed by default so the confirm card fits above the keyboard + composer; user expands to edit.
@@ -31,7 +29,6 @@ struct CoachPlanConfirmBanner: View {
     private static let planFormScrollMaxHeight: CGFloat = 380
 
     var body: some View {
-        @Bindable var ai = aiService
         VStack(alignment: .leading, spacing: 0) {
             Group {
                 if editDetailsExpanded {
@@ -55,7 +52,7 @@ struct CoachPlanConfirmBanner: View {
                 HStack(spacing: 10) {
                     Button {
                         localError = nil
-                        ai.planConfirmationDraft = nil
+                        coachViewModel.clearPlanConfirmationDraft()
                     } label: {
                         Text("Cancel")
                             .font(.system(size: 15, weight: .semibold))
@@ -66,7 +63,7 @@ struct CoachPlanConfirmBanner: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(MangoxPressStyle())
-                    .disabled(ai.generatingPlan)
+                    .disabled(coachViewModel.generatingPlan)
 
                     Button {
                         localError = nil
@@ -78,17 +75,16 @@ struct CoachPlanConfirmBanner: View {
                             let confirmed = PlanGenerationDraft(
                                 id: draft.id,
                                 inputs: inputs,
-                                summaryLine: AIService.planSummaryLine(for: inputs)
+                                summaryLine: coachViewModel.planGenerationSummaryLine(for: inputs)
                             )
                             Task {
                                 do {
-                                    try await ai.runConfirmedPlanGeneration(
+                                    try await coachViewModel.runConfirmedPlanGeneration(
                                         draft: confirmed,
-                                        isPro: purchases.isPro,
-                                        modelContext: modelContext
+                                        isPro: coachViewModel.isPro
                                     )
                                 } catch {
-                                    localError = AIService.userFacingPlanGenerationError(error)
+                                    localError = coachViewModel.userFacingPlanGenerationError(error)
                                     editDetailsExpanded = true
                                 }
                             }
@@ -96,17 +92,17 @@ struct CoachPlanConfirmBanner: View {
                     } label: {
                         VStack(spacing: 6) {
                             HStack(spacing: 8) {
-                                if ai.generatingPlan {
+                                if coachViewModel.generatingPlan {
                                     ProgressView()
                                         .tint(.black.opacity(0.8))
                                 }
-                                Text(ai.generatingPlan
-                                     ? (ai.planProgress?.message ?? "Generating…")
+                                Text(coachViewModel.generatingPlan
+                                     ? (coachViewModel.planProgress?.message ?? "Generating…")
                                      : "Generate")
                                     .font(.system(size: 15, weight: .bold))
                                     .lineLimit(1)
                             }
-                            if ai.generatingPlan, let progress = ai.planProgress {
+                            if coachViewModel.generatingPlan, let progress = coachViewModel.planProgress {
                                 ProgressView(value: progress.fraction)
                                     .tint(.black.opacity(0.6))
                                     .scaleEffect(y: 1.5)
@@ -118,10 +114,10 @@ struct CoachPlanConfirmBanner: View {
                         .background(AppColor.mango)
                         .foregroundStyle(.black.opacity(0.78))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .animation(.easeInOut(duration: 0.2), value: ai.planProgress)
+                        .animation(.easeInOut(duration: 0.2), value: coachViewModel.planProgress)
                     }
                     .buttonStyle(MangoxPressStyle())
-                    .disabled(ai.generatingPlan)
+                    .disabled(coachViewModel.generatingPlan)
                 }
                 .padding(.top, 12)
             }
@@ -279,7 +275,7 @@ struct CoachPlanConfirmBanner: View {
             return (nil, "Enter an event name.")
         }
         let dateTrim = eventDateYMD.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let normalizedDate = AIService.normalizeEventDateForPlan(dateTrim) else {
+        guard let normalizedDate = coachViewModel.normalizePlanEventDate(dateTrim) else {
             return (nil, "Event date must be a valid yyyy-MM-dd (or a recognizable date).")
         }
         let ftpTrim = ftpText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -342,15 +338,12 @@ struct CoachPlanSuccessBanner: View {
     /// e.g. dismiss full-screen chat so the plan route is visible on the tab stack.
     var dismissChat: (() -> Void)?
 
-    @Environment(AIService.self) private var aiService
-    @Environment(PurchasesManager.self) private var purchases
-    @Environment(\.modelContext) private var modelContext
+    @Environment(CoachViewModel.self) private var coachViewModel
 
     @State private var regeneratingWeek: Int?
     @State private var regenError: String?
 
     var body: some View {
-        @Bindable var ai = aiService
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Image(systemName: "checkmark.circle.fill")
@@ -390,11 +383,10 @@ struct CoachPlanSuccessBanner: View {
                                 regenError = nil
                                 defer { regeneratingWeek = nil }
                                 do {
-                                    try await ai.regenerateFallbackPlanWeek(
-                                        weekNumber: wn,
+                                    try await coachViewModel.regenerateFallbackPlanWeek(
+                                        wn,
                                         celebration: celebration,
-                                        isPro: purchases.isPro,
-                                        modelContext: modelContext
+                                        isPro: coachViewModel.isPro
                                     )
                                 } catch {
                                     regenError = error.localizedDescription
@@ -430,7 +422,7 @@ struct CoachPlanSuccessBanner: View {
 
             HStack(spacing: 10) {
                 Button {
-                    ai.planSaveCelebration = nil
+                    coachViewModel.clearPlanSaveCelebration()
                 } label: {
                     Text("Done")
                         .font(.system(size: 15, weight: .semibold))
@@ -444,7 +436,7 @@ struct CoachPlanSuccessBanner: View {
 
                 Button {
                     navigationPath.append(AppRoute.aiPlan(planID: celebration.planID))
-                    ai.planSaveCelebration = nil
+                    coachViewModel.clearPlanSaveCelebration()
                     dismissChat?()
                 } label: {
                     Text("Open plan")

@@ -63,19 +63,19 @@ enum WorkoutExportService {
     static func export(
         workout: Workout,
         format: ExportFormat,
-        routeManager: RouteManager? = nil
+        routeService: (any RouteServiceProtocol)? = nil
     ) throws -> URL {
         switch format {
         case .tcx:
-            return try exportTCX(workout: workout, routeManager: routeManager)
+            return try exportTCX(workout: workout, routeService: routeService)
         case .gpx:
-            return try exportGPX(workout: workout, routeManager: routeManager)
+            return try exportGPX(workout: workout, routeService: routeService)
         }
     }
 
     /// Legacy convenience method — exports GPX (backward compatible with old call sites).
     static func exportGPX(workout: Workout, routeManager: RouteManager) throws -> URL {
-        try export(workout: workout, format: .gpx, routeManager: routeManager)
+        try export(workout: workout, format: .gpx, routeService: routeManager)
     }
 
     /// Whether a given format can export without a loaded route.
@@ -127,13 +127,13 @@ enum WorkoutExportService {
     /// Laps contain summary stats (avg/max HR, avg/max power, calories, distance, etc.)
     private static func exportTCX(
         workout: Workout,
-        routeManager: RouteManager?
+        routeService: (any RouteServiceProtocol)?
     ) throws -> URL {
         let samples = workout.samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds }
         guard !samples.isEmpty else { throw WorkoutExportError.noSamples }
 
         let laps = workout.laps.sorted { $0.lapNumber < $1.lapNumber }
-        let hasRoute = routeManager?.hasRoute == true
+        let hasRoute = routeService?.hasRoute == true
 
         var xml = """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -195,7 +195,7 @@ enum WorkoutExportService {
                     avgSpeed: lap.avgSpeed,
                     samples: lapSamples,
                     workout: workout,
-                    routeManager: hasRoute ? routeManager : nil,
+                    routeService: hasRoute ? routeService : nil,
                     distanceOffset: distanceOffset
                 )
 
@@ -221,7 +221,7 @@ enum WorkoutExportService {
                 avgSpeed: workout.avgSpeed,
                 samples: samples,
                 workout: workout,
-                routeManager: hasRoute ? routeManager : nil,
+                routeService: hasRoute ? routeService : nil,
                 distanceOffset: 0
             )
         }
@@ -257,7 +257,7 @@ enum WorkoutExportService {
         avgSpeed: Double,
         samples: [WorkoutSample],
         workout: Workout,
-        routeManager: RouteManager?,
+        routeService: (any RouteServiceProtocol)?,
         distanceOffset: Double = 0
     ) -> String {
         // Start accumulation from the offset so multi-lap exports look up the
@@ -272,9 +272,9 @@ enum WorkoutExportService {
 
             let coordinate: CLLocationCoordinate2D?
             let elevationMeters: Double?
-            if let rm = routeManager {
-                coordinate = rm.coordinate(forDistance: cumulativeDistance)
-                elevationMeters = rm.elevation(forDistance: cumulativeDistance)
+            if let rs = routeService {
+                coordinate = rs.coordinate(forDistance: cumulativeDistance)
+                elevationMeters = rs.elevation(forDistance: cumulativeDistance)
             } else {
                 coordinate = nil
                 elevationMeters = nil
@@ -374,9 +374,9 @@ enum WorkoutExportService {
     /// and Golden Cheetah all parse automatically.
     private static func exportGPX(
         workout: Workout,
-        routeManager: RouteManager?
+        routeService: (any RouteServiceProtocol)?
     ) throws -> URL {
-        let hasRoute = routeManager?.hasRoute == true
+        let hasRoute = routeService?.hasRoute == true
         guard hasRoute else { throw WorkoutExportError.noRouteLoaded }
 
         let samples = workout.samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds }
@@ -406,10 +406,10 @@ enum WorkoutExportService {
                 continue
             }
 
-            guard let coordinate = routeManager?.coordinate(forDistance: cumulativeDistance) else {
+            guard let coordinate = routeService?.coordinate(forDistance: cumulativeDistance) else {
                 continue
             }
-            let elevationMeters = routeManager?.elevation(forDistance: cumulativeDistance)
+            let elevationMeters = routeService?.elevation(forDistance: cumulativeDistance)
 
             let time = iso8601(workout.startDate.addingTimeInterval(TimeInterval(sample.elapsedSeconds)))
             let dt = elapsedDeltaSeconds(samples: samples, index: idx)
@@ -451,10 +451,10 @@ enum WorkoutExportService {
             trackpoints = []
             for (idx, sample) in samples.enumerated() {
                 cumulativeDistance += increments[idx]
-                guard let coordinate = routeManager?.coordinate(forDistance: cumulativeDistance) else {
+                guard let coordinate = routeService?.coordinate(forDistance: cumulativeDistance) else {
                     continue
                 }
-                let elevationMeters = routeManager?.elevation(forDistance: cumulativeDistance)
+                let elevationMeters = routeService?.elevation(forDistance: cumulativeDistance)
                 let time = iso8601(workout.startDate.addingTimeInterval(TimeInterval(sample.elapsedSeconds)))
                 let dt = elapsedDeltaSeconds(samples: samples, index: idx)
                 let speedMps = max(0, increments[idx] / dt)

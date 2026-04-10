@@ -5,49 +5,156 @@ import Foundation
 @Observable
 final class CoachViewModel {
     // MARK: - Dependencies
-    private let coach: CoachRepository
+    private let coach: AIServiceProtocol
+    private let purchasesService: PurchasesServiceProtocol
 
     // MARK: - View state
     var messages: [ChatMessage] { coach.messages }
     var isLoading: Bool { coach.isLoading }
     var error: String? { coach.error }
     var generatingPlan: Bool { coach.generatingPlan }
+    var planProgress: PlanGenerationProgress? { coach.planProgress }
+    var planConfirmationDraft: PlanGenerationDraft? { coach.planConfirmationDraft }
+    var planSaveCelebration: PlanSaveCelebration? { coach.planSaveCelebration }
     var streamDraftText: String { coach.streamDraftText }
+    var streamStatusText: String? { coach.streamStatusText }
     var streamIsThinking: Bool { coach.streamIsThinking }
     var streamUsesOnDeviceAppearance: Bool { coach.streamUsesOnDeviceAppearance }
     var todayMessageCount: Int { coach.todayMessageCount }
     var contextWindowSize: Int { coach.contextWindowSize }
     var currentContextCount: Int { coach.currentContextCount }
+    var currentSessionID: UUID? { coach.currentSessionID }
     var hasReachedLimit: Bool = false
+    var starterContent: CoachEmptyStartersContent?
 
-    init(coach: CoachRepository) {
+    // MARK: - Purchase state
+    var isPro: Bool { purchasesService.isPro }
+
+    private var didRequestPersistedLoad = false
+
+    init(coach: AIServiceProtocol, purchasesService: PurchasesServiceProtocol) {
         self.coach = coach
+        self.purchasesService = purchasesService
     }
 
     func refreshLimitState(isPro: Bool) {
         hasReachedLimit = coach.hasReachedFreeLimit(isPro: isPro)
     }
 
+    func hasReachedFreeLimit(isPro: Bool) -> Bool {
+        coach.hasReachedFreeLimit(isPro: isPro)
+    }
+
+    func remainingFreeMessages(isPro: Bool) -> Int {
+        guard !isPro else { return Int.max }
+        return max(0, AIService.freeDailyLimit - todayMessageCount)
+    }
+
+    var bypassesDailyLimit: Bool {
+        AIService.bypassesDailyCoachMessageLimit
+    }
+
+    func loadPersistedMessagesIfNeeded() async {
+        guard !didRequestPersistedLoad else { return }
+        didRequestPersistedLoad = true
+        await Task.yield()
+        await coach.loadPersistedMessages()
+    }
+
+    func refreshStarterContentIfNeeded() async {
+        guard messages.isEmpty else {
+            starterContent = nil
+            return
+        }
+        starterContent = await coach.loadCoachEmptyStartersContent()
+    }
+
+    func contextualQuickPrompts() -> [QuickPrompt] {
+        coach.contextualQuickPrompts()
+    }
+
+    func normalizePlanEventDate(_ raw: String) -> String? {
+        AIService.normalizeEventDateForPlan(raw)
+    }
+
+    func planGenerationSummaryLine(for inputs: PlanInputs) -> String {
+        AIService.planSummaryLine(for: inputs)
+    }
+
+    func userFacingPlanGenerationError(_ error: Error) -> String {
+        AIService.userFacingPlanGenerationError(error)
+    }
+
+    func sendMessage(
+        _ text: String,
+        isPro: Bool,
+        delivery: CoachChatDelivery = .automatic
+    ) async {
+        await coach.sendMessage(text, isPro: isPro, delivery: delivery)
+    }
+
+    func createNewSession() {
+        starterContent = nil
+        coach.createNewSession()
+    }
+
+    func escalateStarterOnDeviceToCloud(isPro: Bool) async {
+        await coach.escalateStarterOnDeviceToCloud(isPro: isPro)
+    }
+
+    func switchToSession(_ sessionID: UUID) {
+        starterContent = nil
+        coach.switchToSession(sessionID)
+    }
+
+    func deleteSession(_ sessionID: UUID) {
+        coach.deleteSession(sessionID)
+    }
+
     func submitFeedback(for messageID: UUID, score: Int) {
         coach.submitFeedback(for: messageID, score: score)
     }
-}
 
-// MARK: - Preview mock
-#if DEBUG
-@MainActor
-final class MockCoachRepository: CoachRepository {
-    var messages: [ChatMessage] = []
-    var isLoading = false
-    var error: String? = nil
-    var generatingPlan = false
-    var streamDraftText = ""
-    var streamIsThinking = false
-    var streamUsesOnDeviceAppearance = false
-    var todayMessageCount = 0
-    var contextWindowSize = 16
-    var currentContextCount = 0
-    func hasReachedFreeLimit(isPro: Bool) -> Bool { false }
-    func submitFeedback(for messageID: UUID, score: Int) {}
+    func clearPlanConfirmationDraft() {
+        coach.planConfirmationDraft = nil
+    }
+
+    func clearPlanSaveCelebration() {
+        coach.planSaveCelebration = nil
+    }
+
+    func stagePlanRegeneration(from aiPlan: AIGeneratedPlanDraft) -> Bool {
+        guard let data = aiPlan.regenerationInputsJSON,
+              let inputs = try? JSONDecoder().decode(PlanInputs.self, from: data) else {
+            return false
+        }
+
+        coach.planConfirmationDraft = PlanGenerationDraft(
+            inputs: inputs,
+            summaryLine: aiPlan.userPrompt
+        )
+        return true
+    }
+
+    func runConfirmedPlanGeneration(
+        draft: PlanGenerationDraft,
+        isPro: Bool
+    ) async throws {
+        try await coach.runConfirmedPlanGeneration(
+            draft: draft,
+            isPro: isPro
+        )
+    }
+
+    func regenerateFallbackPlanWeek(
+        _ weekNumber: Int,
+        celebration: PlanSaveCelebration,
+        isPro: Bool
+    ) async throws {
+        try await coach.regenerateFallbackPlanWeek(
+            weekNumber: weekNumber,
+            celebration: celebration,
+            isPro: isPro
+        )
+    }
 }
-#endif

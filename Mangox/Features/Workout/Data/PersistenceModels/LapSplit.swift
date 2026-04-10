@@ -1,4 +1,4 @@
-// Features/Workout/Domain/Entities/LapSplit.swift
+// Features/Workout/Data/PersistenceModels/LapSplit.swift
 import Foundation
 import SwiftData
 

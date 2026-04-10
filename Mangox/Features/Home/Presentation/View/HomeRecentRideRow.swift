@@ -62,6 +62,7 @@ struct HomeRecentRidesTableHeader: View {
 /// One ride row aligned to `HomeRecentRidesTableHeader`.
 struct HomeRecentRideRow: View {
     let workout: Workout
+    let trainingPlanLookupService: TrainingPlanLookupServiceProtocol
 
     private var zone: PowerZone {
         PowerZone.zone(for: Int(workout.avgPower))
@@ -172,7 +173,11 @@ struct HomeRecentRideRow: View {
             .padding(.vertical, 10)
 
             if let dayID = workout.planDayID {
-                HomePlanDayBadgeRow(dayID: dayID, planID: workout.planID)
+                HomePlanDayBadgeRow(
+                    dayID: dayID,
+                    planID: workout.planID,
+                    trainingPlanLookupService: trainingPlanLookupService
+                )
                     .padding(.horizontal, 12)
                     .padding(.bottom, 10)
             }
@@ -209,11 +214,15 @@ struct HomeRecentRideRow: View {
 private struct HomePlanDayBadgeRow: View {
     let dayID: String
     let planID: String?
+    let trainingPlanLookupService: TrainingPlanLookupServiceProtocol
 
     private let accentYellow = AppColor.yellow
 
     var body: some View {
-        if let day = PlanLibrary.resolveDay(planID: planID, dayID: dayID) {
+        if let day = trainingPlanLookupService.resolveDay(
+            planID: planID,
+            dayID: dayID
+        ) {
             HStack(spacing: 0) {
                 HStack(spacing: 5) {
                     Image(systemName: "calendar.badge.checkmark")

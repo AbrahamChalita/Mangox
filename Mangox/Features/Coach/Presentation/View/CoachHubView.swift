@@ -5,7 +5,7 @@ import SwiftData
 struct CoachHubView: View {
     @Binding var navigationPath: NavigationPath
     @Binding var showChat: Bool
-    @Environment(AIService.self) private var aiService
+    @Environment(CoachViewModel.self) private var coachViewModel
     @State private var chatOpenFeedbackTick = 0
 
     // MARK: - Design System
@@ -39,11 +39,11 @@ struct CoachHubView: View {
             if !showChat {
                 VStack {
                     Spacer()
-                    if let draft = aiService.planConfirmationDraft {
+                    if let draft = coachViewModel.planConfirmationDraft {
                         CoachPlanConfirmBanner(draft: draft, navigationPath: $navigationPath)
                             .padding(.horizontal, 20)
                             .padding(.bottom, 28)
-                    } else if let celeb = aiService.planSaveCelebration {
+                    } else if let celeb = coachViewModel.planSaveCelebration {
                         CoachPlanSuccessBanner(
                             celebration: celeb,
                             navigationPath: $navigationPath,
@@ -54,8 +54,8 @@ struct CoachHubView: View {
                     }
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(.smooth(duration: 0.28), value: aiService.planConfirmationDraft?.id)
-                .animation(.smooth(duration: 0.28), value: aiService.planSaveCelebration?.planID)
+                .animation(.smooth(duration: 0.28), value: coachViewModel.planConfirmationDraft?.id)
+                .animation(.smooth(duration: 0.28), value: coachViewModel.planSaveCelebration?.planID)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -112,6 +112,7 @@ struct CoachHubView: View {
                 navigationPath: $navigationPath,
                 dismissParentChat: nil,
                 showsIntroCopy: false,
+                showsSectionHeader: false,
                 onOpenChat: { showChat = true }
             )
         }
@@ -123,5 +124,5 @@ struct CoachHubView: View {
         CoachHubView(navigationPath: .constant(NavigationPath()), showChat: .constant(false))
     }
     .modelContainer(for: [TrainingPlanProgress.self, AIGeneratedPlan.self], inMemory: true)
-    .environment(AIService())
+    .environment(CoachViewModel(coach: AIService(), purchasesService: PurchasesManager.shared))
 }

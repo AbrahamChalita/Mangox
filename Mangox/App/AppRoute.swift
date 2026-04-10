@@ -12,7 +12,6 @@ enum AppRoute: Hashable {
     case customWorkoutRide(templateID: UUID)
     case ftpTest
     case summary(workoutID: UUID)
-    case trainingPlan
     case profile
     case settings
     case outdoorSensorsSetup

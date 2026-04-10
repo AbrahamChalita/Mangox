@@ -1,35 +1,35 @@
 import SwiftUI
-import RevenueCat
 
 struct PaywallView: View {
-    @Environment(PurchasesManager.self) private var purchases
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
-
-    @State private var selectedPackage: Package?
-    @State private var isPurchasing = false
+    @State private var viewModel: PaywallViewModel
 
     private let mango = AppColor.mango
     private let success = AppColor.success
     private let bg = AppColor.bg
+
+    init(viewModel: PaywallViewModel) {
+        _viewModel = State(initialValue: viewModel)
+    }
 
     var body: some View {
         NavigationStack {
             ZStack {
                 bg.ignoresSafeArea()
 
-                if purchases.isLoading {
+                if viewModel.isLoading {
                     ProgressView()
                         .tint(mango)
                 } else {
                     ScrollView {
                         VStack(spacing: 24) {
-                            if purchases.isPro {
+                            if viewModel.isPro {
                                 subscriberHeroSection
-                                if purchases.revenueCatPro, let url = purchases.subscriptionManagementURL {
+                                if viewModel.hasStoreSubscription, let url = viewModel.subscriptionManagementURL {
                                     manageSubscriptionButton(url: url)
                                 }
-                                if purchases.isProDevUnlockOnly {
+                                if viewModel.isProDevUnlockOnly {
                                     devUnlockNotice
                                 }
                             } else {
@@ -58,19 +58,11 @@ struct PaywallView: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .task {
-            // Check if Purchases has been configured before attempting to load offerings
-            guard Purchases.isConfigured else {
-                return
-            }
-            await purchases.loadOfferings()
-            if let currentOffering = purchases.offerings?.current {
-                if selectedPackage == nil {
-                    selectedPackage = currentOffering.availablePackages.first(where: { $0.storeProduct.productIdentifier.contains("yearly") })
-                        ?? currentOffering.availablePackages.first
-                }
-            }
+            await viewModel.onAppear()
         }
     }
+
+    // MARK: - Subscriber hero
 
     private var subscriberHeroSection: some View {
         VStack(spacing: 12) {
@@ -91,16 +83,16 @@ struct PaywallView: View {
     }
 
     private var subscriberHeroSubtitle: String {
-        if purchases.isProDevUnlockOnly {
+        if viewModel.isProDevUnlockOnly {
             return "Pro is enabled on this development build."
         }
-        if let plan = purchases.storeProPlanKind, let renewal = purchases.storeProRenewalDescription {
+        if let plan = viewModel.storeProPlanKind, let renewal = viewModel.storeProRenewalDescription {
             return "\(plan) · \(renewal)"
         }
-        if let renewal = purchases.storeProRenewalDescription {
+        if let renewal = viewModel.storeProRenewalDescription {
             return renewal
         }
-        if let plan = purchases.storeProPlanKind {
+        if let plan = viewModel.storeProPlanKind {
             return "\(plan) plan"
         }
         return "Thanks for subscribing — every feature is unlocked."
@@ -128,6 +120,8 @@ struct PaywallView: View {
             .multilineTextAlignment(.center)
             .padding(.horizontal, 8)
     }
+
+    // MARK: - Upgrade hero
 
     private var heroSection: some View {
         VStack(spacing: 12) {
@@ -217,31 +211,30 @@ struct PaywallView: View {
         }
     }
 
+    // MARK: - Package selector (protocol-backed)
+
     private var packageSelector: some View {
         VStack(spacing: 12) {
             Text("Choose your plan")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.5))
 
-            if let packages = purchases.offerings?.current?.availablePackages {
-                HStack(spacing: 12) {
-                    ForEach(packages, id: \.identifier) { pkg in
-                        packageCard(pkg)
-                    }
+            HStack(spacing: 12) {
+                ForEach(viewModel.availableOptions) { option in
+                    optionCard(option)
                 }
             }
         }
     }
 
-    private func packageCard(_ pkg: Package) -> some View {
-        let isSelected = selectedPackage?.identifier == pkg.identifier
-        let isYearly = pkg.storeProduct.productIdentifier.contains("yearly")
+    private func optionCard(_ option: PaywallOption) -> some View {
+        let isSelected = viewModel.selectedOptionID == option.id
 
         return Button {
-            selectedPackage = pkg
+            viewModel.selectOption(option)
         } label: {
             VStack(spacing: 8) {
-                if isYearly {
+                if option.isYearly {
                     Text("BEST VALUE")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.black)
@@ -251,15 +244,15 @@ struct PaywallView: View {
                         .clipShape(Capsule())
                 }
 
-                Text(pkg.packageTitle)
+                Text(option.title)
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(.white)
 
-                Text(pkg.localizedPriceString)
+                Text(option.localizedPrice)
                     .font(.system(size: 22, weight: .bold, design: .monospaced))
                     .foregroundStyle(mango)
 
-                if isYearly {
+                if option.isYearly {
                     Text("Save 50%")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(success)
@@ -277,18 +270,23 @@ struct PaywallView: View {
         .buttonStyle(MangoxPressStyle())
     }
 
+    // MARK: - Purchase button
+
     private var purchaseButton: some View {
         Button {
-            Task { await purchaseSelectedPackage() }
+            Task {
+                let didSucceed = await viewModel.purchaseSelected()
+                if didSucceed { dismiss() }
+            }
         } label: {
             HStack(spacing: 8) {
-                if isPurchasing {
+                if viewModel.isPurchasing {
                     ProgressView()
                         .tint(.black)
                 } else {
                     Image(systemName: "lock.fill")
                 }
-                Text(selectedPackage?.localizedPriceString ?? "Select a plan")
+                Text(viewModel.selectedOption?.localizedPrice ?? "Select a plan")
             }
             .font(.system(size: 16, weight: .bold))
             .foregroundStyle(.black)
@@ -298,12 +296,12 @@ struct PaywallView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(MangoxPressStyle())
-        .disabled(isPurchasing || selectedPackage == nil || purchases.isLoading)
+        .disabled(viewModel.isPurchasing || viewModel.selectedOption == nil || viewModel.isLoading)
     }
 
     private var restoreButton: some View {
         Button {
-            Task { await purchases.restorePurchases() }
+            Task { await viewModel.restorePurchases() }
         } label: {
             Text("Restore Purchases")
                 .font(.system(size: 13))
@@ -312,35 +310,10 @@ struct PaywallView: View {
     }
 
     private var footerText: some View {
-        Text("Subscriptions auto-renew. Manage in Settings › Apple ID. AI plan generation limited to 8 per month for Pro subscribers.")
+        Text("Subscriptions auto-renew. Manage in Settings > Apple ID. AI plan generation limited to 8 per month for Pro subscribers.")
             .font(.system(size: 10))
             .foregroundStyle(.white.opacity(0.25))
             .multilineTextAlignment(.center)
             .padding(.horizontal, 12)
-    }
-
-    private func purchaseSelectedPackage() async {
-        guard let pkg = selectedPackage else { return }
-        isPurchasing = true
-        defer { isPurchasing = false }
-
-        do {
-            try await purchases.purchase(pkg)
-            if purchases.isPro {
-                dismiss()
-            }
-        } catch {
-            purchases.purchaseError = error.localizedDescription
-        }
-    }
-}
-
-extension Package {
-    var packageTitle: String {
-        switch packageType {
-        case .monthly: return "Monthly"
-        case .annual: return "Yearly"
-        default: return storeProduct.localizedTitle
-        }
     }
 }

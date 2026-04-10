@@ -179,8 +179,8 @@ final class FTPTestManager {
 
     // MARK: - Private
 
-    private weak var bleManager: BLEManager?
-    private weak var dataSource: DataSourceCoordinator?
+    private weak var bleService: BLEServiceProtocol?
+    private weak var dataSourceService: DataSourceServiceProtocol?
     private var timer: Timer?
 
     /// Accumulates all BLE power readings within the current 1-second window.
@@ -218,23 +218,23 @@ final class FTPTestManager {
 
     // MARK: - Configuration
 
-    func configure(bleManager: BLEManager, dataSource: DataSourceCoordinator? = nil) {
-        self.bleManager?.unsubscribe(id: Self.subscriberID)
-        self.dataSource?.unsubscribeCyclingMetrics(id: Self.subscriberID)
+    func configure(bleService: BLEServiceProtocol, dataSourceService: DataSourceServiceProtocol? = nil) {
+        self.bleService?.unsubscribe(id: Self.subscriberID)
+        self.dataSourceService?.unsubscribeCyclingMetrics(id: Self.subscriberID)
 
-        self.bleManager = bleManager
-        self.dataSource = dataSource
+        self.bleService = bleService
+        self.dataSourceService = dataSourceService
 
         // ERG only applies when a BLE trainer is connected; Wi‑Fi bridges are manual resistance.
         ergEnabled =
-            bleManager.ftmsControl.supportsERG && bleManager.trainerConnectionState.isConnected
+            bleService.ftmsControlSupportsERG && bleService.trainerConnectionState.isConnected
 
-        if let dataSource {
-            dataSource.subscribeCyclingMetrics(id: Self.subscriberID) { [weak self] metrics in
+        if let dataSourceService {
+            dataSourceService.subscribeCyclingMetrics(id: Self.subscriberID) { [weak self] metrics in
                 self?.ingestBLEPacket(metrics)
             }
         } else {
-            bleManager.subscribe(id: Self.subscriberID) { [weak self] metrics in
+            bleService.subscribe(id: Self.subscriberID) { [weak self] metrics in
                 self?.ingestBLEPacket(metrics)
             }
         }
@@ -243,24 +243,24 @@ final class FTPTestManager {
     /// Call when leaving the FTP test screen so subscriptions are released.
     func tearDown() {
         stopTimer()
-        bleManager?.unsubscribe(id: Self.subscriberID)
-        dataSource?.unsubscribeCyclingMetrics(id: Self.subscriberID)
+        bleService?.unsubscribe(id: Self.subscriberID)
+        dataSourceService?.unsubscribeCyclingMetrics(id: Self.subscriberID)
     }
 
     /// FTMS control targets the BLE trainer; skip when power comes from a Wi‑Fi bridge.
     private var trainerControlViaBLE: Bool {
-        guard let ble = bleManager, ble.trainerConnectionState.isConnected else { return false }
-        if let ds = dataSource, ds.activeDataSource == .wifi { return false }
+        guard let ble = bleService, ble.trainerConnectionState.isConnected else { return false }
+        if let ds = dataSourceService, ds.activeDataSource == .wifi { return false }
         return true
     }
 
     // MARK: - Computed Properties
 
     var canStart: Bool {
-        if let ds = dataSource {
+        if let ds = dataSourceService {
             return ds.isConnected
         }
-        return bleManager?.trainerConnectionState.isConnected == true
+        return bleService?.trainerConnectionState.isConnected == true
     }
 
     var currentPhase: FTPTestPhase {
@@ -392,7 +392,7 @@ final class FTPTestManager {
         totalElapsedSeconds += 1
 
         let timeSinceLastPacket: TimeInterval
-        if let lastPacket = bleManager?.lastPacketReceived {
+        if let lastPacket = bleService?.lastPacketReceived {
             timeSinceLastPacket = Date().timeIntervalSince(lastPacket)
         } else {
             timeSinceLastPacket = .infinity
@@ -540,7 +540,7 @@ final class FTPTestManager {
             logEvent(mode: "ERG Disabled")
             return
         }
-        guard let bleManager else {
+        guard let bleService else {
             currentERGTarget = nil
             logEvent(mode: "No Trainer")
             return
@@ -572,13 +572,13 @@ final class FTPTestManager {
             logEvent(mode: "Free Ride")
             Task {
                 do {
-                    if bleManager.ftmsControl.supportsResistance {
+                    if bleService.ftmsControlSupportsResistance {
                         // Apply ~45% resistance to provide "pacing rails" and a solid road-like feel for the 20-min block
-                        try await bleManager.ftmsControl.setResistanceLevel(0.45)
+                        try await bleService.setResistanceLevel(0.45)
                         ftpLogger.info(
                             "FTP Test: Resistance → 45% for free-ride phase \(phase.name)")
                     } else {
-                        await bleManager.ftmsControl.releaseControl()
+                        await bleService.releaseTrainerControl()
                         ftpLogger.info(
                             "FTP Test: Released control for free-ride phase \(phase.name)")
                     }
@@ -593,10 +593,10 @@ final class FTPTestManager {
 
     /// Send a single ERG command to the trainer.
     private func sendERGCommand(watts: Int) {
-        guard let bleManager, trainerControlViaBLE else { return }
+        guard let bleService, trainerControlViaBLE else { return }
         Task {
             do {
-                try await bleManager.ftmsControl.setTargetPower(watts: watts)
+                try await bleService.setTargetPower(watts: watts)
                 ftpLogger.info("FTP Test: ERG set to \(watts)W")
             } catch {
                 ftpLogger.error("FTP Test: ERG command failed: \(error.localizedDescription)")
@@ -659,13 +659,13 @@ final class FTPTestManager {
     /// when resistance mode is not supported.
     private func releaseERG() {
         currentERGTarget = nil
-        guard let bleManager, trainerControlViaBLE else { return }
+        guard let bleService, trainerControlViaBLE else { return }
         Task { @MainActor in
             do {
-                if bleManager.ftmsControl.supportsResistance {
-                    try await bleManager.ftmsControl.setResistanceLevel(0)
+                if bleService.ftmsControlSupportsResistance {
+                    try await bleService.setResistanceLevel(0)
                 } else {
-                    await bleManager.ftmsControl.releaseControl()
+                    await bleService.releaseTrainerControl()
                 }
             } catch {
                 ftpLogger.error("FTP Test: releaseERG failed: \(error.localizedDescription)")

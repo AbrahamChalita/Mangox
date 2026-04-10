@@ -1,4 +1,3 @@
-import SwiftData
 import SwiftUI
 import UIKit
 import UserNotifications
@@ -247,8 +246,7 @@ struct AICoachSettingsView: View {
 // MARK: - Power & Zones
 
 struct PowerZonesSettingsView: View {
-    @Environment(FTPRefreshTrigger.self) private var ftpRefresh
-    @Environment(\.modelContext) private var modelContext
+    let viewModel: ProfileViewModel
 
     @State private var ftpDraft: Int = PowerZone.ftp
     @State private var showFTPHistory = false
@@ -293,7 +291,7 @@ struct PowerZonesSettingsView: View {
                             Button {
                                 PowerZone.setFTP(ftpDraft)
                                 FitnessSettingsSnapshotRecorder.recordFromCurrentSettings(
-                                    source: "ftp_settings", modelContext: modelContext)
+                                    source: "ftp_settings")
                             } label: {
                                 Text("Apply")
                                     .font(.system(size: 13, weight: .semibold))
@@ -413,7 +411,7 @@ struct PowerZonesSettingsView: View {
                 }
             }
         }
-        .onChange(of: ftpRefresh.generation) { _, _ in
+        .onChange(of: viewModel.ftpGeneration) { _, _ in
             ftpDraft = PowerZone.ftp
         }
         .sheet(isPresented: $showFTPHistory) {
@@ -425,11 +423,7 @@ struct PowerZonesSettingsView: View {
 // MARK: - Heart Rate
 
 struct HeartRateSettingsView: View {
-    @Environment(HealthKitManager.self) private var healthKitManager
-    @Environment(WhoopService.self) private var whoopService
-    @Environment(\.modelContext) private var modelContext
-
-    @AppStorage(WhoopService.syncHeartBaselinesDefaultsKey) private var syncWhoopBaselines = true
+    let viewModel: ProfileViewModel
     @State private var manualMaxHRInput = ""
     @State private var manualRestingHRInput = ""
     @State private var statusMessage: String?
@@ -459,14 +453,14 @@ struct HeartRateSettingsView: View {
                         unit: HeartRateZone.hasRestingHR ? "bpm" : "",
                         source: restingHRBaselineSource
                     )
-                    if let vo2 = healthKitManager.vo2Max {
+                    if let vo2 = viewModel.healthKitVo2Max {
                         hrMetric(
                             label: "VO₂ Max",
                             value: String(format: "%.1f", vo2),
                             unit: "",
                             source: "Health"
                         )
-                    } else if whoopService.isConnected {
+                    } else if viewModel.whoopConnected {
                         hrMetric(
                             label: "VO₂ Max",
                             value: "—",
@@ -485,19 +479,22 @@ struct HeartRateSettingsView: View {
                 }
             }
 
-            if whoopService.isConfigured {
+            if viewModel.whoopIsConfigured {
                 settingsSubCard {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 8) {
                             Image(systemName: "waveform.path.ecg")
                                 .font(.system(size: 14))
                                 .foregroundStyle(AppColor.whoop)
-                            Text(whoopService.isConnected ? "WHOOP connected" : "WHOOP not connected")
+                            Text(viewModel.whoopConnected ? "WHOOP connected" : "WHOOP not connected")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.75))
                         }
-                        if whoopService.isConnected {
-                            Toggle(isOn: $syncWhoopBaselines) {
+                        if viewModel.whoopConnected {
+                            Toggle(isOn: Binding(
+                                get: { viewModel.whoopSyncHeartBaselinesFromWhoop },
+                                set: { viewModel.whoopSyncHeartBaselinesFromWhoop = $0 }
+                            )) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Use WHOOP for max & resting HR")
                                         .font(.system(size: 13, weight: .semibold))
@@ -511,9 +508,9 @@ struct HeartRateSettingsView: View {
                                 }
                             }
                             .tint(AppColor.whoop)
-                            .onChange(of: syncWhoopBaselines) { _, on in
+                            .onChange(of: viewModel.whoopSyncHeartBaselinesFromWhoop) { _, on in
                                 if on {
-                                    whoopService.applyHeartBaselinesFromLatestWhoopData()
+                                    viewModel.applyHeartBaselinesFromLatestWhoopData()
                                 } else {
                                     syncHealthKit()
                                 }
@@ -528,7 +525,7 @@ struct HeartRateSettingsView: View {
             }
 
             // HealthKit
-            if !healthKitManager.isAuthorized {
+            if !viewModel.healthKitIsAuthorized {
                 settingsSubCard {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 6) {
@@ -545,7 +542,7 @@ struct HeartRateSettingsView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.38))
                         Button {
-                            Task { await healthKitManager.requestAuthorization() }
+                            Task { await viewModel.requestHealthKitAuthorization() }
                         } label: {
                             Text("Enable HealthKit")
                                 .font(.system(size: 13, weight: .semibold))
@@ -570,11 +567,11 @@ struct HeartRateSettingsView: View {
                                 .foregroundStyle(.white.opacity(0.65))
                         }
                         Toggle(isOn: Binding(
-                            get: { healthKitManager.syncWorkoutsToAppleHealth },
+                            get: { viewModel.healthKitSyncWorkoutsToAppleHealth },
                             set: { on in
-                                healthKitManager.syncWorkoutsToAppleHealth = on
+                                viewModel.healthKitSyncWorkoutsToAppleHealth = on
                                 if on {
-                                    Task { await healthKitManager.requestAuthorization() }
+                                    Task { await viewModel.requestHealthKitAuthorization() }
                                 }
                             }
                         )) {
@@ -695,19 +692,19 @@ struct HeartRateSettingsView: View {
 
     private var maxHRBaselineSource: String {
         if HeartRateZone.hasManualMaxHROverride { return "Manual" }
-        if syncWhoopBaselines, whoopService.isConnected, whoopService.latestMaxHeartRateFromProfile != nil {
+        if viewModel.whoopSyncHeartBaselinesFromWhoop, viewModel.whoopConnected, viewModel.whoopLatestMaxHeartRateFromProfile != nil {
             return "WHOOP"
         }
-        if healthKitManager.maxHeartRate != nil { return "Health" }
+        if viewModel.healthKitMaxHeartRate != nil { return "Health" }
         return "Estimated"
     }
 
     private var restingHRBaselineSource: String {
         if HeartRateZone.hasManualRestingHROverride { return "Manual" }
-        if syncWhoopBaselines, whoopService.isConnected, whoopService.latestRecoveryRestingHR != nil {
+        if viewModel.whoopSyncHeartBaselinesFromWhoop, viewModel.whoopConnected, viewModel.whoopLatestRecoveryRestingHR != nil {
             return "WHOOP"
         }
-        if healthKitManager.restingHeartRate != nil { return "Health" }
+        if viewModel.healthKitRestingHeartRate != nil { return "Health" }
         return HeartRateZone.hasRestingHR ? "Default" : "Not set"
     }
 
@@ -764,8 +761,7 @@ struct HeartRateSettingsView: View {
         syncHealthKit()
         loadInputs()
         statusMessage = "HR overrides saved."
-        FitnessSettingsSnapshotRecorder.recordFromCurrentSettings(
-            source: "hr_settings", modelContext: modelContext)
+        FitnessSettingsSnapshotRecorder.recordFromCurrentSettings(source: "hr_settings")
     }
 
     private func clearOverrides() {
@@ -777,26 +773,14 @@ struct HeartRateSettingsView: View {
     }
 
     private func syncHealthKit() {
-        if whoopService.syncHeartBaselinesFromWhoop && whoopService.isConnected {
-            whoopService.applyHeartBaselinesFromLatestWhoopData()
-            return
-        }
-        let effectiveMax = healthKitManager.effectiveMaxHR
-        if effectiveMax > 0, !HeartRateZone.hasManualMaxHROverride {
-            HeartRateZone.maxHR = effectiveMax
-        }
-        if let resting = healthKitManager.restingHeartRate, resting > 0,
-            !HeartRateZone.hasManualRestingHROverride
-        {
-            HeartRateZone.restingHR = resting
-        }
+        viewModel.syncHealthKitToZones()
     }
 }
 
 // MARK: - Strava
 
 struct StravaSettingsView: View {
-    @Environment(StravaService.self) private var stravaService
+    let viewModel: ProfileViewModel
     @State private var statusMessage: String?
 
     var body: some View {
@@ -814,36 +798,36 @@ struct StravaSettingsView: View {
                             HStack(spacing: 5) {
                                 Circle()
                                     .fill(
-                                        stravaService.isConnected
+                                        viewModel.stravaConnected
                                             ? AppColor.success : .white.opacity(0.2)
                                     )
                                     .frame(width: 6, height: 6)
-                                Text(stravaService.isConnected ? "Connected" : "Not connected")
+                                Text(viewModel.stravaConnected ? "Connected" : "Not connected")
                                     .font(.system(size: 12))
                                     .foregroundStyle(
-                                        stravaService.isConnected
+                                        viewModel.stravaConnected
                                             ? AppColor.success : .white.opacity(0.35))
                             }
                         }
                         Spacer()
                     }
 
-                    if !stravaService.isConfigured {
+                    if !viewModel.stravaIsConfigured {
                         Text("Strava credentials are not set up in this build.")
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.32))
                     } else {
                         Button {
-                            if stravaService.isConnected { disconnect() } else { connect() }
+                            if viewModel.stravaConnected { disconnect() } else { connect() }
                         } label: {
                             HStack(spacing: 8) {
                                 Image(
-                                    systemName: stravaService.isConnected
+                                    systemName: viewModel.stravaConnected
                                         ? "link.circle" : "link.badge.plus"
                                 )
                                 .font(.system(size: 13))
                                 Text(
-                                    stravaService.isConnected
+                                    viewModel.stravaConnected
                                         ? "Disconnect Strava" : "Connect Strava"
                                 )
                                 .font(.system(size: 13, weight: .semibold))
@@ -857,7 +841,7 @@ struct StravaSettingsView: View {
                                 Capsule().strokeBorder(AppColor.strava.opacity(0.35), lineWidth: 1))
                         }
                         .buttonStyle(.plain)
-                        .disabled(stravaService.isBusy)
+                        .disabled(viewModel.stravaIsBusy)
 
                         Text(
                             "Connecting allows Mangox to auto-upload rides. Ride upload details are managed per-activity in the summary screen."
@@ -871,7 +855,7 @@ struct StravaSettingsView: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.35))
                     }
-                    if let err = stravaService.lastError, !err.isEmpty {
+                    if let err = viewModel.stravaLastError, !err.isEmpty {
                         Text(err)
                             .font(.system(size: 11))
                             .foregroundStyle(Color.orange.opacity(0.8))
@@ -884,9 +868,9 @@ struct StravaSettingsView: View {
     private func connect() {
         Task {
             do {
-                try await stravaService.connect()
+                try await viewModel.connectStrava()
                 statusMessage =
-                    "Connected as \(stravaService.athleteDisplayName ?? "Strava athlete")."
+                    "Connected as \(viewModel.stravaDisplayName ?? "Strava athlete")."
             } catch {
                 statusMessage =
                     (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -895,7 +879,7 @@ struct StravaSettingsView: View {
     }
 
     private func disconnect() {
-        stravaService.disconnect()
+        viewModel.disconnectStrava()
         statusMessage = "Strava disconnected."
     }
 }
@@ -903,8 +887,7 @@ struct StravaSettingsView: View {
 // MARK: - WHOOP
 
 struct WhoopSettingsView: View {
-    @Environment(WhoopService.self) private var whoopService
-    @AppStorage(WhoopService.syncHeartBaselinesDefaultsKey) private var syncWhoopBaselines = true
+    let viewModel: ProfileViewModel
     @State private var statusMessage: String?
 
     var body: some View {
@@ -922,28 +905,28 @@ struct WhoopSettingsView: View {
                             HStack(spacing: 5) {
                                 Circle()
                                     .fill(
-                                        whoopService.isConnected
+                                        viewModel.whoopConnected
                                             ? AppColor.success : .white.opacity(0.2)
                                     )
                                     .frame(width: 6, height: 6)
-                                Text(whoopService.isConnected ? "Connected" : "Not connected")
+                                Text(viewModel.whoopConnected ? "Connected" : "Not connected")
                                     .font(.system(size: 12))
                                     .foregroundStyle(
-                                        whoopService.isConnected
+                                        viewModel.whoopConnected
                                             ? AppColor.success : .white.opacity(0.35))
                             }
                         }
                         Spacer()
                     }
 
-                    if !whoopService.isConfigured {
+                    if !viewModel.whoopIsConfigured {
                         Text("WHOOP credentials are not set up in this build.")
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.32))
                     } else {
-                        if whoopService.isConnected {
+                        if viewModel.whoopConnected {
                             VStack(alignment: .leading, spacing: 6) {
-                                if let score = whoopService.latestRecoveryScore {
+                                if let score = viewModel.recoveryScore {
                                     Text(
                                         String(
                                             format: "Latest recovery: %.0f%%",
@@ -953,17 +936,17 @@ struct WhoopSettingsView: View {
                                     .font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.85))
                                 }
-                                if let rhr = whoopService.latestRecoveryRestingHR {
+                                if let rhr = viewModel.whoopLatestRecoveryRestingHR {
                                     Text("Resting HR (recovery): \(rhr) bpm")
                                         .font(.system(size: 11))
                                         .foregroundStyle(.white.opacity(0.38))
                                 }
-                                if let hrv = whoopService.latestRecoveryHRV {
+                                if let hrv = viewModel.whoopLatestRecoveryHRV {
                                     Text("HRV (RMSSD): \(hrv) ms")
                                         .font(.system(size: 11))
                                         .foregroundStyle(.white.opacity(0.38))
                                 }
-                                if let maxHR = whoopService.latestMaxHeartRateFromProfile {
+                                if let maxHR = viewModel.whoopLatestMaxHeartRateFromProfile {
                                     Text("Max HR (WHOOP profile): \(maxHR) bpm")
                                         .font(.system(size: 11))
                                         .foregroundStyle(.white.opacity(0.38))
@@ -971,7 +954,10 @@ struct WhoopSettingsView: View {
                             }
                             .padding(.bottom, 4)
 
-                            Toggle(isOn: $syncWhoopBaselines) {
+                            Toggle(isOn: Binding(
+                                get: { viewModel.whoopSyncHeartBaselinesFromWhoop },
+                                set: { viewModel.whoopSyncHeartBaselinesFromWhoop = $0 }
+                            )) {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("Sync max & resting HR into zones")
                                         .font(.system(size: 13, weight: .semibold))
@@ -985,9 +971,9 @@ struct WhoopSettingsView: View {
                                 }
                             }
                             .tint(AppColor.whoop)
-                            .onChange(of: syncWhoopBaselines) { _, on in
+                            .onChange(of: viewModel.whoopSyncHeartBaselinesFromWhoop) { _, on in
                                 if on {
-                                    whoopService.applyHeartBaselinesFromLatestWhoopData()
+                                    viewModel.applyHeartBaselinesFromLatestWhoopData()
                                 }
                             }
 
@@ -1009,12 +995,12 @@ struct WhoopSettingsView: View {
                                     Capsule().strokeBorder(AppColor.whoop.opacity(0.35), lineWidth: 1))
                             }
                             .buttonStyle(.plain)
-                            .disabled(whoopService.isBusy)
+                            .disabled(viewModel.whoopIsBusy)
                         }
 
                         Button {
                             Task {
-                                if whoopService.isConnected {
+                                if viewModel.whoopConnected {
                                     await disconnect()
                                 } else {
                                     await connect()
@@ -1023,12 +1009,12 @@ struct WhoopSettingsView: View {
                         } label: {
                             HStack(spacing: 8) {
                                 Image(
-                                    systemName: whoopService.isConnected
+                                    systemName: viewModel.whoopConnected
                                         ? "link.circle" : "link.badge.plus"
                                 )
                                 .font(.system(size: 13))
                                 Text(
-                                    whoopService.isConnected
+                                    viewModel.whoopConnected
                                         ? "Disconnect WHOOP" : "Connect WHOOP"
                                 )
                                 .font(.system(size: 13, weight: .semibold))
@@ -1042,7 +1028,7 @@ struct WhoopSettingsView: View {
                                 Capsule().strokeBorder(AppColor.whoop.opacity(0.35), lineWidth: 1))
                         }
                         .buttonStyle(.plain)
-                        .disabled(whoopService.isBusy)
+                        .disabled(viewModel.whoopIsBusy)
 
                         Text(
                             "Read-only: recovery, sleep, workouts, and strain context from WHOOP. Mangox cannot upload activities to WHOOP via their API — turn on “Save rides to Apple Health” in Heart Rate settings if you want WHOOP to import indoor rides through Apple Health."
@@ -1064,7 +1050,7 @@ struct WhoopSettingsView: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.35))
                     }
-                    if let err = whoopService.lastError, !err.isEmpty {
+                    if let err = viewModel.whoopLastError, !err.isEmpty {
                         Text(err)
                             .font(.system(size: 11))
                             .foregroundStyle(Color.orange.opacity(0.8))
@@ -1073,36 +1059,34 @@ struct WhoopSettingsView: View {
             }
         }
         .task {
-            if whoopService.isConnected, whoopService.isConfigured {
+            if viewModel.whoopConnected, viewModel.whoopIsConfigured {
                 await refresh()
             }
         }
     }
 
     private func connect() async {
-        do {
-            try await whoopService.connect()
+        await viewModel.connectWhoop()
+        if let err = viewModel.whoopLastError, !err.isEmpty {
+            statusMessage = err
+        } else {
             statusMessage =
-                "Connected as \(whoopService.memberDisplayName ?? "WHOOP member")."
-        } catch {
-            statusMessage =
-                (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                "Connected as \(viewModel.whoopDisplayName ?? "WHOOP member")."
         }
     }
 
     private func disconnect() async {
-        await whoopService.disconnect()
+        await viewModel.disconnectWhoop()
         statusMessage = "WHOOP disconnected."
     }
 
     private func refresh() async {
-        guard whoopService.isConnected else { return }
-        do {
-            try await whoopService.refreshLinkedData()
+        guard viewModel.whoopConnected else { return }
+        await viewModel.refreshWhoop()
+        if let err = viewModel.whoopLastError, !err.isEmpty {
+            statusMessage = err
+        } else {
             statusMessage = "WHOOP data updated."
-        } catch {
-            statusMessage =
-                (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 }
@@ -1460,7 +1444,7 @@ struct AudioHapticsSettingsView: View {
 // MARK: - Mangox Pro (subscriber status)
 
 struct MangoxProSettingsView: View {
-    @Environment(PurchasesManager.self) private var purchases
+    let viewModel: ProfileViewModel
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -1482,7 +1466,7 @@ struct MangoxProSettingsView: View {
                 .frame(maxWidth: .infinity)
             }
 
-            if purchases.isProDevUnlockOnly {
+            if viewModel.isProDevUnlockOnly {
                 settingsSubCard {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: "hammer.fill")
@@ -1503,7 +1487,7 @@ struct MangoxProSettingsView: View {
                 }
             }
 
-            if purchases.revenueCatPro, let url = purchases.subscriptionManagementURL {
+            if viewModel.hasStoreSubscription, let url = viewModel.subscriptionManagementURL {
                 settingsSubSectionLabel("Subscription")
                 settingsSubCard {
                     Button {
@@ -1541,21 +1525,21 @@ struct MangoxProSettingsView: View {
             }
         }
         .task {
-            await purchases.sync()
+            await viewModel.syncPurchases()
         }
     }
 
     private var statusDetail: String {
-        if purchases.isProDevUnlockOnly {
+        if viewModel.isProDevUnlockOnly {
             return "Full Pro features for development and testing."
         }
-        if let plan = purchases.storeProPlanKind, let renewal = purchases.storeProRenewalDescription {
+        if let plan = viewModel.storeProPlanKind, let renewal = viewModel.storeProRenewalDescription {
             return "\(plan) plan · \(renewal)"
         }
-        if let renewal = purchases.storeProRenewalDescription {
+        if let renewal = viewModel.storeProRenewalDescription {
             return renewal
         }
-        if let plan = purchases.storeProPlanKind {
+        if let plan = viewModel.storeProPlanKind {
             return "\(plan) plan"
         }
         return "Thank you for supporting Mangox."
@@ -1809,10 +1793,7 @@ struct GearSettingsView: View {
 // MARK: - Data, privacy & alerts
 
 struct DataPrivacyNotificationsHubView: View {
-    @Environment(StravaService.self) private var stravaService
-    @Environment(WhoopService.self) private var whoopService
-    @Environment(HealthKitManager.self) private var healthKitManager
-    @Environment(\.modelContext) private var modelContext
+    let viewModel: ProfileViewModel
 
     @State private var notifyTomorrow = TrainingNotificationsPreferences.tomorrowSessionReminder
     @State private var notifyHour = TrainingNotificationsPreferences.tomorrowReminderHour
@@ -1830,20 +1811,20 @@ struct DataPrivacyNotificationsHubView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     rowStatus(
                         title: "Strava",
-                        value: stravaService.isConnected ? "Connected" : "Not connected",
-                        ok: stravaService.isConnected
+                        value: viewModel.stravaConnected ? "Connected" : "Not connected",
+                        ok: viewModel.stravaConnected
                     )
                     rowStatus(
                         title: "WHOOP",
-                        value: whoopService.isConnected ? "Connected" : "Not connected",
-                        ok: whoopService.isConnected
+                        value: viewModel.whoopConnected ? "Connected" : "Not connected",
+                        ok: viewModel.whoopConnected
                     )
                     rowStatus(
                         title: "Apple Health",
-                        value: healthKitManager.syncWorkoutsToAppleHealth
+                        value: viewModel.healthKitSyncWorkoutsToAppleHealth
                             ? "Save rides on"
                             : "Save rides off",
-                        ok: healthKitManager.syncWorkoutsToAppleHealth
+                        ok: viewModel.healthKitSyncWorkoutsToAppleHealth
                     )
                     Text(
                         "Files: Ride Summary → Share for FIT, GPX, or TCX. Plan calendar: Connections → Calendar & file sharing."
@@ -1881,8 +1862,7 @@ struct DataPrivacyNotificationsHubView: View {
                         set: { enabled in
                             MangoxFeatureFlags.allowsTrainingNotifications = enabled
                             if enabled {
-                                TrainingNotificationsScheduler.refreshDeferredSchedules(
-                                    modelContext: modelContext)
+                                TrainingNotificationsScheduler.refreshDeferredSchedules()
                             } else {
                                 TrainingNotificationsScheduler.cancelPendingTrainingReminders()
                             }
@@ -1996,8 +1976,7 @@ struct DataPrivacyNotificationsHubView: View {
                     Button {
                         exportError = nil
                         do {
-                            exportURL = try UserDataExportService.buildExportBundle(
-                                modelContext: modelContext, tier: .standard)
+                            exportURL = try UserDataExportService.buildExportBundle(tier: .standard)
                             showExportShare = true
                         } catch {
                             exportError = error.localizedDescription
@@ -2016,8 +1995,7 @@ struct DataPrivacyNotificationsHubView: View {
                     Button {
                         exportError = nil
                         do {
-                            exportURL = try UserDataExportService.buildExportBundle(
-                                modelContext: modelContext, tier: .extended)
+                            exportURL = try UserDataExportService.buildExportBundle(tier: .extended)
                             showExportShare = true
                         } catch {
                             exportError = error.localizedDescription

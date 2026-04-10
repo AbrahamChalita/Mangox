@@ -90,7 +90,7 @@ struct NewPRFlag: Identifiable {
 /// All heavy computation is done off the main actor and results are published back.
 @Observable
 @MainActor
-final class PersonalRecords {
+final class PersonalRecords: PersonalRecordsServiceProtocol {
 
     // MARK: - Singleton
 
@@ -175,6 +175,12 @@ final class PersonalRecords {
 
         guard !results.isEmpty else { return nil }
         return WorkoutMMP(workoutID: workoutID, results: results)
+    }
+
+    /// Instance-method wrapper that satisfies `PersonalRecordsServiceProtocol`.
+    /// Delegates to the static implementation.
+    func computeMMP(for samples: [WorkoutSampleData], workoutID: UUID) -> WorkoutMMP? {
+        Self.computeMMP(for: samples, workoutID: workoutID)
     }
 
     /// Compare a freshly-computed WorkoutMMP against stored all-time PRs and

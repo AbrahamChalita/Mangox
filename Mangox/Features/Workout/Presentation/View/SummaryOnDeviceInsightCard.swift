@@ -1,4 +1,3 @@
-import SwiftData
 import SwiftUI
 
 /// Power zone time shares for the ride insight footer (same order as ``PowerZone.zones``).
@@ -103,8 +102,6 @@ struct SummaryOnDeviceInsightCard: View {
     /// When `true`, the standalone summary power-zones card should appear (insight unavailable).
     @Binding var onDeviceInsightFailed: Bool
 
-    @Environment(\.modelContext) private var modelContext
-
     @State private var insight: WorkoutSummaryOnDeviceInsight?
     @State private var loadFailed = false
 
@@ -201,8 +198,7 @@ struct SummaryOnDeviceInsightCard: View {
                 await WorkoutSummaryOnDeviceInsight.generateSmartTitleIfNeeded(
                     workout: workout,
                     powerZoneLine: powerZoneLine,
-                    ftpWatts: ftpWatts,
-                    modelContext: modelContext
+                    ftpWatts: ftpWatts
                 )
                 return
             }
@@ -218,8 +214,7 @@ struct SummaryOnDeviceInsightCard: View {
             await WorkoutSummaryOnDeviceInsight.generateSmartTitleIfNeeded(
                 workout: workout,
                 powerZoneLine: powerZoneLine,
-                ftpWatts: ftpWatts,
-                modelContext: modelContext
+                ftpWatts: ftpWatts
             )
             if let result {
                 insight = result

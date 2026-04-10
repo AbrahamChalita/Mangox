@@ -112,13 +112,11 @@ struct GridPatternView: View {
     let dataSource = DataSourceCoordinator(bleManager: ble, wifiService: wifi)
     NavigationStack {
         ConnectionView(
-            navigationPath: .constant(NavigationPath())
+            navigationPath: .constant(NavigationPath()),
+            bleService: ble,
+            dataSourceService: dataSource,
+            routeService: RouteManager(),
+            locationService: LocationManager()
         )
     }
-    .environment(ble)
-    .environment(wifi)
-    .environment(dataSource)
-    .environment(FTPRefreshTrigger.shared)
-    .environment(RouteManager())
-    .environment(LocationManager())
 }

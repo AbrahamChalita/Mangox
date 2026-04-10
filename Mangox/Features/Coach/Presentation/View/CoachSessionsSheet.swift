@@ -2,8 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct CoachSessionsSheet: View {
-    @Environment(AIService.self) private var aiService
-    @Environment(\.modelContext) private var modelContext
+    @Environment(CoachViewModel.self) private var coachViewModel
     @Environment(\.dismiss) private var dismiss
 
     private static let sessionsDescriptor: FetchDescriptor<ChatSession> = {
@@ -133,7 +132,7 @@ struct CoachSessionsSheet: View {
                     selectedIDs.insert(session.id)
                 }
             } else {
-                aiService.switchToSession(session.id, modelContext: modelContext)
+                coachViewModel.switchToSession(session.id)
                 dismiss()
             }
         }
@@ -144,15 +143,15 @@ struct CoachSessionsSheet: View {
             ZStack {
                 Circle()
                     .fill(
-                        session.id == aiService.currentSessionID
+                        session.id == coachViewModel.currentSessionID
                             ? AppColor.mango.opacity(0.22)
                             : Color.white.opacity(0.06)
                     )
                     .frame(width: 40, height: 40)
-                Image(systemName: session.id == aiService.currentSessionID ? "bubble.left.fill" : "bubble.left")
+                Image(systemName: session.id == coachViewModel.currentSessionID ? "bubble.left.fill" : "bubble.left")
                     .font(.system(size: 16))
                     .foregroundStyle(
-                        session.id == aiService.currentSessionID
+                        session.id == coachViewModel.currentSessionID
                             ? AppColor.mango
                             : .white.opacity(0.4)
                     )
@@ -170,7 +169,7 @@ struct CoachSessionsSheet: View {
 
             Spacer()
 
-            if session.id == aiService.currentSessionID, !isSelecting {
+            if session.id == coachViewModel.currentSessionID, !isSelecting {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 16))
                     .foregroundStyle(AppColor.mango)
@@ -181,7 +180,7 @@ struct CoachSessionsSheet: View {
 
     private func removeSessions(ids: Set<UUID>) {
         for id in ids {
-            aiService.deleteSession(id, modelContext: modelContext)
+            coachViewModel.deleteSession(id)
         }
     }
 

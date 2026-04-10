@@ -14,35 +14,14 @@ import UniformTypeIdentifiers
 /// - **Follow Route**: GPX overlay + off-course detection
 /// - **Turn-by-Turn**: Apple Maps directions + navigation HUD
 struct OutdoorDashboardView: View {
-    @Environment(LocationManager.self) private var locationManager
-    @Environment(BLEManager.self) private var bleManager
-    @Environment(HealthKitManager.self) private var healthKitManager
-    @Environment(RouteManager.self) private var routeManager
-    @Environment(RideLiveActivityManager.self) private var liveActivityManager
-    @Environment(\.modelContext) private var modelContext
+    @State private var viewModel: OutdoorViewModel
+    @Environment(DIContainer.self) private var di
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
     @Binding var navigationPath: NavigationPath
 
-    @State private var navigationService = NavigationService()
-    @State private var showRouteSheet = false
-    @State private var routeSheetPage: RouteSheetPage = .menu
     // searchQuery, searchFieldFocused moved into DestinationSearchOverlay / RouteSearchPage
-    @State private var showEndConfirmation = false
-    @State private var showDiscardConfirmation = false
-    @State private var isHybridMapStyle = false
-    @State private var showRouteImporter = false
-    @State private var routeImportError: String?
     // searchDebounceTask removed — now handled by MKLocalSearchCompleter in extracted views
-    /// Shows route-selection setup screen before the map loads.
-    @State private var showSetupPhase = true
-    /// Which mode is pre-selected in the setup screen.
-    private enum SetupMode: Hashable { case freeRide, gpx, navigate }
-    @State private var setupMode: SetupMode = .freeRide
-    /// Destination selected on the Navigate destination search page.
-    @State private var selectedDestination: MKMapItem? = nil
-    /// True while the full-screen destination search overlay is showing.
-    @State private var showDestinationSearch = false
     /// Pre-initialized completer so MapKit search infrastructure is warm before the overlay opens.
     /// `DestinationSearchCompleter` init is now free (MKLocalSearchCompleter is lazy inside it).
     @State private var searchCompleter = DestinationSearchCompleter()
@@ -54,56 +33,61 @@ struct OutdoorDashboardView: View {
     @State private var statsCardHeight: CGFloat = 0
     /// After timeout, show map even if accuracy is still poor (indoors / weak sky view).
     @State private var outdoorLoadingBypassed = false
-    /// Compact layout: show/hide the map layer behind the bottom card.
-    @State private var showMapInCompact = true
-    /// Set by onChange when LocationManager fires a new lap.
-    @State private var showLapToast = false
-    @State private var latestLapRecord: OutdoorLapRecord? = nil
-    /// User-placed map waypoints (long-press on map).
-    @State private var mapWaypoints: [CLLocationCoordinate2D] = []
     /// Whether to show all discovered sensors or just the first 3.
     @State private var showAllSensors = false
-
-    /// Shown when cycling route prefetch fails (setup CTA or route sheet).
-    @State private var routeBuildError: String?
 
     @Bindable private var prefs = RidePreferences.shared
 
     /// Match `LocationManager` acceptable accuracy for a “ready” outdoor fix.
     private let outdoorReadyAccuracyMeters: Double = 50
 
+    init(navigationPath: Binding<NavigationPath>, viewModel: OutdoorViewModel) {
+        self._navigationPath = navigationPath
+        self._viewModel = State(initialValue: viewModel)
+    }
+
+    /// Shorthand for the location service — replaces the removed `@Environment(LocationManager.self)`.
+    private var ls: LocationServiceProtocol { viewModel.locationService }
+    private var mapCameraService: MapCameraServiceProtocol { di.mapCameraService }
+    /// Shorthand for the VM-owned NavigationService.
+    private var ns: NavigationService { viewModel.navigationService }
+
+    private func binding<Value>(_ keyPath: ReferenceWritableKeyPath<OutdoorViewModel, Value>)
+        -> Binding<Value>
+    {
+        Binding(
+            get: { viewModel[keyPath: keyPath] },
+            set: { viewModel[keyPath: keyPath] = $0 }
+        )
+    }
+
     /// Live GPS speed, or an em dash when Core Location has not delivered fixes recently.
     private func liveGpsSpeedText(imperial: Bool) -> String {
-        if locationManager.isGpsSignalStale {
+        if ls.isGpsSignalStale {
             return "—"
         }
-        return AppFormat.speedString(locationManager.speed, imperial: imperial)
+        return AppFormat.speedString(ls.speed, imperial: imperial)
     }
 
     private var hasGoodOutdoorFix: Bool {
-        guard let loc = locationManager.currentLocation else { return false }
+        guard let loc = ls.currentLocation else { return false }
         return loc.horizontalAccuracy > 0 && loc.horizontalAccuracy <= outdoorReadyAccuracyMeters
     }
 
     private var outdoorMapReady: Bool {
-        !locationManager.isAuthorized || hasGoodOutdoorFix || outdoorLoadingBypassed
+        !ls.isAuthorized || hasGoodOutdoorFix || outdoorLoadingBypassed
     }
 
     private var showOutdoorLoadingShell: Bool {
-        locationManager.isAuthorized && !outdoorMapReady
+        ls.isAuthorized && !outdoorMapReady
     }
 
-    private enum RouteSheetPage: Hashable {
-        case menu
-        case search
-    }
-
-    private var isPreRide: Bool { !locationManager.isRecording }
+    private var isPreRide: Bool { !ls.isRecording }
 
     /// MapKit destination autocomplete: prefer neighborhood when GPS is live, otherwise bias to rough location instead of a global search window.
     private var destinationSearchMapBias: DestinationSearchMapBias {
-        if locationManager.currentLocation != nil { return .preciseGPS }
-        if locationManager.lastSearchBiasCoordinate != nil { return .regional }
+        if ls.currentLocation != nil { return .preciseGPS }
+        if mapCameraService.lastSearchBiasCoordinate != nil { return .regional }
         return .wideFallback
     }
 
@@ -132,9 +116,9 @@ struct OutdoorDashboardView: View {
                     .accessibilityHidden(true)
             }
 
-            if !locationManager.isAuthorized {
+            if !ls.isAuthorized {
                 locationPermissionState
-            } else if showSetupPhase {
+            } else if viewModel.showSetupPhase {
                 outdoorSetupView
                     .transition(
                         .asymmetric(
@@ -152,43 +136,31 @@ struct OutdoorDashboardView: View {
             endDiscardOverlays
 
             // Full-screen destination search (setup navigate mode)
-            if showDestinationSearch {
+            if viewModel.showDestinationSearch {
                 DestinationSearchOverlay(
                     completer: searchCompleter,
                     onSelect: { item in
-                        selectedDestination = item
-                        showDestinationSearch = false
+                        viewModel.selectDestination(item)
+                        viewModel.dismissDestinationSearch()
                     },
                     onDismiss: {
                         // Clear stale destination if user dismisses without a new selection
                         // so the setup card doesn't show a stale "To: ..." subtitle.
-                        showDestinationSearch = false
+                        viewModel.dismissDestinationSearch()
                     },
                     searchMapBias: destinationSearchMapBias,
-                    searchBiasCoordinate: locationManager.destinationSearchBiasCoordinate
+                    searchBiasCoordinate: mapCameraService.destinationSearchBiasCoordinate
                 )
                 .zIndex(150)
                 .transition(.move(edge: .trailing))
             }
         }
-        .animation(.easeInOut(duration: 0.22), value: showDestinationSearch)
+        .animation(.easeInOut(duration: 0.22), value: viewModel.showDestinationSearch)
         .onAppear {
-            locationManager.setup()
-            locationManager.lapIntervalMeters = prefs.outdoorAutoLapIntervalMeters
-            // Defer GPX sync to the next run loop so the first frame paints the setup UI immediately.
-            Task { @MainActor in
-                if routeManager.hasRoute, navigationService.mode == .freeRide {
-                    navigationService.followGPXRoute(
-                        points: routeManager.points,
-                        name: routeManager.routeName,
-                        segmentBreakIndices: routeManager.segmentBreakIndices
-                    )
-                }
-            }
-            // Auto-reconnect to previously paired HR / speed / cadence sensors.
-            if bleManager.bluetoothState == .poweredOn {
-                bleManager.reconnectOrScan()
-            }
+            viewModel.handleAppear(
+                locationManager: ls,
+                autoLapIntervalMeters: prefs.outdoorAutoLapIntervalMeters
+            )
         }
         .task {
             // Defer the hidden Map until the navigation push eases (~280ms). Slightly earlier than
@@ -197,105 +169,73 @@ struct OutdoorDashboardView: View {
             mapKitPreWarmActive = true
             searchCompleter.warmUp()
         }
-        .onChange(of: setupMode) { _, mode in
-            // Don't start GPS just from tapping the Navigate card — wait for destination search to open.
-            guard locationManager.isAuthorized, showSetupPhase else { return }
-            if mode == .freeRide || mode == .gpx {
-                locationManager.stopOutdoorLocationPreviewIfIdle()
-            }
+        .onChange(of: viewModel.setupMode) { _, mode in
+            viewModel.handleSetupModeChange(
+                mode: mode,
+                showSetupPhase: viewModel.showSetupPhase,
+                locationManager: ls
+            )
         }
-        .onChange(of: showSetupPhase) { _, committed in
-            guard committed == false else { return }
-            // GPS + Map pre-warm only after the user leaves mode selection (silent until then).
-            if locationManager.isAuthorized {
-                locationManager.startOutdoorLocationPreview()
-            }
+        .onChange(of: viewModel.showSetupPhase) { _, committed in
+            viewModel.handleSetupPhaseChange(
+                committed: committed,
+                locationManager: ls
+            )
         }
-        .onChange(of: showDestinationSearch) { _, open in
-            // Navigate flow needs a fix for region-biased search before setup is dismissed.
-            guard open, locationManager.isAuthorized else { return }
-            locationManager.startOutdoorLocationPreview()
+        .onChange(of: viewModel.showDestinationSearch) { _, open in
+            viewModel.handleDestinationSearchChange(
+                isOpen: open,
+                locationManager: ls
+            )
         }
         .onDisappear {
-            if locationManager.isRecording {
-                locationManager.stopRecording()
-            }
-            locationManager.stopOutdoorLocationPreviewIfIdle()
-            // Cancel the CSC connection so CoreBluetooth stops trying to
-            // reconnect in the background — prevents "accessory wants to
-            // open Mangox" system notifications from speed/cadence sensors.
-            bleManager.disconnectCSC()
+            viewModel.handleDisappear(locationManager: ls)
         }
-        .task(id: locationManager.isAuthorized) {
+        .task(id: ls.isAuthorized) {
             outdoorLoadingBypassed = false
             try? await Task.sleep(for: .seconds(12))
             outdoorLoadingBypassed = true
         }
-        .task(id: locationManager.isRecording) {
-            guard locationManager.isRecording else {
-                await liveActivityManager.syncRecording(
-                    isRecording: false,
-                    prefs: prefs,
-                    navigationService: navigationService,
-                    locationManager: locationManager,
-                    bleManager: bleManager
-                )
-                return
-            }
-            await RideLiveActivityManager.shared.syncRecording(
-                isRecording: true,
+        .task(id: ls.isRecording) {
+            await viewModel.syncLiveActivity(
+                isRecording: ls.isRecording,
                 prefs: prefs,
-                navigationService: navigationService,
-                locationManager: locationManager,
-                bleManager: bleManager
+                locationManager: ls
             )
-            while !Task.isCancelled, locationManager.isRecording {
-                try? await Task.sleep(for: .seconds(5))
-                guard locationManager.isRecording else { break }
-                await liveActivityManager.syncRecording(
-                    isRecording: true,
-                    prefs: prefs,
-                    navigationService: navigationService,
-                    locationManager: locationManager,
-                    bleManager: bleManager
-                )
+        }
+        .onChange(of: ls.currentLocation) {
+            guard !viewModel.showSetupPhase else { return }
+            if let loc = ls.currentLocation {
+                ns.updatePosition(loc)
             }
         }
-        .onChange(of: locationManager.currentLocation) {
-            guard !showSetupPhase else { return }
-            if let loc = locationManager.currentLocation {
-                navigationService.updatePosition(loc)
+        .onChange(of: ls.newLapJustCompleted) {
+            guard ls.newLapJustCompleted else { return }
+            ls.newLapJustCompleted = false
+            withAnimation(.spring(duration: 0.3)) {
+                viewModel.presentLapToast(for: ls.completedLaps.last)
             }
-        }
-        .onChange(of: locationManager.newLapJustCompleted) {
-            guard locationManager.newLapJustCompleted else { return }
-            locationManager.newLapJustCompleted = false
-            latestLapRecord = locationManager.completedLaps.last
-            withAnimation(.spring(duration: 0.3)) { showLapToast = true }
             Task {
                 try? await Task.sleep(for: .seconds(3))
-                withAnimation(.easeOut(duration: 0.3)) { showLapToast = false }
+                withAnimation(.easeOut(duration: 0.3)) { viewModel.dismissLapToast() }
             }
         }
-        .onChange(of: locationManager.authorizationStatus) {
-            let newStatus = locationManager.authorizationStatus
-            if newStatus == .authorizedWhenInUse || newStatus == .authorizedAlways {
-                // Avoid starting GPS while the user is still on the mode-selection screen.
-                if !showSetupPhase {
-                    locationManager.startOutdoorLocationPreview()
-                }
-            }
+        .onChange(of: ls.authorizationStatus) {
+            viewModel.handleAuthorizationChange(
+                status: ls.authorizationStatus,
+                locationManager: ls
+            )
         }
         .sheet(
-            isPresented: $showRouteSheet,
+            isPresented: binding(\.showRouteSheet),
             onDismiss: {
-                routeSheetPage = .menu
+                viewModel.dismissRouteSheet()
             }
         ) {
             routePlanningSheet
         }
         .fileImporter(
-            isPresented: $showRouteImporter,
+            isPresented: binding(\.showRouteImporter),
             allowedContentTypes: [UTType(filenameExtension: "gpx") ?? .xml],
             allowsMultipleSelection: false
         ) { result in
@@ -303,81 +243,74 @@ struct OutdoorDashboardView: View {
             case .success(let urls):
                 guard let url = urls.first else { return }
                 Task {
-                    do {
-                        try await routeManager.loadGPX(from: url)
+                    if let error = await viewModel.importRoute(
+                        from: url
+                    ) {
                         await MainActor.run {
-                            navigationService.followGPXRoute(
-                                points: routeManager.points,
-                                name: routeManager.routeName,
-                                segmentBreakIndices: routeManager.segmentBreakIndices
-                            )
-                            showRouteImporter = false
-                            showRouteSheet = false
-                            withAnimation(.easeInOut(duration: 0.35)) {
-                                showSetupPhase = false
-                            }
+                            viewModel.presentRouteImportError(error)
                         }
-                    } catch {
+                    } else {
                         await MainActor.run {
-                            routeImportError = error.localizedDescription
+                            withAnimation(.easeInOut(duration: 0.35)) {}
                         }
                     }
                 }
             case .failure(let error):
-                routeImportError = error.localizedDescription
+                viewModel.presentRouteImportError(error.localizedDescription)
             }
         }
         .alert(
             "Route Import Failed",
             isPresented: Binding(
-                get: { routeImportError != nil },
-                set: { if !$0 { routeImportError = nil } }
+                get: { viewModel.routeImportError != nil },
+                set: { if !$0 { viewModel.clearRouteImportError() } }
             ),
             actions: {
-                Button("OK") { routeImportError = nil }
+                Button("OK") { viewModel.clearRouteImportError() }
             },
             message: {
-                Text(routeImportError ?? "")
+                Text(viewModel.routeImportError ?? "")
             }
         )
         .alert(
             "Couldn’t build route",
             isPresented: Binding(
-                get: { routeBuildError != nil },
-                set: { if !$0 { routeBuildError = nil } }
+                get: { viewModel.routeBuildError != nil },
+                set: { if !$0 { viewModel.clearRouteBuildError() } }
             ),
             actions: {
-                Button("OK", role: .cancel) { routeBuildError = nil }
+                Button("OK", role: .cancel) { viewModel.clearRouteBuildError() }
             },
             message: {
-                Text(routeBuildError ?? "")
+                Text(viewModel.routeBuildError ?? "")
             }
         )
         // Hide the NavigationStack bar — we use a fully custom chrome.
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: prefs.outdoorAutoLapIntervalMeters) {
-            locationManager.lapIntervalMeters = prefs.outdoorAutoLapIntervalMeters
+            ls.lapIntervalMeters = prefs.outdoorAutoLapIntervalMeters
         }
+        .environment(viewModel)
     }
 
     private var hasActiveRoute: Bool {
-        navigationService.routePolyline.count > 1
+        ns.routePolyline.count > 1
     }
 
     /// Mapless iPhone layout: surface navigation under speed when a route or TBT is active.
     private var maplessNavPriorityActive: Bool {
         prefs.prioritizeNavigationInMaplessBikeComputer
-            && (navigationService.mode == .turnByTurn
-                || navigationService.mode == .followRoute
+            && (ns.mode == .turnByTurn
+                || ns.mode == .followRoute
                 || hasActiveRoute)
     }
 
     /// Cursor on the elevation strip: along-route when following a polyline, else wheel distance.
     private var elevationStripRiderDistance: Double {
-        if navigationService.mode != .freeRide, navigationService.routePolyline.count > 1 {
-            return navigationService.distanceAlongRouteMeters
+        if ns.mode != .freeRide, ns.routePolyline.count > 1 {
+            return ns.distanceAlongRouteMeters
         }
-        return locationManager.totalDistance
+        return ls.totalDistance
     }
 
     private var routeStatusCard: some View {
@@ -392,23 +325,23 @@ struct OutdoorDashboardView: View {
 
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(navigationService.routeName ?? routeManager.routeName ?? "Free Ride")
+                Text(ns.routeName ?? viewModel.routeName ?? "Free Ride")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
 
                 HStack(spacing: 8) {
-                    if navigationService.routeDistance > 0 {
+                    if ns.routeDistance > 0 {
                         Text(
-                            "\(AppFormat.distanceString(navigationService.routeDistance, imperial: isImperial)) \(AppFormat.distanceUnit(imperial: isImperial))"
+                            "\(AppFormat.distanceString(ns.routeDistance, imperial: isImperial)) \(AppFormat.distanceUnit(imperial: isImperial))"
                         )
                     } else {
                         Text("No route loaded")
                     }
 
-                    if navigationService.mode == .turnByTurn {
+                    if ns.mode == .turnByTurn {
                         Text("Turn-by-turn")
-                    } else if navigationService.mode == .followRoute {
+                    } else if ns.mode == .followRoute {
                         Text("Follow route")
                     } else {
                         Text("Free ride")
@@ -420,10 +353,9 @@ struct OutdoorDashboardView: View {
 
             Spacer()
 
-            if navigationService.mode != .freeRide {
+            if ns.mode != .freeRide {
                 Button {
-                    navigationService.clearNavigation()
-                    routeManager.clearRoute()
+                    viewModel.clearRouteSelection()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .bold))
@@ -459,7 +391,7 @@ struct OutdoorDashboardView: View {
 
                 Spacer(minLength: 4)
 
-                if let upcoming = navigationService.upcomingTurn {
+                if let upcoming = ns.upcomingTurn {
                     VStack(spacing: 4) {
                         Image(systemName: upcoming.symbol)
                             .font(.system(size: 14))
@@ -477,14 +409,14 @@ struct OutdoorDashboardView: View {
 
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(navigationService.routeName ?? routeManager.routeName ?? "Route")
+                    Text(ns.routeName ?? viewModel.routeName ?? "Route")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
                     HStack(spacing: 8) {
-                        if navigationService.routeDistance > 0 {
+                        if ns.routeDistance > 0 {
                             Text(
-                                "\(AppFormat.distanceString(navigationService.routeDistance, imperial: isImperial)) \(AppFormat.distanceUnit(imperial: isImperial))"
+                                "\(AppFormat.distanceString(ns.routeDistance, imperial: isImperial)) \(AppFormat.distanceUnit(imperial: isImperial))"
                             )
                         }
                         Text("Turn-by-turn")
@@ -494,8 +426,7 @@ struct OutdoorDashboardView: View {
                 }
                 Spacer()
                 Button {
-                    navigationService.clearNavigation()
-                    routeManager.clearRoute()
+                    viewModel.clearRouteSelection()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .bold))
@@ -570,7 +501,7 @@ struct OutdoorDashboardView: View {
 
             VStack(spacing: 12) {
                 Button {
-                    locationManager.requestPermission()
+                    viewModel.requestLocationPermission()
                 } label: {
                     Text("Enable Location")
                         .font(.system(size: 16, weight: .bold))
@@ -595,7 +526,7 @@ struct OutdoorDashboardView: View {
     }
 
     private var mapStyle: MapStyle {
-        if isHybridMapStyle {
+        if viewModel.isHybridMapStyle {
             return .hybrid(elevation: .realistic, pointsOfInterest: .excludingAll)
         }
         return .standard(elevation: .realistic, emphasis: .muted)
@@ -709,7 +640,7 @@ struct OutdoorDashboardView: View {
                         }
 
                         // Destination preview — small map when navigate destination is selected
-                        if let dest = selectedDestination {
+                        if let dest = viewModel.selectedDestination {
                             destinationPreviewCard(dest)
                         }
 
@@ -717,7 +648,7 @@ struct OutdoorDashboardView: View {
                         outdoorSensorsSection
 
                         // Map style toggle
-                        Toggle(isOn: $isHybridMapStyle) {
+                        Toggle(isOn: binding(\.isHybridMapStyle)) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Satellite map")
                                     .font(.system(size: 14, weight: .semibold))
@@ -746,8 +677,8 @@ struct OutdoorDashboardView: View {
         .ignoresSafeArea(edges: .bottom)
     }
 
-    private func setupModeCard(_ mode: SetupMode) -> some View {
-        let isSelected = setupMode == mode
+    private func setupModeCard(_ mode: OutdoorSetupMode) -> some View {
+        let isSelected = viewModel.setupMode == mode
         let icon: String
         let title: String
         let subtitle: String
@@ -759,19 +690,19 @@ struct OutdoorDashboardView: View {
         case .gpx:
             icon = "doc.badge.arrow.up"
             title = "Import GPX"
-            subtitle = routeManager.hasRoute ? "Route loaded — ready to go" : "Follow a .gpx file"
+            subtitle = viewModel.hasRoute ? "Route loaded — ready to go" : "Follow a .gpx file"
         case .navigate:
             icon = "arrow.triangle.turn.up.right.diamond"
             title = "Navigate"
             subtitle =
-                selectedDestination != nil
-                ? "To: \(selectedDestination!.name ?? "Destination")"
+                viewModel.selectedDestination != nil
+                ? "To: \(viewModel.selectedDestination!.name ?? "Destination")"
                 : "Apple Maps cycling directions"
         }
 
         return Button {
-            withAnimation(.easeInOut(duration: 0.16)) { setupMode = mode }
-            if mode == .gpx && !routeManager.hasRoute { showRouteImporter = true }
+            withAnimation(.easeInOut(duration: 0.16)) { viewModel.selectSetupMode(mode) }
+            if mode == .gpx && !viewModel.hasRoute { viewModel.presentRouteImporter() }
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: icon)
@@ -833,7 +764,7 @@ struct OutdoorDashboardView: View {
                 }
                 Spacer()
                 Button {
-                    selectedDestination = nil
+                    viewModel.clearSelectedDestination()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 14))
@@ -883,14 +814,14 @@ struct OutdoorDashboardView: View {
                 Spacer()
                 // Scan / Stop button
                 Button {
-                    if bleManager.isScanningForDevices {
-                        bleManager.stopScan()
+                    if viewModel.isScanningForSensors {
+                        viewModel.stopSensorScan()
                     } else {
-                        bleManager.startScan()
+                        viewModel.scanForSensors()
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        if bleManager.isScanningForDevices {
+                        if viewModel.isScanningForSensors {
                             ProgressView()
                                 .controlSize(.mini)
                                 .tint(AppColor.yellow)
@@ -898,7 +829,7 @@ struct OutdoorDashboardView: View {
                             Image(systemName: "antenna.radiowaves.left.and.right")
                                 .font(.system(size: 10, weight: .semibold))
                         }
-                        Text(bleManager.isScanningForDevices ? "Scanning…" : "Scan")
+                        Text(viewModel.isScanningForSensors ? "Scanning…" : "Scan")
                             .font(.system(size: 11, weight: .semibold))
                     }
                     .foregroundStyle(AppColor.yellow)
@@ -919,21 +850,21 @@ struct OutdoorDashboardView: View {
                 outdoorSensorRow(
                     icon: "heart.fill",
                     label: "Heart Rate",
-                    state: bleManager.hrConnectionState,
+                    state: viewModel.hrConnectionState,
                     color: AppColor.heartRate
                 )
                 Divider().background(Color.white.opacity(0.06)).padding(.leading, 44)
                 outdoorSensorRow(
                     icon: "speedometer",
                     label: "Speed / Cadence",
-                    state: bleManager.cscConnectionState,
+                    state: viewModel.cscConnectionState,
                     color: AppColor.blue
                 )
             }
 
             // Discovered devices — exclude trainers and already-connected/connecting peripherals
-            let activeIDs = bleManager.activePeripheralIDs
-            let sensorResults = bleManager.discoveredPeripherals.filter {
+            let activeIDs = viewModel.activeSensorIDs
+            let sensorResults = viewModel.discoveredSensors.filter {
                 $0.deviceType != .trainer && !activeIDs.contains($0.id)
             }
             if !sensorResults.isEmpty {
@@ -998,9 +929,9 @@ struct OutdoorDashboardView: View {
             }
 
             // Hint when nothing connected
-            if !bleManager.hrConnectionState.isConnected
-                && !bleManager.cscConnectionState.isConnected
-                && sensorResults.isEmpty && !bleManager.isScanningForDevices
+            if !viewModel.isHRMonitorConnected
+                && !viewModel.isCSCConnected
+                && sensorResults.isEmpty && !viewModel.isScanningForSensors
             {
                 Text("Tap Scan to find nearby HR & speed/cadence sensors")
                     .font(.system(size: 11))
@@ -1066,12 +997,12 @@ struct OutdoorDashboardView: View {
     private func connectOutdoorSensor(_ peripheral: DiscoveredPeripheral) {
         switch peripheral.deviceType {
         case .heartRateMonitor:
-            bleManager.connectHRMonitor(peripheral.peripheral)
+            viewModel.connectHRMonitor(peripheral.peripheral)
         case .cyclingSpeedCadence:
-            bleManager.connectCSCSensor(peripheral.peripheral)
+            viewModel.connectCSCSensor(peripheral.peripheral)
         default:
             // For unknown types, try CSC (speed/cadence is more common outdoors)
-            bleManager.connectCSCSensor(peripheral.peripheral)
+            viewModel.connectCSCSensor(peripheral.peripheral)
         }
     }
 
@@ -1081,26 +1012,26 @@ struct OutdoorDashboardView: View {
 
     @ViewBuilder
     private var setupCTAButton: some View {
-        switch setupMode {
+        switch viewModel.setupMode {
         case .freeRide:
             Button {
-                withAnimation(.easeInOut(duration: 0.35)) { showSetupPhase = false }
+                withAnimation(.easeInOut(duration: 0.35)) { viewModel.commitSetupPhase() }
             } label: {
                 ctaLabel("Start Free Ride")
             }
             .buttonStyle(MangoxPressStyle())
 
         case .gpx:
-            if routeManager.hasRoute {
+            if viewModel.hasRoute {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.35)) { showSetupPhase = false }
+                    withAnimation(.easeInOut(duration: 0.35)) { viewModel.commitSetupPhase() }
                 } label: {
                     ctaLabel("Start Route")
                 }
                 .buttonStyle(MangoxPressStyle())
             } else {
                 Button {
-                    showRouteImporter = true
+                    viewModel.presentRouteImporter()
                 } label: {
                     ctaLabel("Import GPX File", secondary: true)
                 }
@@ -1108,11 +1039,11 @@ struct OutdoorDashboardView: View {
             }
 
         case .navigate:
-            if selectedDestination != nil {
+            if viewModel.selectedDestination != nil {
                 Button {
                     startNavigation()
                 } label: {
-                    if navigationService.isCalculating {
+                    if ns.isCalculating {
                         HStack(spacing: 10) {
                             ProgressView()
                                 .tint(AppColor.bg)
@@ -1128,11 +1059,11 @@ struct OutdoorDashboardView: View {
                         ctaLabel("Start Navigation")
                     }
                 }
-                .disabled(navigationService.isCalculating)
+                .disabled(ns.isCalculating)
                 .buttonStyle(MangoxPressStyle())
             } else {
                 Button {
-                    showDestinationSearch = true
+                    viewModel.presentDestinationSearch()
                 } label: {
                     ctaLabel("Choose Destination")
                 }
@@ -1163,7 +1094,7 @@ struct OutdoorDashboardView: View {
     /// The arrow always points toward geographic north; it counter-rotates
     /// with the same rotation as the map camera (course-first + smoothed).
     private var compactCompass: some View {
-        let deg = -locationManager.mapCameraHeadingDegrees
+        let deg = -mapCameraService.mapCameraHeadingDegrees
         return VStack(spacing: 2) {
             Image(systemName: "arrow.up")
                 .font(.system(size: 12, weight: .bold))
@@ -1181,7 +1112,7 @@ struct OutdoorDashboardView: View {
 
     /// Full-screen bike-computer when the map is hidden (compact iPhone): works pre-ride and while recording.
     private var showCompactBikeComputerLayout: Bool {
-        !showMapInCompact && outdoorMapReady
+        !viewModel.showMapInCompact && outdoorMapReady
     }
 
     /// Chrome palette when the map is visible vs full-screen black bike-computer (both use light icons).
@@ -1253,7 +1184,7 @@ struct OutdoorDashboardView: View {
             // ZStack-sibling approach causes MapKit to steal button taps.
             ZStack {
                 Group {
-                    if outdoorMapReady && geo.size.width > 0 && showMapInCompact {
+                    if outdoorMapReady && geo.size.width > 0 && viewModel.showMapInCompact {
                         mapView
                             .ignoresSafeArea(edges: [.top, .bottom, .leading, .trailing])
                     } else {
@@ -1282,16 +1213,16 @@ struct OutdoorDashboardView: View {
                         // Lap toast — floats above the card
                         lapToastView
                             .frame(maxWidth: .infinity, alignment: .center)
-                            .animation(.spring(duration: 0.3), value: showLapToast)
+                            .animation(.spring(duration: 0.3), value: viewModel.showLapToast)
 
                         // Climb banner — only during active climb
                         climbBanner
 
                         // Elevation profile strip — when a GPX route is loaded and has elevation data
-                        if routeManager.hasRoute && routeManager.hasElevationData {
+                        if viewModel.hasRoute && viewModel.hasElevationData {
                             ElevationProfileStripView(
-                                profilePoints: routeManager.elevationProfilePoints,
-                                totalDistance: routeManager.totalDistance,
+                                profilePoints: viewModel.routeElevationProfilePoints,
+                                totalDistance: viewModel.totalRouteDistance,
                                 riderDistance: elevationStripRiderDistance
                             )
                             .padding(.horizontal, 12)
@@ -1299,7 +1230,7 @@ struct OutdoorDashboardView: View {
 
                         // AUTO-PAUSED floats above the card as a pill — keeping card height
                         // constant so the map viewport doesn't jump when pausing.
-                        if locationManager.isRecording && locationManager.isAutoPaused {
+                        if ls.isRecording && ls.isAutoPaused {
                             Text("AUTO-PAUSED")
                                 .font(.system(size: 12, weight: .bold))
                                 .foregroundStyle(AppColor.yellow)
@@ -1317,7 +1248,7 @@ struct OutdoorDashboardView: View {
                         }
 
                         // Compass: bottom-left, above stats card
-                        if showMapInCompact {
+                        if viewModel.showMapInCompact {
                             compactCompass
                                 .padding(.leading, 20)
                         }
@@ -1343,16 +1274,16 @@ struct OutdoorDashboardView: View {
         let canvas = Color.black
         let labelMuted = Color.white.opacity(0.38)
         let tileFont: CGFloat = 28
-        let recording = locationManager.isRecording
+        let recording = ls.isRecording
         let timePrimary: String =
             recording
-            ? AppFormat.duration(locationManager.rideDuration)
+            ? AppFormat.duration(ls.rideDuration)
             : "0:00"
         let distPrimary: String = AppFormat.distanceString(
-            locationManager.totalDistance, imperial: isImperial)
+            ls.totalDistance, imperial: isImperial)
         let elevPrimary = AppFormat.elevationString(
-            locationManager.totalElevationGain, imperial: isImperial)
-        let avgPrimary = AppFormat.speedString(locationManager.averageSpeed, imperial: isImperial)
+            ls.totalElevationGain, imperial: isImperial)
+        let avgPrimary = AppFormat.speedString(ls.averageSpeed, imperial: isImperial)
         let navPriority = maplessNavPriorityActive
 
         return VStack(spacing: 0) {
@@ -1360,7 +1291,7 @@ struct OutdoorDashboardView: View {
                 lapToastView
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 8)
-                    .animation(.spring(duration: 0.3), value: showLapToast)
+                    .animation(.spring(duration: 0.3), value: viewModel.showLapToast)
             }
 
             Spacer(minLength: 12)
@@ -1402,7 +1333,7 @@ struct OutdoorDashboardView: View {
                     .frame(maxWidth: .infinity)
             }
 
-            if recording, locationManager.isAutoPaused {
+            if recording, ls.isAutoPaused {
                 Text("AUTO-PAUSED")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(AppColor.yellow)
@@ -1423,7 +1354,7 @@ struct OutdoorDashboardView: View {
             HStack(alignment: .center, spacing: 12) {
                 if recording {
                     Button {
-                        showEndConfirmation = true
+                        viewModel.presentEndConfirmation()
                     } label: {
                         ZStack {
                             Circle()
@@ -1443,7 +1374,7 @@ struct OutdoorDashboardView: View {
 
                     Button {
                         withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
-                            showMapInCompact = true
+                            viewModel.showCompactMap()
                         }
                     } label: {
                         Image(systemName: "map")
@@ -1459,7 +1390,7 @@ struct OutdoorDashboardView: View {
                     .accessibilityLabel("Show map")
                 } else {
                     Button {
-                        locationManager.startRecording()
+                        viewModel.startRide(using: ls)
                     } label: {
                         Text("Start ride")
                             .font(.system(size: 17, weight: .bold))
@@ -1473,7 +1404,7 @@ struct OutdoorDashboardView: View {
 
                     Button {
                         withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
-                            showMapInCompact = true
+                            viewModel.showCompactMap()
                         }
                     } label: {
                         Image(systemName: "map")
@@ -1570,9 +1501,9 @@ struct OutdoorDashboardView: View {
 
     @ViewBuilder
     private func bikeComputerSensorStrip() -> some View {
-        let showHR = bleManager.hrConnectionState.isConnected
-        let showCad = bleManager.metrics.cadence > 0
-        let showPow = bleManager.trainerConnectionState.isConnected
+        let showHR = viewModel.isHRMonitorConnected
+        let showCad = viewModel.sensorCadence > 0
+        let showPow = viewModel.isTrainerConnected
         if showHR || showCad || showPow {
             HStack(spacing: 16) {
                 if showHR {
@@ -1580,7 +1511,7 @@ struct OutdoorDashboardView: View {
                         Image(systemName: "heart.fill")
                             .font(.system(size: 12))
                             .foregroundStyle(AppColor.heartRate.opacity(0.9))
-                        Text("\(bleManager.smoothedHR)")
+                        Text("\(viewModel.smoothedHeartRate)")
                             .font(.system(size: 16, weight: .bold, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.88))
                         Text("bpm")
@@ -1593,7 +1524,7 @@ struct OutdoorDashboardView: View {
                         Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
                             .font(.system(size: 12))
                             .foregroundStyle(AppColor.blue.opacity(0.85))
-                        Text("\(bleManager.metrics.cadence)")
+                        Text("\(viewModel.sensorCadence)")
                             .font(.system(size: 16, weight: .bold, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.88))
                         Text("rpm")
@@ -1606,7 +1537,7 @@ struct OutdoorDashboardView: View {
                         Image(systemName: "bolt.fill")
                             .font(.system(size: 12))
                             .foregroundStyle(AppColor.mango.opacity(0.9))
-                        Text("\(bleManager.smoothedPower)")
+                        Text("\(viewModel.smoothedPower)")
                             .font(.system(size: 16, weight: .bold, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.88))
                         Text("W")
@@ -1622,7 +1553,7 @@ struct OutdoorDashboardView: View {
 
     @ViewBuilder
     private var bikeComputerNavBannersBlock: some View {
-        if navigationService.isOffCourse {
+        if ns.isOffCourse {
             offCourseBanner(surface: .bikeComputerDark, chromeStyle: .bikeComputerSheet)
         }
         // Weak GPS is folded into `compactNavCardRow` via `navCardGpsLine` so it doesn’t stack as a second full-width bar.
@@ -1679,7 +1610,7 @@ struct OutdoorDashboardView: View {
                 // Directions / off-course live inside the mapless bike-computer sheet when map is hidden.
                 if surface != .bikeComputerDark {
                     compactNavCardRow(surface: surface, chromeStyle: .frostedGlass)
-                    if navigationService.isOffCourse {
+                    if ns.isOffCourse {
                         offCourseBanner(surface: surface, chromeStyle: .frostedGlass)
                             .padding(.top, 4)
                     }
@@ -1699,7 +1630,7 @@ struct OutdoorDashboardView: View {
     /// First row: back button only (pre-ride). GPS badge now lives inside the nav card.
     @ViewBuilder
     private func compactTopRow(surface: OutdoorChromeSurface) -> some View {
-        if !locationManager.isRecording {
+        if !ls.isRecording {
             // Pre-ride: back button only — GPS merged into nav card below
             HStack {
                 Button {
@@ -1725,7 +1656,7 @@ struct OutdoorDashboardView: View {
             Color.clear.frame(height: 8)
 
             Button {
-                showRouteSheet = true
+                viewModel.presentRouteSheet()
             } label: {
                 Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
                     .font(.system(size: 15, weight: .semibold))
@@ -1737,7 +1668,7 @@ struct OutdoorDashboardView: View {
             .accessibilityLabel("Route")
 
             Button {
-                locationManager.centerMapOnUser()
+                mapCameraService.centerMapOnUser()
             } label: {
                 Image(systemName: "location.circle.fill")
                     .font(.system(size: 15, weight: .semibold))
@@ -1747,32 +1678,33 @@ struct OutdoorDashboardView: View {
             .buttonStyle(MangoxPressStyle())
             .background(.ultraThinMaterial, in: Circle())
             .accessibilityLabel("Center on location")
-            .disabled(locationManager.currentLocation == nil)
-            .opacity(locationManager.currentLocation == nil ? 0.35 : 1)
+            .disabled(ls.currentLocation == nil)
+            .opacity(ls.currentLocation == nil ? 0.35 : 1)
 
             // Map visibility toggle (compact / iPhone only) — hidden on mapless bike screen (duplicates bottom control)
             if hSizeClass == .compact, surface != .bikeComputerDark {
                 Button {
                     withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
-                        showMapInCompact.toggle()
+                        viewModel.toggleCompactMapVisibility()
                     }
                 } label: {
-                    Image(systemName: showMapInCompact ? "map.fill" : "map")
+                    Image(systemName: viewModel.showMapInCompact ? "map.fill" : "map")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(
-                            showMapInCompact ? AppColor.mango : chromeIcon(surface).opacity(0.7)
+                            viewModel.showMapInCompact
+                                ? AppColor.mango : chromeIcon(surface).opacity(0.7)
                         )
                         .frame(width: 40, height: 40)
                 }
                 .buttonStyle(MangoxPressStyle())
                 .background(.ultraThinMaterial, in: Circle())
-                .accessibilityLabel(showMapInCompact ? "Hide map" : "Show map")
+                .accessibilityLabel(viewModel.showMapInCompact ? "Hide map" : "Show map")
             }
 
             if surface != .bikeComputerDark {
                 Button {
-                    guard let c = locationManager.currentLocation?.coordinate else { return }
-                    mapWaypoints.append(c)
+                    guard let c = ls.currentLocation?.coordinate else { return }
+                    viewModel.addWaypoint(c)
                 } label: {
                     Image(systemName: "mappin.and.ellipse")
                         .font(.system(size: 15, weight: .semibold))
@@ -1782,12 +1714,12 @@ struct OutdoorDashboardView: View {
                 .buttonStyle(MangoxPressStyle())
                 .background(.ultraThinMaterial, in: Circle())
                 .accessibilityLabel("Drop waypoint at current location")
-                .disabled(locationManager.currentLocation == nil)
-                .opacity(locationManager.currentLocation == nil ? 0.35 : 1)
+                .disabled(ls.currentLocation == nil)
+                .opacity(ls.currentLocation == nil ? 0.35 : 1)
 
-                if !mapWaypoints.isEmpty {
+                if !viewModel.mapWaypoints.isEmpty {
                     Button {
-                        mapWaypoints.removeAll()
+                        viewModel.clearWaypoints()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 15, weight: .semibold))
@@ -1800,9 +1732,9 @@ struct OutdoorDashboardView: View {
                 }
             }
 
-            if locationManager.isRecording {
+            if ls.isRecording {
                 Button {
-                    showDiscardConfirmation = true
+                    viewModel.presentDiscardConfirmation()
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 15, weight: .semibold))
@@ -1815,7 +1747,7 @@ struct OutdoorDashboardView: View {
 
                 if surface != .bikeComputerDark {
                     Button {
-                        showEndConfirmation = true
+                        viewModel.presentEndConfirmation()
                     } label: {
                         Text("END")
                             .font(.system(size: 11, weight: .bold))
@@ -1838,9 +1770,9 @@ struct OutdoorDashboardView: View {
                 preRideReadinessRow
             } else {
                 metricsGrid
-                if bleManager.trainerConnectionState.isConnected
-                    || bleManager.hrConnectionState.isConnected
-                    || bleManager.cscConnectionState.isConnected
+                if viewModel.isTrainerConnected
+                    || viewModel.isHRMonitorConnected
+                    || viewModel.isCSCConnected
                 {
                     sensorRow
                 }
@@ -1887,12 +1819,12 @@ struct OutdoorDashboardView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
                         // Elevation profile strip — bottom of map column
-                        if routeManager.hasRoute && routeManager.hasElevationData {
+                        if viewModel.hasRoute && viewModel.hasElevationData {
                             VStack {
                                 Spacer()
                                 ElevationProfileStripView(
-                                    profilePoints: routeManager.elevationProfilePoints,
-                                    totalDistance: routeManager.totalDistance,
+                                    profilePoints: viewModel.routeElevationProfilePoints,
+                                    totalDistance: viewModel.totalRouteDistance,
                                     riderDistance: elevationStripRiderDistance
                                 )
                                 .padding(.horizontal, 12)
@@ -1911,9 +1843,9 @@ struct OutdoorDashboardView: View {
                             } else {
                                 primaryMetrics
 
-                                if bleManager.trainerConnectionState.isConnected
-                                    || bleManager.hrConnectionState.isConnected
-                                    || bleManager.cscConnectionState.isConnected
+                                if viewModel.isTrainerConnected
+                                    || viewModel.isHRMonitorConnected
+                                    || viewModel.isCSCConnected
                                 {
                                     sensorMetrics
                                 }
@@ -1952,21 +1884,21 @@ struct OutdoorDashboardView: View {
 
     @ViewBuilder
     private var wideNavHud: some View {
-        if navigationService.isOffCourse {
+        if ns.isOffCourse {
             offCourseBanner(surface: .mapOverlay, chromeStyle: .frostedGlass)
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
         }
-        if locationManager.isGpsSignalStale {
+        if ls.isGpsSignalStale {
             weakGpsBanner(surface: .mapOverlay, chromeStyle: .frostedGlass)
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
         }
         climbBanner
-        if navigationService.mode == .turnByTurn, let turn = navigationService.nextTurn {
+        if ns.mode == .turnByTurn, let turn = ns.nextTurn {
             combinedTurnByTurnCard(turn)
-        } else if navigationService.mode == .followRoute,
-            let hint = navigationService.followRouteHint
+        } else if ns.mode == .followRoute,
+            let hint = ns.followRouteHint
         {
             combinedFollowRouteCard(hint: hint)
         } else if hasActiveRoute {
@@ -1980,15 +1912,15 @@ struct OutdoorDashboardView: View {
     private var mapView: some View {
         Map(
             position: Binding(
-                get: { locationManager.mapCameraPosition },
+                get: { mapCameraService.mapCameraPosition },
                 set: { newPos in
-                    locationManager.mapCameraPosition = newPos
-                    locationManager.isFollowingUser = false
+                    mapCameraService.mapCameraPosition = newPos
+                    mapCameraService.isFollowingUser = false
                 }
             )
         ) {
             // Frozen breadcrumb chunks — colour-coded by average speed
-            ForEach(locationManager.frozenBreadcrumbChunks) { chunk in
+            ForEach(ls.frozenBreadcrumbChunks) { chunk in
                 let crumbs = chunk.coords.sanitizedForMapPolyline()
                 if crumbs.count > 1 {
                     MapPolyline(coordinates: crumbs)
@@ -1997,22 +1929,22 @@ struct OutdoorDashboardView: View {
             }
 
             // Live tail — always mango coloured
-            let tail = locationManager.liveBreadcrumbTail.sanitizedForMapPolyline()
+            let tail = ls.liveBreadcrumbTail.sanitizedForMapPolyline()
             if tail.count > 1 {
                 MapPolyline(coordinates: tail)
                     .stroke(AppColor.mango, lineWidth: 4)
             }
 
             // Route overlay — traversed (grey) vs remaining (yellow)
-            ForEach(navigationService.completedRoutePolylines.indices, id: \.self) { i in
-                let done = navigationService.completedRoutePolylines[i].sanitizedForMapPolyline()
+            ForEach(ns.completedRoutePolylines.indices, id: \.self) { i in
+                let done = ns.completedRoutePolylines[i].sanitizedForMapPolyline()
                 if done.count > 1 {
                     MapPolyline(coordinates: done)
                         .stroke(Color.white.opacity(0.35), lineWidth: 5)
                 }
             }
-            ForEach(navigationService.remainingRoutePolylines.indices, id: \.self) { i in
-                let left = navigationService.remainingRoutePolylines[i].sanitizedForMapPolyline()
+            ForEach(ns.remainingRoutePolylines.indices, id: \.self) { i in
+                let left = ns.remainingRoutePolylines[i].sanitizedForMapPolyline()
                 if left.count > 1 {
                     MapPolyline(coordinates: left)
                         .stroke(AppColor.yellow, lineWidth: 5)
@@ -2020,8 +1952,8 @@ struct OutdoorDashboardView: View {
             }
 
             // Lookahead ghost — dashed white, 300m ahead on remaining route
-            ForEach(navigationService.lookaheadPolylines.indices, id: \.self) { i in
-                let lookahead = navigationService.lookaheadPolylines[i].sanitizedForMapPolyline()
+            ForEach(ns.lookaheadPolylines.indices, id: \.self) { i in
+                let lookahead = ns.lookaheadPolylines[i].sanitizedForMapPolyline()
                 if lookahead.count > 1 {
                     MapPolyline(coordinates: lookahead)
                         .stroke(
@@ -2032,7 +1964,7 @@ struct OutdoorDashboardView: View {
             }
 
             // Off-course snap-back line — dashed red line to nearest route point
-            let snapBack = navigationService.snapBackPolyline
+            let snapBack = ns.snapBackPolyline
             if snapBack.count == 2 {
                 MapPolyline(coordinates: snapBack)
                     .stroke(
@@ -2042,8 +1974,8 @@ struct OutdoorDashboardView: View {
             }
 
             // Pause gap markers
-            ForEach(locationManager.pauseGapCoordinates.indices, id: \.self) { i in
-                let coord = locationManager.pauseGapCoordinates[i]
+            ForEach(ls.pauseGapCoordinates.indices, id: \.self) { i in
+                let coord = ls.pauseGapCoordinates[i]
                 Annotation("", coordinate: coord) {
                     Circle()
                         .fill(AppColor.yellow.opacity(0.85))
@@ -2053,9 +1985,10 @@ struct OutdoorDashboardView: View {
             }
 
             // Rider position — solid circle dot (smoothed when follow mode matches the camera).
-            if let loc = locationManager.currentLocation {
-                let riderCoord = locationManager.isFollowingUser
-                    ? locationManager.smoothedRiderCoordinate
+            if let loc = ls.currentLocation {
+                let riderCoord =
+                    mapCameraService.isFollowingUser
+                    ? mapCameraService.smoothedRiderCoordinate
                     : loc.coordinate
                 Annotation("", coordinate: riderCoord) {
                     Circle()
@@ -2067,13 +2000,13 @@ struct OutdoorDashboardView: View {
             }
 
             // Destination pin
-            if let dest = navigationService.destination {
+            if let dest = ns.destination {
                 Marker(dest.name ?? "Destination", coordinate: dest.location.coordinate)
                     .tint(AppColor.red)
             }
 
             // User-placed waypoints
-            ForEach(Array(mapWaypoints.enumerated()), id: \.offset) { index, coord in
+            ForEach(Array(viewModel.mapWaypoints.enumerated()), id: \.offset) { index, coord in
                 Annotation("", coordinate: coord) {
                     VStack(spacing: 2) {
                         ZStack {
@@ -2104,7 +2037,7 @@ struct OutdoorDashboardView: View {
         // no overlapping card. statsCardHeight is measured live from the card.
         .safeAreaPadding(.bottom, hSizeClass == .compact ? statsCardHeight : 0)
         .overlay {
-            if navigationService.isCalculating {
+            if ns.isCalculating {
                 ZStack {
                     Color.black.opacity(0.35).ignoresSafeArea()
                     ProgressView("Building route…")
@@ -2123,26 +2056,32 @@ struct OutdoorDashboardView: View {
 
     private var endDiscardOverlays: some View {
         ZStack {
-            if showEndConfirmation {
+            if viewModel.isShowingEndConfirmation {
                 endRideConfirmationOverlay
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
-            if showDiscardConfirmation {
+            if viewModel.isShowingDiscardConfirmation {
                 discardRideConfirmationOverlay
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
         }
-        .animation(.spring(response: 0.26, dampingFraction: 0.9), value: showEndConfirmation)
-        .animation(.spring(response: 0.26, dampingFraction: 0.9), value: showDiscardConfirmation)
+        .animation(
+            .spring(response: 0.26, dampingFraction: 0.9),
+            value: viewModel.isShowingEndConfirmation
+        )
+        .animation(
+            .spring(response: 0.26, dampingFraction: 0.9),
+            value: viewModel.isShowingDiscardConfirmation
+        )
         .zIndex(200)
-        .allowsHitTesting(showEndConfirmation || showDiscardConfirmation)
+        .allowsHitTesting(viewModel.isShowingConfirmationOverlay)
     }
 
     private var endRideConfirmationOverlay: some View {
         ZStack {
             Color.black.opacity(0.52)
                 .ignoresSafeArea()
-                .onTapGesture { showEndConfirmation = false }
+                .onTapGesture { viewModel.dismissConfirmation() }
 
             VStack(alignment: .leading, spacing: 16) {
                 Text("End & save ride?")
@@ -2156,7 +2095,7 @@ struct OutdoorDashboardView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 12) {
                     Button {
-                        showEndConfirmation = false
+                        viewModel.dismissConfirmation()
                     } label: {
                         Text("Cancel")
                             .font(.system(size: 16, weight: .semibold))
@@ -2169,7 +2108,6 @@ struct OutdoorDashboardView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                     Button {
-                        showEndConfirmation = false
                         endRide()
                     } label: {
                         Text("End & Save")
@@ -2204,7 +2142,7 @@ struct OutdoorDashboardView: View {
         ZStack {
             Color.black.opacity(0.52)
                 .ignoresSafeArea()
-                .onTapGesture { showDiscardConfirmation = false }
+                .onTapGesture { viewModel.dismissConfirmation() }
 
             VStack(alignment: .leading, spacing: 16) {
                 Text("Discard this ride?")
@@ -2218,7 +2156,7 @@ struct OutdoorDashboardView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 12) {
                     Button {
-                        showDiscardConfirmation = false
+                        viewModel.dismissConfirmation()
                     } label: {
                         Text("Cancel")
                             .font(.system(size: 16, weight: .semibold))
@@ -2231,7 +2169,6 @@ struct OutdoorDashboardView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                     Button {
-                        showDiscardConfirmation = false
                         discardRide()
                     } label: {
                         Text("Discard")
@@ -2266,11 +2203,10 @@ struct OutdoorDashboardView: View {
         HStack(alignment: .top, spacing: 8) {
             // Back / exit — always pinned to the left
             Button {
-                if showEndConfirmation || showDiscardConfirmation {
-                    showEndConfirmation = false
-                    showDiscardConfirmation = false
-                } else if locationManager.isRecording {
-                    showEndConfirmation = true
+                if viewModel.isShowingConfirmationOverlay {
+                    viewModel.dismissConfirmation()
+                } else if ls.isRecording {
+                    viewModel.presentEndConfirmation()
                 } else {
                     navigationPath.removeLast()
                 }
@@ -2291,7 +2227,7 @@ struct OutdoorDashboardView: View {
                 gpsStatusBadge
 
                 Button {
-                    showRouteSheet = true
+                    viewModel.presentRouteSheet()
                 } label: {
                     Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
                         .font(.system(size: 15, weight: .semibold))
@@ -2303,7 +2239,7 @@ struct OutdoorDashboardView: View {
                 .accessibilityLabel("Route")
 
                 Button {
-                    locationManager.centerMapOnUser()
+                    mapCameraService.centerMapOnUser()
                 } label: {
                     Image(systemName: "location.circle.fill")
                         .font(.system(size: 15, weight: .semibold))
@@ -2313,31 +2249,31 @@ struct OutdoorDashboardView: View {
                 .buttonStyle(MangoxPressStyle())
                 .background(.ultraThinMaterial, in: Circle())
                 .accessibilityLabel("Center on location")
-                .disabled(locationManager.currentLocation == nil)
-                .opacity(locationManager.currentLocation == nil ? 0.35 : 1)
+                .disabled(ls.currentLocation == nil)
+                .opacity(ls.currentLocation == nil ? 0.35 : 1)
 
                 // Map visibility toggle (compact / iPhone only)
                 if hSizeClass == .compact {
                     Button {
                         withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
-                            showMapInCompact.toggle()
+                            viewModel.toggleCompactMapVisibility()
                         }
                     } label: {
-                        Image(systemName: showMapInCompact ? "map.fill" : "map")
+                        Image(systemName: viewModel.showMapInCompact ? "map.fill" : "map")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(
-                                showMapInCompact ? AppColor.mango : .white.opacity(0.7)
+                                viewModel.showMapInCompact ? AppColor.mango : .white.opacity(0.7)
                             )
                             .frame(width: 40, height: 40)
                     }
                     .buttonStyle(MangoxPressStyle())
                     .background(.ultraThinMaterial, in: Circle())
-                    .accessibilityLabel(showMapInCompact ? "Hide map" : "Show map")
+                    .accessibilityLabel(viewModel.showMapInCompact ? "Hide map" : "Show map")
                 }
 
                 Button {
-                    guard let c = locationManager.currentLocation?.coordinate else { return }
-                    mapWaypoints.append(c)
+                    guard let c = ls.currentLocation?.coordinate else { return }
+                    viewModel.addWaypoint(c)
                 } label: {
                     Image(systemName: "mappin.and.ellipse")
                         .font(.system(size: 15, weight: .semibold))
@@ -2347,12 +2283,12 @@ struct OutdoorDashboardView: View {
                 .buttonStyle(MangoxPressStyle())
                 .background(.ultraThinMaterial, in: Circle())
                 .accessibilityLabel("Drop waypoint at current location")
-                .disabled(locationManager.currentLocation == nil)
-                .opacity(locationManager.currentLocation == nil ? 0.35 : 1)
+                .disabled(ls.currentLocation == nil)
+                .opacity(ls.currentLocation == nil ? 0.35 : 1)
 
-                if !mapWaypoints.isEmpty {
+                if !viewModel.mapWaypoints.isEmpty {
                     Button {
-                        mapWaypoints.removeAll()
+                        viewModel.clearWaypoints()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 15, weight: .semibold))
@@ -2364,9 +2300,9 @@ struct OutdoorDashboardView: View {
                     .accessibilityLabel("Clear waypoints")
                 }
 
-                if locationManager.isRecording {
+                if ls.isRecording {
                     Button {
-                        showDiscardConfirmation = true
+                        viewModel.presentDiscardConfirmation()
                     } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 15, weight: .semibold))
@@ -2378,7 +2314,7 @@ struct OutdoorDashboardView: View {
                     .accessibilityLabel("Discard ride")
 
                     Button {
-                        showEndConfirmation = true
+                        viewModel.presentEndConfirmation()
                     } label: {
                         Text("END")
                             .font(.system(size: 11, weight: .bold))
@@ -2411,7 +2347,7 @@ struct OutdoorDashboardView: View {
     /// Replaces the inline accuracy pill when the fix is stale so we don’t duplicate a full-width weak-GPS banner on mapless layouts.
     @ViewBuilder
     private func navCardGpsLine(surface: OutdoorChromeSurface) -> some View {
-        if locationManager.isGpsSignalStale {
+        if ls.isGpsSignalStale {
             HStack(spacing: 5) {
                 Image(systemName: "antenna.radiowaves.left.and.right.slash")
                     .font(.system(size: 9, weight: .semibold))
@@ -2433,7 +2369,7 @@ struct OutdoorDashboardView: View {
     private func compactNavCardRow(
         surface: OutdoorChromeSurface, chromeStyle: CompactNavChromeStyle = .frostedGlass
     ) -> some View {
-        if navigationService.mode == .turnByTurn, let turn = navigationService.nextTurn {
+        if ns.mode == .turnByTurn, let turn = ns.nextTurn {
             applyCompactNavChrome(style: chromeStyle, shape: .roundedRect) {
                 VStack(alignment: .leading, spacing: 6) {
                     navCardGpsLine(surface: surface)
@@ -2452,7 +2388,7 @@ struct OutdoorDashboardView: View {
                                 .foregroundStyle(chromeNavSecondary(surface))
                         }
                         Spacer(minLength: 4)
-                        if let upcoming = navigationService.upcomingTurn {
+                        if let upcoming = ns.upcomingTurn {
                             VStack(spacing: 2) {
                                 Image(systemName: upcoming.symbol)
                                     .font(.system(size: 12))
@@ -2467,8 +2403,8 @@ struct OutdoorDashboardView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
             }
-        } else if navigationService.mode == .followRoute,
-            let hint = navigationService.followRouteHint
+        } else if ns.mode == .followRoute,
+            let hint = ns.followRouteHint
         {
             applyCompactNavChrome(style: chromeStyle, shape: .roundedRect) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -2501,7 +2437,7 @@ struct OutdoorDashboardView: View {
                         Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
                             .font(.system(size: 13))
                             .foregroundStyle(chromeNavSecondary(surface))
-                        Text(navigationService.routeName ?? routeManager.routeName ?? "Free Ride")
+                        Text(ns.routeName ?? viewModel.routeName ?? "Free Ride")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(chromeNavPrimary(surface))
                             .lineLimit(1)
@@ -2516,7 +2452,7 @@ struct OutdoorDashboardView: View {
             if chromeStyle == .bikeComputerSheet {
                 applyCompactNavChrome(style: chromeStyle, shape: .capsule) {
                     Group {
-                        if locationManager.isGpsSignalStale {
+                        if ls.isGpsSignalStale {
                             HStack(spacing: 5) {
                                 Image(systemName: "antenna.radiowaves.left.and.right.slash")
                                     .font(.system(size: 10, weight: .semibold))
@@ -2561,7 +2497,7 @@ struct OutdoorDashboardView: View {
     }
 
     private var gpsColor: Color {
-        switch locationManager.signalConfidence {
+        switch ls.signalConfidence {
         case .excellent:
             return AppColor.success
         case .good:
@@ -2574,14 +2510,14 @@ struct OutdoorDashboardView: View {
     }
 
     private var gpsLabel: String {
-        let acc = locationManager.horizontalAccuracy
-        switch locationManager.signalConfidence {
+        let acc = ls.horizontalAccuracy
+        switch ls.signalConfidence {
         case .searching:
             return "Searching GPS"
         case .stale:
-            return locationManager.isMotionFallbackActive ? "GPS Lost · Motion Assist" : "GPS Lost"
+            return ls.isMotionFallbackActive ? "GPS Lost · Motion Assist" : "GPS Lost"
         case .weak:
-            if locationManager.isMotionFallbackActive {
+            if ls.isMotionFallbackActive {
                 return acc >= 0 ? "GPS Weak · Motion Assist" : "GPS Weak"
             }
             return acc >= 0 ? "GPS ±\(Int(acc))m" : "GPS Weak"
@@ -2609,7 +2545,7 @@ struct OutdoorDashboardView: View {
             }
             Spacer()
             Button {
-                showRouteSheet = true
+                viewModel.presentRouteSheet()
             } label: {
                 Text("Route")
                     .font(.system(size: 13, weight: .bold))
@@ -2642,7 +2578,7 @@ struct OutdoorDashboardView: View {
                     isPrimary: true
                 )
                 metricCell(
-                    value: AppFormat.duration(locationManager.rideDuration),
+                    value: AppFormat.duration(ls.rideDuration),
                     unit: "",
                     label: "DURATION",
                     isPrimary: true
@@ -2653,21 +2589,21 @@ struct OutdoorDashboardView: View {
             HStack(spacing: 10) {
                 metricCell(
                     value: AppFormat.distanceString(
-                        locationManager.totalDistance, imperial: isImperial),
+                        ls.totalDistance, imperial: isImperial),
                     unit: AppFormat.distanceUnit(imperial: isImperial),
                     label: "DISTANCE",
                     isPrimary: false
                 )
                 metricCell(
                     value: AppFormat.elevationString(
-                        locationManager.totalElevationGain, imperial: isImperial),
+                        ls.totalElevationGain, imperial: isImperial),
                     unit: AppFormat.elevationUnit(imperial: isImperial),
                     label: "ELEVATION",
                     isPrimary: false
                 )
                 metricCell(
                     value: AppFormat.speedString(
-                        locationManager.averageSpeed, imperial: isImperial),
+                        ls.averageSpeed, imperial: isImperial),
                     unit: AppFormat.speedUnit(imperial: isImperial),
                     label: "AVG",
                     isPrimary: false
@@ -2675,7 +2611,7 @@ struct OutdoorDashboardView: View {
             }
 
             // Grade row
-            if locationManager.isRecording {
+            if ls.isRecording {
                 gradeMetricCell
             }
         }
@@ -2713,7 +2649,7 @@ struct OutdoorDashboardView: View {
     }
 
     private var gradeMetricCell: some View {
-        let grade = locationManager.currentGrade
+        let grade = ls.currentGrade
         let symbol: String
         let color: Color
         if grade > 0.5 {
@@ -2753,30 +2689,30 @@ struct OutdoorDashboardView: View {
     private var sensorRow: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                if bleManager.hrConnectionState.isConnected {
+                if viewModel.isHRMonitorConnected {
                     compactSensorMetric(
                         icon: "heart.fill",
                         iconColor: AppColor.heartRate,
-                        value: "\(bleManager.smoothedHR)",
+                        value: "\(viewModel.smoothedHeartRate)",
                         unit: "bpm",
                         border: AppColor.heartRate.opacity(0.35)
                     )
                 }
-                if bleManager.trainerConnectionState.isConnected {
+                if viewModel.isTrainerConnected {
                     compactSensorMetric(
                         icon: "bolt.fill",
                         iconColor: AppColor.mango,
-                        value: "\(bleManager.smoothedPower)",
+                        value: "\(viewModel.smoothedPower)",
                         unit: "W",
                         border: AppColor.mango.opacity(0.35)
                     )
                 }
             }
-            if bleManager.metrics.cadence > 0 {
+            if viewModel.sensorCadence > 0 {
                 compactSensorMetric(
                     icon: "arrow.trianglehead.2.clockwise.rotate.90",
                     iconColor: AppColor.blue,
-                    value: "\(bleManager.metrics.cadence)",
+                    value: "\(viewModel.sensorCadence)",
                     unit: "rpm",
                     border: AppColor.blue.opacity(0.35)
                 )
@@ -2838,14 +2774,14 @@ struct OutdoorDashboardView: View {
             // Duration + Distance
             HStack(spacing: 12) {
                 metricCell(
-                    value: AppFormat.duration(locationManager.rideDuration),
+                    value: AppFormat.duration(ls.rideDuration),
                     unit: "",
                     label: "DURATION",
                     isPrimary: false
                 )
                 metricCell(
                     value: AppFormat.distanceString(
-                        locationManager.totalDistance, imperial: isImperial),
+                        ls.totalDistance, imperial: isImperial),
                     unit: AppFormat.distanceUnit(imperial: isImperial),
                     label: "DISTANCE",
                     isPrimary: false
@@ -2867,26 +2803,26 @@ struct OutdoorDashboardView: View {
             HStack(spacing: 12) {
                 metricCell(
                     value: AppFormat.elevationString(
-                        locationManager.totalElevationGain, imperial: isImperial),
+                        ls.totalElevationGain, imperial: isImperial),
                     unit: AppFormat.elevationUnit(imperial: isImperial),
                     label: "ELEVATION",
                     isPrimary: false
                 )
                 metricCell(
                     value: AppFormat.speedString(
-                        locationManager.averageSpeed, imperial: isImperial),
+                        ls.averageSpeed, imperial: isImperial),
                     unit: AppFormat.speedUnit(imperial: isImperial),
                     label: "AVG SPEED",
                     isPrimary: false
                 )
                 metricCell(
-                    value: AppFormat.speedString(locationManager.maxSpeed, imperial: isImperial),
+                    value: AppFormat.speedString(ls.maxSpeed, imperial: isImperial),
                     unit: AppFormat.speedUnit(imperial: isImperial),
                     label: "MAX",
                     isPrimary: false
                 )
             }
-            if locationManager.isRecording {
+            if ls.isRecording {
                 gradeMetricCell
             }
         }
@@ -2943,15 +2879,15 @@ struct OutdoorDashboardView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 14))
                 .foregroundStyle(AppColor.yellow)
-            Text("Off course — \(Int(navigationService.deviationDistance))m away")
+            Text("Off course — \(Int(ns.deviationDistance))m away")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(chromeNavPrimary(surface))
             Spacer()
-            if navigationService.mode == .turnByTurn {
+            if ns.mode == .turnByTurn {
                 Button("Re-route") {
                     Task {
-                        if let loc = locationManager.currentLocation {
-                            await navigationService.reroute(from: loc.coordinate)
+                        if let loc = ls.currentLocation {
+                            await ns.reroute(from: loc.coordinate)
                         }
                     }
                 }
@@ -2991,7 +2927,7 @@ struct OutdoorDashboardView: View {
 
     @ViewBuilder
     private var climbBanner: some View {
-        if locationManager.isRecording, let climb = locationManager.activeClimb {
+        if ls.isRecording, let climb = ls.activeClimb {
             HStack(spacing: 8) {
                 Image(systemName: "mountain.2.fill")
                     .font(.system(size: 13))
@@ -3020,7 +2956,7 @@ struct OutdoorDashboardView: View {
 
     @ViewBuilder
     private var lapToastView: some View {
-        if showLapToast, let lap = latestLapRecord {
+        if viewModel.showLapToast, let lap = viewModel.latestLapRecord {
             VStack(spacing: 2) {
                 Text("Lap \(lap.number) complete")
                     .font(.system(size: 13, weight: .bold))
@@ -3047,9 +2983,9 @@ struct OutdoorDashboardView: View {
     /// End/Discard are in the top-right overlay when recording.
     @ViewBuilder
     private var compactDrawerBottom: some View {
-        if !locationManager.isRecording {
+        if !ls.isRecording {
             Button {
-                locationManager.startRecording()
+                viewModel.startRide(using: ls)
             } label: {
                 Text("Start ride")
                     .font(.system(size: 17, weight: .bold))
@@ -3065,10 +3001,10 @@ struct OutdoorDashboardView: View {
 
     private var controlBar: some View {
         HStack(spacing: 12) {
-            if locationManager.isRecording {
+            if ls.isRecording {
                 // Discard
                 Button {
-                    showDiscardConfirmation = true
+                    viewModel.presentDiscardConfirmation()
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 16, weight: .semibold))
@@ -3080,7 +3016,7 @@ struct OutdoorDashboardView: View {
                 }
 
                 // Pause / Resume
-                if locationManager.isAutoPaused {
+                if ls.isAutoPaused {
                     Text("AUTO-PAUSED")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(AppColor.yellow)
@@ -3099,7 +3035,7 @@ struct OutdoorDashboardView: View {
 
                 // End
                 Button {
-                    showEndConfirmation = true
+                    viewModel.presentEndConfirmation()
                 } label: {
                     Text("END")
                         .font(.system(size: 15, weight: .bold))
@@ -3113,7 +3049,7 @@ struct OutdoorDashboardView: View {
             } else {
                 // Start — explicit ride begin (no auto-start on screen open)
                 Button {
-                    locationManager.startRecording()
+                    viewModel.startRide(using: ls)
                 } label: {
                     Text("Start ride")
                         .font(.system(size: 17, weight: .bold))
@@ -3133,7 +3069,7 @@ struct OutdoorDashboardView: View {
     private var routePlanningSheet: some View {
         NavigationStack {
             Group {
-                switch routeSheetPage {
+                switch viewModel.routeSheetPage {
                 case .menu:
                     routeMenuPage
                 case .search:
@@ -3145,9 +3081,9 @@ struct OutdoorDashboardView: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .preferredColorScheme(.dark)
-        .interactiveDismissDisabled(navigationService.isCalculating)
+        .interactiveDismissDisabled(ns.isCalculating)
         .overlay {
-            if navigationService.isCalculating {
+            if ns.isCalculating {
                 ZStack {
                     Color.black.opacity(0.42)
                         .ignoresSafeArea()
@@ -3175,23 +3111,22 @@ struct OutdoorDashboardView: View {
                     title: "Free ride", subtitle: "No route — just ride and record",
                     icon: "figure.outdoor.cycle"
                 ) {
-                    navigationService.clearNavigation()
-                    routeManager.clearRoute()
-                    showRouteSheet = false
+                    viewModel.clearRouteSelection()
+                    viewModel.dismissRouteSheet()
                 }
                 menuActionButton(
                     title: "Import GPX", subtitle: "Load a .gpx file from Files",
                     icon: "doc.badge.arrow.up"
                 ) {
-                    showRouteImporter = true
+                    viewModel.presentRouteImporter()
                 }
                 menuActionButton(
                     title: "Navigate to destination", subtitle: "Apple Maps cycling directions",
                     icon: "arrow.triangle.turn.up.right.diamond"
                 ) {
-                    routeSheetPage = .search
+                    viewModel.showRouteSearch()
                 }
-                Toggle(isOn: $isHybridMapStyle) {
+                Toggle(isOn: binding(\.isHybridMapStyle)) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Satellite / hybrid map")
                             .font(.system(size: 15, weight: .semibold))
@@ -3206,10 +3141,9 @@ struct OutdoorDashboardView: View {
                 .background(Color.white.opacity(0.04))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                if hasActiveRoute || routeManager.hasRoute {
+                if hasActiveRoute || viewModel.hasRoute {
                     Button(role: .destructive) {
-                        navigationService.clearNavigation()
-                        routeManager.clearRoute()
+                        viewModel.clearRouteSelection()
                     } label: {
                         Text("Clear route")
                             .font(.system(size: 15, weight: .semibold))
@@ -3226,7 +3160,7 @@ struct OutdoorDashboardView: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") {
-                    showRouteSheet = false
+                    viewModel.dismissRouteSheet()
                 }
                 .foregroundStyle(AppColor.mango)
             }
@@ -3269,9 +3203,9 @@ struct OutdoorDashboardView: View {
                 selectDestination(item)
             },
             onBack: {
-                routeSheetPage = .menu
+                viewModel.routeSheetPage = .menu
             },
-            searchBiasCoordinate: locationManager.destinationSearchBiasCoordinate,
+            searchBiasCoordinate: mapCameraService.destinationSearchBiasCoordinate,
             searchMapBias: destinationSearchMapBias
         )
     }
@@ -3280,113 +3214,66 @@ struct OutdoorDashboardView: View {
 
     /// Prefetch cycling directions on the setup screen, then leave setup only when the route is ready.
     private func startNavigation() {
-        guard let dest = selectedDestination else { return }
-        guard let loc = locationManager.currentLocation else {
-            routeBuildError = "Location unavailable. Wait for GPS or try near a window."
-            return
-        }
         Task { @MainActor in
-            await navigationService.calculateRoute(from: loc.coordinate, to: dest)
-            if navigationService.lastError == nil, navigationService.mode == .turnByTurn {
-                showSetupPhase = false
-            } else if let err = navigationService.lastError {
-                routeBuildError = err
-            } else {
-                routeBuildError = "No cycling route found."
-            }
+            _ = await viewModel.startNavigation(
+                destination: viewModel.selectedDestination,
+                currentLocation: ls.currentLocation
+            )
         }
     }
 
     /// Same prefetch flow when picking a destination from the in-ride route sheet.
     private func selectDestination(_ item: MKMapItem) {
-        guard let loc = locationManager.currentLocation else {
-            routeBuildError = "Location unavailable. Wait for GPS or try near a window."
-            return
-        }
         Task { @MainActor in
-            await navigationService.calculateRoute(from: loc.coordinate, to: item)
-            if navigationService.lastError == nil, navigationService.mode == .turnByTurn {
+            if await viewModel.selectDestination(
+                item,
+                currentLocation: ls.currentLocation
+            ) {
                 // Brief delay so user sees the route land on the map before sheet closes.
                 try? await Task.sleep(for: .milliseconds(400))
-                routeSheetPage = .menu
-                showRouteSheet = false
-            } else if let err = navigationService.lastError {
-                routeBuildError = err
-            } else {
-                routeBuildError = "No cycling route found."
             }
         }
     }
 
     private func endRide() {
-        locationManager.stopRecording()
+        ls.stopRecording()
+        let plannedRouteDistanceMeters =
+            ns.routeDistance > 0
+            ? ns.routeDistance
+            : (viewModel.hasRoute ? viewModel.totalRouteDistance : 0)
 
-        // Save workout to SwiftData
-        let workout = Workout(startDate: Date().addingTimeInterval(-locationManager.rideDuration))
-        workout.duration = locationManager.rideDuration
-        workout.distance = locationManager.totalDistance
-        workout.elevationGain = locationManager.totalElevationGain
-        workout.avgSpeed = locationManager.averageSpeed
-        workout.endDate = .now
-        workout.status = .completed
-
-        let planned =
-            navigationService.routeDistance > 0
-            ? navigationService.routeDistance
-            : (routeManager.hasRoute ? routeManager.totalDistance : 0)
-        workout.plannedRouteDistanceMeters = planned
-
-        switch navigationService.mode {
+        let rideModeDraft: OutdoorRideModeDraft
+        switch ns.mode {
         case .freeRide:
-            workout.savedRouteKindRaw = SavedRouteKind.free.rawValue
-            workout.savedRouteName = nil
-            workout.routeDestinationSummary = nil
-            workout.notes = "Outdoor free ride"
+            rideModeDraft = .freeRide
         case .followRoute:
-            workout.savedRouteKindRaw = SavedRouteKind.gpx.rawValue
-            workout.savedRouteName = navigationService.routeName ?? routeManager.routeName
-            workout.routeDestinationSummary = nil
-            workout.notes = "Outdoor ride — GPX route: \(workout.savedRouteName ?? "route")"
+            rideModeDraft = .followRoute(routeName: ns.routeName ?? viewModel.routeName)
         case .turnByTurn:
-            workout.savedRouteKindRaw = SavedRouteKind.directions.rawValue
-            workout.savedRouteName = navigationService.routeName
-            workout.routeDestinationSummary = navigationService.destination?.addressRepresentations?
-                .fullAddress(includingRegion: true, singleLine: true)
-            let dest = navigationService.destination?.name ?? "destination"
-            workout.notes = "Outdoor ride — directions to \(dest)"
+            rideModeDraft = .turnByTurn(
+                routeName: ns.routeName,
+                destinationName: ns.destination?.name,
+                destinationSummary: ns.destination?.addressRepresentations?
+                    .fullAddress(includingRegion: true, singleLine: true)
+            )
         }
 
-        modelContext.insert(workout)
-
-        for lap in locationManager.completedLaps {
-            let split = LapSplit(lapNumber: lap.number, startTime: lap.startedAt)
-            split.endTime = lap.endedAt
-            split.duration = lap.duration
-            split.distance = lap.distanceMeters
-            split.avgSpeed = lap.avgSpeedKmh
-            split.avgPower = 0
-            split.maxPower = 0
-            split.avgCadence = 0
-            split.avgHR = 0
-            split.workout = workout
-            modelContext.insert(split)
-        }
-
-        try? modelContext.save()
-        MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
-
-        Task { await healthKitManager.saveCyclingWorkoutToHealthIfEnabled(workout) }
-
-        // Pop outdoor dashboard and push summary — batched so there's no flash.
-        let finishedWorkoutID = workout.id
-        mapWaypoints.removeAll()
+        let finishedWorkoutID = viewModel.completeRide(
+            session: OutdoorRideSessionSnapshot(
+                rideDuration: ls.rideDuration,
+                totalDistance: ls.totalDistance,
+                totalElevationGain: ls.totalElevationGain,
+                averageSpeed: ls.averageSpeed,
+                completedLaps: ls.completedLaps
+            ),
+            plannedRouteDistanceMeters: plannedRouteDistanceMeters,
+            mode: rideModeDraft
+        )
         navigationPath.removeLast()
         navigationPath.append(AppRoute.summary(workoutID: finishedWorkoutID))
     }
 
     private func discardRide() {
-        locationManager.stopRecording()
-        mapWaypoints.removeAll()
+        viewModel.discardRide(using: ls)
         navigationPath.removeLast()
     }
 }

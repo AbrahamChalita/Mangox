@@ -38,10 +38,6 @@ private struct ConnectedDeviceStateRow: Identifiable {
 }
 
 struct ConnectionView: View {
-    @Environment(BLEManager.self) private var bleManager
-    @Environment(DataSourceCoordinator.self) private var dataSource
-    @Environment(RouteManager.self) private var routeManager
-    @Environment(LocationManager.self) private var locationManager
     @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
@@ -55,6 +51,35 @@ struct ConnectionView: View {
     var indoorRideLocked: Bool = false
     /// Pair HR + speed/cadence for outdoor rides — no trainer, route, or start-ride CTA.
     var outdoorSensorsOnly: Bool = false
+
+    let bleService: BLEServiceProtocol
+    let dataSourceService: DataSourceServiceProtocol
+    let routeService: RouteServiceProtocol
+    let locationService: LocationServiceProtocol
+
+    init(
+        navigationPath: Binding<NavigationPath>,
+        startMode: ConnectionStartMode = .ride,
+        planID: String? = nil,
+        planDayID: String? = nil,
+        indoorRideLocked: Bool = false,
+        outdoorSensorsOnly: Bool = false,
+        bleService: BLEServiceProtocol,
+        dataSourceService: DataSourceServiceProtocol,
+        routeService: RouteServiceProtocol,
+        locationService: LocationServiceProtocol
+    ) {
+        self._navigationPath = navigationPath
+        self.startMode = startMode
+        self.planID = planID
+        self.planDayID = planDayID
+        self.indoorRideLocked = indoorRideLocked
+        self.outdoorSensorsOnly = outdoorSensorsOnly
+        self.bleService = bleService
+        self.dataSourceService = dataSourceService
+        self.routeService = routeService
+        self.locationService = locationService
+    }
 
     @State private var showRouteImporter = false
     @State private var routeImportError: String?
@@ -78,20 +103,20 @@ struct ConnectionView: View {
     private var canStartRide: Bool {
         if outdoorSensorsOnly { return true }
         guard startMode == .ride else {
-            return dataSource.isConnected
+            return dataSourceService.isConnected
         }
 
         switch rideLaunchMode {
         case .indoor:
-            return bleManager.trainerConnectionState.isConnected
-                || dataSource.wifiConnectionState.isConnected
+            return bleService.trainerConnectionState.isConnected
+                || dataSourceService.wifiConnectionState.isConnected
         case .outdoor:
             return true
         }
     }
 
     private var wifiStateAsBLE: BLEConnectionState {
-        switch dataSource.wifiConnectionState {
+        switch dataSourceService.wifiConnectionState {
         case .disconnected: return .disconnected
         case .discovering: return .scanning
         case .connecting(let name): return .connecting(name)
@@ -109,9 +134,9 @@ struct ConnectionView: View {
     private var showCSCStatusRow: Bool { outdoorSensorsOnly }
 
     private var trainerStatusBannerTitle: String {
-        switch bleManager.trainerConnectionState {
+        switch bleService.trainerConnectionState {
         case .connected:
-            return bleManager.connectedTrainerName ?? "Connected"
+            return bleService.connectedTrainerName ?? "Connected"
         case .connecting(let name):
             return "Connecting to \(name)…"
         case .scanning:
@@ -122,7 +147,7 @@ struct ConnectionView: View {
     }
 
     private var wifiStatusBannerTitle: String {
-        switch dataSource.wifiConnectionState {
+        switch dataSourceService.wifiConnectionState {
         case .connected(let name), .connecting(let name):
             return name
         case .error(let message):
@@ -136,9 +161,9 @@ struct ConnectionView: View {
     }
 
     private var heartRateStatusBannerTitle: String {
-        switch bleManager.hrConnectionState {
+        switch bleService.hrConnectionState {
         case .connected:
-            return bleManager.connectedHRName ?? "Connected"
+            return bleService.connectedHRName ?? "Connected"
         case .connecting(let name):
             return "Connecting to \(name)…"
         case .scanning:
@@ -149,9 +174,9 @@ struct ConnectionView: View {
     }
 
     private var cscStatusBannerTitle: String {
-        switch bleManager.cscConnectionState {
+        switch bleService.cscConnectionState {
         case .connected:
-            return bleManager.connectedCSCName ?? "Connected"
+            return bleService.connectedCSCName ?? "Connected"
         case .connecting(let name):
             return "Connecting to \(name)…"
         case .scanning:
@@ -162,7 +187,7 @@ struct ConnectionView: View {
     }
 
     private var wifiStatusBannerAccent: Color? {
-        if case .error = dataSource.wifiConnectionState { return AppColor.orange }
+        if case .error = dataSourceService.wifiConnectionState { return AppColor.orange }
         return nil
     }
 
@@ -177,7 +202,7 @@ struct ConnectionView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 20)
 
-                    if bleManager.bluetoothState != .poweredOn
+                    if bleService.bluetoothState != .poweredOn
                         && (rideLaunchMode == .indoor || outdoorSensorsOnly)
                     {
                         bluetoothOffCard
@@ -264,7 +289,7 @@ struct ConnectionView: View {
             .scrollIndicators(.hidden)
 
             // Sticky bottom action bar
-            if bleManager.bluetoothState == .poweredOn
+            if bleService.bluetoothState == .poweredOn
                 || (startMode == .ride && rideLaunchMode == .outdoor) || outdoorSensorsOnly
             {
                 stickyActionBar
@@ -285,8 +310,8 @@ struct ConnectionView: View {
             }
         }
         .onAppear {
-            locationManager.setup()
-            dataSource.updateActiveSource()
+            locationService.setup()
+            dataSourceService.updateActiveSource()
             syncRideGoalDistanceFromPrefs()
             if indoorRideLocked {
                 rideLaunchMode = .indoor
@@ -295,19 +320,19 @@ struct ConnectionView: View {
                 selectedCustomTemplateID = nil
             }
             if outdoorSensorsOnly {
-                if bleManager.bluetoothState == .poweredOn {
-                    bleManager.reconnectOrScan()
+                if bleService.bluetoothState == .poweredOn {
+                    bleService.reconnectOrScan()
                 }
             } else if rideLaunchMode == .indoor,
-                bleManager.bluetoothState == .poweredOn,
-                !bleManager.trainerConnectionState.isConnected
+                bleService.bluetoothState == .poweredOn,
+                !bleService.trainerConnectionState.isConnected
             {
-                bleManager.reconnectOrScan()
+                bleService.reconnectOrScan()
             }
         }
         .onDisappear {
-            bleManager.stopScan()
-            dataSource.stopWiFiDiscovery()
+            bleService.stopScan()
+            dataSourceService.stopWiFiDiscovery()
         }
         .fileImporter(
             isPresented: $showRouteImporter,
@@ -319,7 +344,7 @@ struct ConnectionView: View {
                 guard let url = urls.first else { return }
                 Task {
                     do {
-                        try await routeManager.loadGPX(from: url)
+                        try await routeService.loadGPX(from: url)
                     } catch {
                         await MainActor.run {
                             routeImportError = error.localizedDescription
@@ -442,7 +467,7 @@ struct ConnectionView: View {
                     icon: "bicycle",
                     category: "Trainer",
                     title: trainerStatusBannerTitle,
-                    state: bleManager.trainerConnectionState
+                    state: bleService.trainerConnectionState
                 )
                 .frame(maxWidth: .infinity)
             }
@@ -460,7 +485,7 @@ struct ConnectionView: View {
                 icon: "heart.fill",
                 category: "Heart rate",
                 title: heartRateStatusBannerTitle,
-                state: bleManager.hrConnectionState
+                state: bleService.hrConnectionState
             )
             .frame(maxWidth: .infinity)
             if showCSCStatusRow {
@@ -468,7 +493,7 @@ struct ConnectionView: View {
                     icon: "arrow.trianglehead.2.clockwise.rotate.90",
                     category: "Speed / cadence",
                     title: cscStatusBannerTitle,
-                    state: bleManager.cscConnectionState
+                    state: bleService.cscConnectionState
                 )
                 .frame(maxWidth: .infinity)
             }
@@ -483,7 +508,7 @@ struct ConnectionView: View {
                     icon: "bicycle",
                     category: "Trainer",
                     title: trainerStatusBannerTitle,
-                    state: bleManager.trainerConnectionState
+                    state: bleService.trainerConnectionState
                 )
             }
             if showWiFiStatusRow {
@@ -503,7 +528,7 @@ struct ConnectionView: View {
                 icon: "heart.fill",
                 category: "Heart rate",
                 title: heartRateStatusBannerTitle,
-                state: bleManager.hrConnectionState
+                state: bleService.hrConnectionState
             )
             if showCSCStatusRow {
                 connectionStatusDivider
@@ -511,7 +536,7 @@ struct ConnectionView: View {
                     icon: "arrow.trianglehead.2.clockwise.rotate.90",
                     category: "Speed / cadence",
                     title: cscStatusBannerTitle,
-                    state: bleManager.cscConnectionState
+                    state: bleService.cscConnectionState
                 )
             }
         }
@@ -661,11 +686,11 @@ struct ConnectionView: View {
 
     private var scanButton: some View {
         Button {
-            if bleManager.isScanningForDevices {
-                bleManager.stopScan()
+            if bleService.isScanningForDevices {
+                bleService.stopScan()
                 scanPulse = false
             } else {
-                bleManager.startScan()
+                bleService.startScan()
                 if accessibilityReduceMotion {
                     scanPulse = true
                 } else {
@@ -677,7 +702,7 @@ struct ConnectionView: View {
         } label: {
             HStack(spacing: 10) {
                 ZStack {
-                    if bleManager.isScanningForDevices {
+                    if bleService.isScanningForDevices {
                         Circle()
                             .fill(accentSuccess.opacity(scanPulse ? 0.2 : 0.05))
                             .frame(width: 36, height: 36)
@@ -703,11 +728,11 @@ struct ConnectionView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(bleManager.isScanningForDevices ? "Scanning…" : "Scan for Devices")
+                    Text(bleService.isScanningForDevices ? "Scanning…" : "Scan for Devices")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
                     Text(
-                        bleManager.isScanningForDevices
+                        bleService.isScanningForDevices
                             ? "Tap to stop"
                             : (outdoorSensorsOnly
                                 ? "Find speed/cadence sensors & heart rate monitors"
@@ -720,7 +745,7 @@ struct ConnectionView: View {
                 Spacer()
 
                 Image(
-                    systemName: bleManager.isScanningForDevices ? "stop.circle" : "arrow.clockwise"
+                    systemName: bleService.isScanningForDevices ? "stop.circle" : "arrow.clockwise"
                 )
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(accentSuccess.opacity(0.6))
@@ -742,20 +767,20 @@ struct ConnectionView: View {
 
     private var connectedDeviceRows: [ConnectedDeviceStateRow] {
         var rows: [ConnectedDeviceStateRow] = []
-        if !outdoorSensorsOnly, let name = bleManager.connectedTrainerName {
+        if !outdoorSensorsOnly, let name = bleService.connectedTrainerName {
             rows.append(
                 ConnectedDeviceStateRow(
-                    name: name, type: .trainer, state: bleManager.trainerConnectionState))
+                    name: name, type: .trainer, state: bleService.trainerConnectionState))
         }
-        if let name = bleManager.connectedHRName {
+        if let name = bleService.connectedHRName {
             rows.append(
                 ConnectedDeviceStateRow(
-                    name: name, type: .heartRateMonitor, state: bleManager.hrConnectionState))
+                    name: name, type: .heartRateMonitor, state: bleService.hrConnectionState))
         }
-        if let name = bleManager.connectedCSCName {
+        if let name = bleService.connectedCSCName {
             rows.append(
                 ConnectedDeviceStateRow(
-                    name: name, type: .cyclingSpeedCadence, state: bleManager.cscConnectionState))
+                    name: name, type: .cyclingSpeedCadence, state: bleService.cscConnectionState))
         }
         return rows
     }
@@ -768,7 +793,7 @@ struct ConnectionView: View {
         // already-connected devices. Discovered peripherals whose name matches a
         // connected device are considered duplicates.
         let connectedNames = Set(connectedDeviceRows.map(\.name))
-        for d in bleManager.discoveredPeripherals where connectedNames.contains(d.name) {
+        for d in bleService.discoveredPeripherals where connectedNames.contains(d.name) {
             ids.insert(d.id)
         }
         return ids
@@ -779,7 +804,7 @@ struct ConnectionView: View {
         let dupIDs = connectedPeripheralIDs
 
         // Scan results minus already-connected devices
-        let scanResults = bleManager.discoveredPeripherals.filter { !dupIDs.contains($0.id) }
+        let scanResults = bleService.discoveredPeripherals.filter { !dupIDs.contains($0.id) }
         let scanForDisplay =
             outdoorSensorsOnly ? scanResults.filter { $0.deviceType != .trainer } : scanResults
         let trainers = scanForDisplay.filter { $0.deviceType == .trainer }
@@ -832,13 +857,13 @@ struct ConnectionView: View {
                     }
 
                     // Scanning indicator at the bottom when there are already items
-                    if bleManager.isScanningForDevices && !scanForDisplay.isEmpty {
+                    if bleService.isScanningForDevices && !scanForDisplay.isEmpty {
                         sectionDivider
                         scanningFooter
                     }
 
                     // Gentle prompt to scan for more when idle with connected devices but no scan results
-                    if !connected.isEmpty && !hasScanResults && !bleManager.isScanningForDevices {
+                    if !connected.isEmpty && !hasScanResults && !bleService.isScanningForDevices {
                         sectionDivider
                         scanForMorePrompt
                     }
@@ -856,19 +881,19 @@ struct ConnectionView: View {
     // MARK: - WiFi Trainers Card
 
     private var isWiFiDiscovering: Bool {
-        if case .discovering = dataSource.wifiConnectionState { return true }
+        if case .discovering = dataSourceService.wifiConnectionState { return true }
         return false
     }
 
     private var isWiFiConnecting: Bool {
-        if case .connecting = dataSource.wifiConnectionState { return true }
+        if case .connecting = dataSourceService.wifiConnectionState { return true }
         return false
     }
 
     private var wifiTrainersCard: some View {
-        let wifiState = dataSource.wifiConnectionState
-        let connectedID = dataSource.wifiService.connectedTrainer?.id
-        let trainers = dataSource.discoveredWiFiTrainers.filter { t in
+        let wifiState = dataSourceService.wifiConnectionState
+        let connectedID = dataSourceService.connectedWiFiTrainer?.id
+        let trainers = dataSourceService.discoveredWiFiTrainers.filter { t in
             guard let connectedID else { return true }
             return t.id != connectedID
         }
@@ -908,7 +933,7 @@ struct ConnectionView: View {
                     .frame(height: 1)
                     .padding(.horizontal, 16)
 
-                if wifiState.isConnected, let connected = dataSource.wifiService.connectedTrainer {
+                if wifiState.isConnected, let connected = dataSourceService.connectedWiFiTrainer {
                     wifiConnectedRow(trainer: connected)
                 }
 
@@ -961,9 +986,9 @@ struct ConnectionView: View {
     private var wifiTrainerDiscoveryButton: some View {
         Button {
             if isWiFiDiscovering {
-                dataSource.stopWiFiDiscovery()
+                dataSourceService.stopWiFiDiscovery()
             } else {
-                dataSource.startWiFiDiscovery()
+                dataSourceService.startWiFiDiscovery()
             }
         } label: {
             HStack(spacing: 10) {
@@ -1038,7 +1063,7 @@ struct ConnectionView: View {
             Spacer()
 
             Button("Disconnect") {
-                dataSource.disconnectWiFi()
+                dataSourceService.disconnectWiFi()
             }
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(accentOrange)
@@ -1070,7 +1095,7 @@ struct ConnectionView: View {
     private func wifiTrainerRow(trainer: DiscoveredWiFiTrainer, connectDisabled: Bool) -> some View
     {
         Button {
-            dataSource.connectWiFi(to: trainer)
+            dataSourceService.connectWiFi(to: trainer)
         } label: {
             HStack(spacing: 12) {
                 ZStack {
@@ -1214,7 +1239,7 @@ struct ConnectionView: View {
 
     private var scanForMorePrompt: some View {
         Button {
-            bleManager.startScan()
+            bleService.startScan()
             if accessibilityReduceMotion {
                 scanPulse = true
             } else {
@@ -1246,7 +1271,7 @@ struct ConnectionView: View {
 
     private var emptyDevicesPlaceholder: some View {
         VStack(spacing: 10) {
-            if bleManager.isScanningForDevices {
+            if bleService.isScanningForDevices {
                 HStack(spacing: 10) {
                     ForEach(0..<3) { i in
                         RoundedRectangle(cornerRadius: 8)
@@ -1359,10 +1384,10 @@ struct ConnectionView: View {
     private func deviceRow(device: DiscoveredPeripheral, type: DeviceType) -> some View {
         let connState: BLEConnectionState = {
             switch type {
-            case .trainer: return bleManager.trainerConnectionState
-            case .heartRateMonitor: return bleManager.hrConnectionState
-            case .cyclingSpeedCadence: return bleManager.cscConnectionState
-            case .unknown: return bleManager.trainerConnectionState
+            case .trainer: return bleService.trainerConnectionState
+            case .heartRateMonitor: return bleService.hrConnectionState
+            case .cyclingSpeedCadence: return bleService.cscConnectionState
+            case .unknown: return bleService.trainerConnectionState
             }
         }()
         let isThisConnected = {
@@ -1387,10 +1412,10 @@ struct ConnectionView: View {
 
         return Button {
             switch type {
-            case .trainer: bleManager.connectTrainer(device.peripheral)
-            case .heartRateMonitor: bleManager.connectHRMonitor(device.peripheral)
-            case .cyclingSpeedCadence: bleManager.connectCSCSensor(device.peripheral)
-            case .unknown: bleManager.connectTrainer(device.peripheral)
+            case .trainer: bleService.connectTrainer(device.peripheral)
+            case .heartRateMonitor: bleService.connectHRMonitor(device.peripheral)
+            case .cyclingSpeedCadence: bleService.connectCSCSensor(device.peripheral)
+            case .unknown: bleService.connectTrainer(device.peripheral)
             }
         } label: {
             HStack(spacing: 12) {
@@ -1587,7 +1612,7 @@ struct ConnectionView: View {
 
     private var routeCard: some View {
         VStack(spacing: 0) {
-            if routeManager.hasRoute {
+            if routeService.hasRoute {
                 loadedRouteCard
             } else {
                 emptyRouteCard
@@ -1602,7 +1627,7 @@ struct ConnectionView: View {
                 )
         )
         .animation(.easeInOut(duration: 0.2), value: routeDropTargeted)
-        .animation(.easeInOut(duration: 0.35), value: routeManager.hasRoute)
+        .animation(.easeInOut(duration: 0.35), value: routeService.hasRoute)
     }
 
     private var emptyRouteCard: some View {
@@ -1683,9 +1708,9 @@ struct ConnectionView: View {
     private var loadedRouteCard: some View {
         VStack(spacing: 0) {
             // Map preview
-            if let region = routeManager.cameraRegion {
+            if let region = routeService.cameraRegion {
                 Map(initialPosition: .region(region)) {
-                    ForEach(Array(routeManager.polylineSegments.enumerated()), id: \.offset) {
+                    ForEach(Array(routeService.polylineSegments.enumerated()), id: \.offset) {
                         _, segment in
                         let coordinates = segment.sanitizedForMapPolyline()
                         if coordinates.count > 1 {
@@ -1700,10 +1725,10 @@ struct ConnectionView: View {
                 .overlay(alignment: .topTrailing) {
                     // Route stats overlay
                     VStack(alignment: .trailing, spacing: 4) {
-                        Text(String(format: "%.1f km", routeManager.totalDistance / 1000))
+                        Text(String(format: "%.1f km", routeService.totalDistance / 1000))
                             .font(.system(size: 13, weight: .bold, design: .monospaced))
                             .foregroundStyle(.white)
-                        Text("\(routeManager.points.count) points")
+                        Text("\(routeService.points.count) points")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.7))
                     }
@@ -1721,7 +1746,7 @@ struct ConnectionView: View {
                     .foregroundStyle(accentSuccess)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(routeManager.routeName ?? "Route loaded")
+                    Text(routeService.routeName ?? "Route loaded")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.85))
                         .lineLimit(1)
@@ -1739,7 +1764,7 @@ struct ConnectionView: View {
                         Label("Replace Route", systemImage: "arrow.triangle.2.circlepath")
                     }
                     Button(role: .destructive) {
-                        withAnimation { routeManager.clearRoute() }
+                        withAnimation { routeService.clearRoute() }
                     } label: {
                         Label("Remove Route", systemImage: "trash")
                     }
@@ -1759,9 +1784,9 @@ struct ConnectionView: View {
 
     private var routeSubtitle: String {
         let base = String(
-            format: "%.1f km · %d waypoints", routeManager.totalDistance / 1000,
-            routeManager.points.count)
-        let gain = Int(routeManager.totalElevationGain.rounded())
+            format: "%.1f km · %d waypoints", routeService.totalDistance / 1000,
+            routeService.points.count)
+        let gain = Int(routeService.totalElevationGain.rounded())
         if gain > 0 {
             return "\(base) · +\(gain)m"
         }
@@ -2165,7 +2190,7 @@ struct ConnectionView: View {
             switch startMode {
             case .ride:
                 if rideLaunchMode == .outdoor {
-                    return routeManager.hasRoute
+                    return routeService.hasRoute
                         ? "Ready — GPX route will be followed outdoors"
                         : "Ready — GPS free ride with optional BLE sensors"
                 }
@@ -2175,8 +2200,8 @@ struct ConnectionView: View {
                     return "Ready — guided workout from your library"
                 }
                 if rideLaunchMode == .indoor,
-                    dataSource.wifiConnectionState.isConnected,
-                    !bleManager.trainerConnectionState.isConnected
+                    dataSourceService.wifiConnectionState.isConnected,
+                    !bleService.trainerConnectionState.isConnected
                 {
                     return "Ready — WiFi trainer connected"
                 }
@@ -2201,7 +2226,7 @@ struct ConnectionView: View {
             return
                 "Indoor rides need a Bluetooth or Wi‑Fi trainer and can optionally use a GPX route for simulation."
         case .outdoor:
-            return routeManager.hasRoute
+            return routeService.hasRoute
                 ? "Your loaded GPX route will appear on the outdoor map with off-course tracking."
                 : "Outdoor rides use GPS from your phone and can still show BLE heart rate, cadence, and power."
         }
@@ -2240,7 +2265,7 @@ struct ConnectionView: View {
                     .foregroundStyle(.white.opacity(0.25))
                     .tracking(2)
                 Text(
-                    "BT: \(String(describing: bleManager.bluetoothState.rawValue))  Trainer: \(bleManager.trainerConnectionState.label)  HR: \(bleManager.hrConnectionState.label)  Devices: \(bleManager.discoveredPeripherals.count)"
+                    "BT: \(String(describing: bleService.bluetoothState.rawValue))  Trainer: \(bleService.trainerConnectionState.label)  HR: \(bleService.hrConnectionState.label)  Devices: \(bleService.discoveredPeripherals.count)"
                 )
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.2))

@@ -49,6 +49,12 @@ enum TrainingNotificationsScheduler {
 
     /// Re-applies evening + FTP schedules after the user re-enables training notifications.
     @MainActor
+    static func refreshDeferredSchedules() {
+        refreshDeferredSchedules(modelContext: PersistenceContainer.shared.mainContext)
+    }
+
+    /// Re-applies evening + FTP schedules after the user re-enables training notifications.
+    @MainActor
     static func refreshDeferredSchedules(modelContext: ModelContext) {
         rescheduleEveningPreview(modelContext: modelContext)
         rescheduleFTPReminder()
@@ -62,6 +68,12 @@ enum TrainingNotificationsScheduler {
             guard settings.authorizationStatus == .notDetermined else { return }
             _ = try? await c.requestAuthorization(options: [.alert, .sound, .badge])
         }
+    }
+
+    /// Call when app moves to background to refresh the next evening preview.
+    @MainActor
+    static func rescheduleEveningPreview() {
+        rescheduleEveningPreview(modelContext: PersistenceContainer.shared.mainContext)
     }
 
     /// Call when app moves to background to refresh the next evening preview.
@@ -116,6 +128,12 @@ enum TrainingNotificationsScheduler {
 
         let req = UNNotificationRequest(identifier: idTomorrow, content: content, trigger: trigger)
         center.add(req)
+    }
+
+    /// When app becomes active: one-shot nudge if yesterday had a mandatory key workout that wasn’t completed.
+    @MainActor
+    static func evaluateMissedKeyIfNeeded() {
+        evaluateMissedKeyIfNeeded(modelContext: PersistenceContainer.shared.mainContext)
     }
 
     /// When app becomes active: one-shot nudge if yesterday had a mandatory key workout that wasn’t completed.

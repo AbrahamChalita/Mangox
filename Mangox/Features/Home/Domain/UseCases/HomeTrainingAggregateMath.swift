@@ -7,7 +7,7 @@ struct HomeWorkoutMetricSlice: Sendable {
     let tss: Double
 }
 
-struct HomeWeekBarDTO: Sendable {
+struct HomeWeekBarDTO: Identifiable, Sendable {
     let id: String
     let day: String
     let tss: Double
@@ -24,7 +24,7 @@ struct HomeTrainingCacheDTO: Sendable {
 /// Pure training aggregates for `HomeView` (no SwiftUI / SwiftData types).
 enum HomeTrainingAggregateMath {
 
-    static func compute(
+    nonisolated static func compute(
         slices: [HomeWorkoutMetricSlice],
         now: Date,
         timeZone: TimeZone,

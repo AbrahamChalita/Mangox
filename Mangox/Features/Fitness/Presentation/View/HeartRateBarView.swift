@@ -3,7 +3,6 @@ import SwiftUI
 struct HeartRateBarView: View {
     let heartRate: Int
     var compact: Bool = false
-    @Environment(HealthKitManager.self) private var healthKitManager
 
     private var maxHR: Int {
         HeartRateZone.maxHR

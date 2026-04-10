@@ -50,7 +50,7 @@ struct MangoxApp: App {
                                 .allowsHitTesting(false)
                         }
                 } else {
-                    OnboardingView()
+                    OnboardingView(viewModel: di.makeOnboardingViewModel())
                         .environment(di)
                         .environment(di.locationManager)
                         .environment(di.healthKitManager)
@@ -75,7 +75,6 @@ struct MangoxApp: App {
 
 private struct NotificationLifecycleHook: View {
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         Color.clear
@@ -84,12 +83,12 @@ private struct NotificationLifecycleHook: View {
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
                 case .active:
-                    FitnessSettingsSnapshotBackfill.runIfNeeded(modelContext: modelContext)
-                    TrainingNotificationsScheduler.evaluateMissedKeyIfNeeded(modelContext: modelContext)
+                    FitnessSettingsSnapshotBackfill.runIfNeeded()
+                    TrainingNotificationsScheduler.evaluateMissedKeyIfNeeded()
                     TrainingNotificationsScheduler.rescheduleFTPReminder()
-                    WorkoutRAGIndex.scheduleBackgroundSync(modelContext: modelContext)
+                    WorkoutRAGIndex.scheduleBackgroundSync()
                 case .background:
-                    TrainingNotificationsScheduler.rescheduleEveningPreview(modelContext: modelContext)
+                    TrainingNotificationsScheduler.rescheduleEveningPreview()
                 default:
                     break
                 }

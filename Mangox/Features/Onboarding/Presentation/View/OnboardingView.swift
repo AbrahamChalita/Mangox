@@ -1,7 +1,4 @@
 import SwiftUI
-import CoreBluetooth
-import UserNotifications
-import CoreLocation
 
 // MARK: - Hero graphic
 
@@ -15,27 +12,17 @@ private enum OnboardingHeroGraphic {
 ///
 /// Flow: Welcome → Bluetooth → HealthKit → Notifications → Location → Strava → Get Started
 struct OnboardingView: View {
-    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
-    @Environment(HealthKitManager.self) private var healthKitManager
-    @Environment(LocationManager.self) private var locationManager
-    @Environment(StravaService.self) private var stravaService
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var currentPage = 0
-    @State private var blePermissionGranted = false
-    @State private var healthKitGranted = false
-    @State private var locationGranted = false
-    @State private var notificationsGranted = false
-    @State private var stravaStatus: String?
-    @State private var bleTrigger: CBCentralManager?
-    @State private var welcomeAppeared = false
-    @State private var finishCelebration = false
-    @State private var onboardingWeightKg: Double = RidePreferences.shared.riderWeightKg
-    @State private var onboardingBirthYear: Int = RidePreferences.shared.riderBirthYear ?? (Calendar.current.component(.year, from: .now) - 30)
+    @State private var viewModel: OnboardingViewModel
 
     private let totalPages = 8
 
+    init(viewModel: OnboardingViewModel) {
+        _viewModel = State(initialValue: viewModel)
+    }
+
     private var pageAccent: Color {
-        switch currentPage {
+        switch viewModel.currentStep {
         case 0: return AppColor.mango
         case 1: return AppColor.blue
         case 2: return AppColor.heartRate
@@ -52,7 +39,7 @@ struct OnboardingView: View {
             OnboardingAmbientBackground(accent: pageAccent, reduceMotion: reduceMotion)
 
             VStack(spacing: 0) {
-                TabView(selection: $currentPage) {
+                TabView(selection: binding(\.currentStep)) {
                     welcomePage.tag(0)
                     bluetoothPage.tag(1)
                     healthKitPage.tag(2)
@@ -63,7 +50,7 @@ struct OnboardingView: View {
                     getStartedPage.tag(7)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(reduceMotion ? .none : .easeInOut(duration: 0.35), value: currentPage)
+                .animation(reduceMotion ? .none : .easeInOut(duration: 0.35), value: viewModel.currentStep)
 
                 Spacer()
 
@@ -73,9 +60,9 @@ struct OnboardingView: View {
                 actionButton
                     .padding(.horizontal, 32)
 
-                if currentPage < totalPages - 1 {
-                    Button(isPermissionPage ? "Maybe Later" : "Skip") {
-                        withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) { advancePage() }
+                if viewModel.currentStep < totalPages - 1 {
+                    Button(viewModel.isPermissionPage ? "Maybe Later" : "Skip") {
+                        withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) { viewModel.advance() }
                     }
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.white.opacity(0.35))
@@ -89,10 +76,10 @@ struct OnboardingView: View {
         .onAppear {
             syncWelcomeAppearance()
         }
-        .onChange(of: reduceMotion) { _, _ in
+        .onChange(of: reduceMotion) {
             syncWelcomeAppearance()
         }
-        .onChange(of: currentPage) { _, new in
+        .onChange(of: viewModel.currentStep) { _, new in
             if new == 0 {
                 syncWelcomeAppearance()
             }
@@ -100,52 +87,49 @@ struct OnboardingView: View {
                 triggerFinishCelebrationIfNeeded()
             }
         }
-        .onChange(of: blePermissionGranted) { _, new in
-            if new, currentPage == 1 { HapticManager.shared.onboardingStepCompleted() }
+        .onChange(of: viewModel.blePermissionGranted) { _, new in
+            if new, viewModel.currentStep == 1 { HapticManager.shared.onboardingStepCompleted() }
         }
-        .onChange(of: healthKitGranted) { _, new in
-            if new, currentPage == 2 { HapticManager.shared.onboardingStepCompleted() }
+        .onChange(of: viewModel.healthKitGranted) { _, new in
+            if new, viewModel.currentStep == 2 { HapticManager.shared.onboardingStepCompleted() }
         }
-        .onChange(of: notificationsGranted) { _, new in
-            if new, currentPage == 3 { HapticManager.shared.onboardingStepCompleted() }
+        .onChange(of: viewModel.notificationsGranted) { _, new in
+            if new, viewModel.currentStep == 3 { HapticManager.shared.onboardingStepCompleted() }
         }
-        .onChange(of: locationGranted) { _, new in
-            if new, currentPage == 4 { HapticManager.shared.onboardingStepCompleted() }
+        .onChange(of: viewModel.locationGranted) { _, new in
+            if new, viewModel.currentStep == 4 { HapticManager.shared.onboardingStepCompleted() }
         }
         .task {
-            locationManager.setup()
-            blePermissionGranted = CBManager.authorization == .allowedAlways
-            healthKitGranted = healthKitManager.isAuthorized
-            locationGranted = locationManager.isAuthorized
-            notificationsGranted = await notificationPermissionGranted()
-            if stravaService.isConnected {
-                stravaStatus = "Connected as \(stravaService.athleteDisplayName ?? "Strava athlete")."
-            }
+            await viewModel.syncInitialPermissionState()
         }
     }
 
+    private func binding<Value>(_ keyPath: ReferenceWritableKeyPath<OnboardingViewModel, Value>)
+        -> Binding<Value>
+    {
+        Binding(
+            get: { viewModel[keyPath: keyPath] },
+            set: { viewModel[keyPath: keyPath] = $0 }
+        )
+    }
+
     private func syncWelcomeAppearance() {
-        if reduceMotion {
-            welcomeAppeared = true
-        } else if currentPage == 0 {
-            welcomeAppeared = false
+        viewModel.syncWelcomeAppearance(reduceMotion: reduceMotion)
+        if !reduceMotion, viewModel.currentStep == 0 {
             DispatchQueue.main.async {
                 withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) {
-                    welcomeAppeared = true
+                    viewModel.welcomeAppeared = true
                 }
             }
         }
     }
 
     private func triggerFinishCelebrationIfNeeded() {
-        guard !reduceMotion else {
-            finishCelebration = true
-            return
-        }
-        finishCelebration = false
+        viewModel.triggerFinishCelebrationIfNeeded(reduceMotion: reduceMotion)
+        guard !reduceMotion else { return }
         DispatchQueue.main.async {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.68)) {
-                finishCelebration = true
+                viewModel.finishCelebration = true
             }
         }
     }
@@ -156,33 +140,25 @@ struct OnboardingView: View {
         HStack(spacing: 8) {
             ForEach(0..<totalPages, id: \.self) { index in
                 Capsule()
-                    .fill(index == currentPage ? AppColor.mango : Color.white.opacity(0.15))
-                    .frame(width: index == currentPage ? 24 : 8, height: 8)
-                    .animation(reduceMotion ? .none : .easeInOut(duration: 0.25), value: currentPage)
+                    .fill(index == viewModel.currentStep ? AppColor.mango : Color.white.opacity(0.15))
+                    .frame(width: index == viewModel.currentStep ? 24 : 8, height: 8)
+                    .animation(reduceMotion ? .none : .easeInOut(duration: 0.25), value: viewModel.currentStep)
                     .accessibilityHidden(true)
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Page \(currentPage + 1) of \(totalPages)")
-    }
-
-    // MARK: - Permission Page Check
-
-    /// Pages where the primary button requests a system permission. Notifications (page 3) is informational only.
-    private var isPermissionPage: Bool {
-        switch currentPage {
-        case 1, 2, 4: return true
-        default: return false
-        }
+            .accessibilityLabel("Page \(viewModel.currentStep + 1) of \(totalPages)")
     }
 
     // MARK: - Action Button
 
     private var actionButton: some View {
         Button {
-            handleAction()
+            withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) {
+                viewModel.handleAction(reduceMotion: reduceMotion)
+            }
         } label: {
-            Text(buttonTitle)
+            Text(viewModel.buttonTitle())
                 .font(.body.weight(.bold))
                 .foregroundStyle(AppColor.bg)
                 .frame(maxWidth: .infinity)
@@ -193,145 +169,11 @@ struct OnboardingView: View {
         .buttonStyle(MangoxPressStyle())
     }
 
-    private var buttonTitle: String {
-        switch currentPage {
-        case 0: return "Continue"
-        case 1: return blePermissionGranted ? "Continue" : "Enable Bluetooth"
-        case 2: return healthKitGranted ? "Continue" : "Enable Health"
-        case 3: return "Continue"
-        case 4: return locationGranted ? "Continue" : "Enable Location"
-        case 5:
-            if stravaService.isBusy { return "Connecting..." }
-            if stravaService.isConnected { return "Continue" }
-            return stravaService.isConfigured ? "Connect Strava" : "Continue"
-        case 6: return "Continue"
-        case 7: return "Get Started"
-        default: return "Continue"
-        }
-    }
-
-    private func handleAction() {
-        switch currentPage {
-        case 1:
-            if !blePermissionGranted {
-                requestBluetooth()
-            } else {
-                withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) { advancePage() }
-            }
-        case 2:
-            if !healthKitGranted {
-                requestHealthKit()
-            } else {
-                withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) { advancePage() }
-            }
-        case 3:
-            withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) { advancePage() }
-        case 4:
-            if !locationGranted {
-                requestLocation()
-            } else {
-                withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) { advancePage() }
-            }
-        case 5:
-            if stravaService.isConnected || !stravaService.isConfigured {
-                withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) { advancePage() }
-            } else {
-                connectStrava()
-            }
-        case 6:
-            // Save rider profile and advance
-            let prefs = RidePreferences.shared
-            prefs.riderWeightKg = onboardingWeightKg
-            prefs.riderBirthYear = onboardingBirthYear
-            withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) { advancePage() }
-        case 7:
-            HapticManager.shared.onboardingCelebration()
-            hasCompletedOnboarding = true
-        default:
-            withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) { advancePage() }
-        }
-    }
-
-    private func advancePage() {
-        if currentPage < totalPages - 1 {
-            currentPage += 1
-        }
-    }
-
-    // MARK: - Permission Requests
-
-    private func requestBluetooth() {
-        bleTrigger = CBCentralManager(delegate: nil, queue: nil)
-        Task {
-            for _ in 0..<30 {
-                try? await Task.sleep(for: .milliseconds(250))
-                let granted = CBManager.authorization == .allowedAlways
-                await MainActor.run {
-                    blePermissionGranted = granted
-                }
-                if CBManager.authorization != .notDetermined {
-                    break
-                }
-            }
-            await MainActor.run {
-                withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) { advancePage() }
-            }
-        }
-    }
-
-    private func requestHealthKit() {
-        Task {
-            await healthKitManager.requestAuthorization()
-            await MainActor.run {
-                healthKitGranted = healthKitManager.isAuthorized
-                withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) { advancePage() }
-            }
-        }
-    }
-
-    private func requestLocation() {
-        locationManager.requestPermission()
-        Task {
-            for _ in 0..<40 {
-                try? await Task.sleep(for: .milliseconds(250))
-                if locationManager.authorizationStatus != .notDetermined {
-                    break
-                }
-            }
-            await MainActor.run {
-                locationGranted = locationManager.isAuthorized
-                withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) { advancePage() }
-            }
-        }
-    }
-
-    private func connectStrava() {
-        Task {
-            do {
-                try await stravaService.connect()
-                await MainActor.run {
-                    stravaStatus = "Connected as \(stravaService.athleteDisplayName ?? "Strava athlete")."
-                    HapticManager.shared.onboardingCelebration()
-                    withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) { advancePage() }
-                }
-            } catch {
-                await MainActor.run {
-                    stravaStatus = error.localizedDescription
-                }
-            }
-        }
-    }
-
-    private func notificationPermissionGranted() async -> Bool {
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
-        return settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
-    }
-
     // MARK: - Pages
 
     private var welcomePage: some View {
         OnboardingWelcomePage(
-            welcomeAppeared: welcomeAppeared,
+            welcomeAppeared: viewModel.welcomeAppeared,
             reduceMotion: reduceMotion,
             featureRows: {
                 VStack(spacing: 8) {
@@ -353,7 +195,7 @@ struct OnboardingView: View {
             title: "Connect Your Gear",
             subtitle: "Mangox uses Bluetooth to connect to your smart trainer, heart rate monitor, and power meter.",
             color: AppColor.blue,
-            granted: blePermissionGranted,
+            granted: viewModel.blePermissionGranted,
             reduceMotion: reduceMotion,
             extraContent: {
                 permissionNote("Required for indoor training. Also works outdoors with BLE sensors.")
@@ -367,7 +209,7 @@ struct OnboardingView: View {
             title: "Health Data",
             subtitle: "Read resting HR, max HR, and VO2 Max for zones. You can opt in later to save finished rides to the Fitness app.",
             color: AppColor.heartRate,
-            granted: healthKitGranted,
+            granted: viewModel.healthKitGranted,
             reduceMotion: reduceMotion,
             extraContent: {
                 permissionNote(
@@ -383,7 +225,7 @@ struct OnboardingView: View {
             title: "GPS Location",
             subtitle: "Track outdoor rides with live speed, distance, elevation, and route recording right on your phone.",
             color: AppColor.success,
-            granted: locationGranted,
+            granted: viewModel.locationGranted,
             reduceMotion: reduceMotion,
             extraContent: {
                 permissionNote("Used only during outdoor rides. Never tracked in the background when not riding.")
@@ -398,11 +240,11 @@ struct OnboardingView: View {
             subtitle:
                 "You can turn on workout reminders and plan nudges later in Settings → Data, privacy & alerts — and iOS will ask for notification permission only when you opt in there.",
             color: AppColor.orange,
-            granted: notificationsGranted,
+            granted: viewModel.notificationsGranted,
             reduceMotion: reduceMotion,
             extraContent: {
                 permissionNote(
-                    "We don’t request notification access during onboarding so you stay in control.")
+                    "We don't request notification access during onboarding so you stay in control.")
             }
         )
     }
@@ -413,11 +255,11 @@ struct OnboardingView: View {
             title: "Share With Strava",
             subtitle: "One tap to upload your ride after every session. You can connect Strava anytime from your profile.",
             color: AppColor.strava,
-            granted: stravaService.isConnected,
+            granted: viewModel.stravaConnected,
             reduceMotion: reduceMotion,
             extraContent: {
                 VStack(spacing: 12) {
-                    if stravaService.isConnected {
+                    if viewModel.stravaConnected {
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark.seal.fill")
                                 .foregroundStyle(AppColor.success)
@@ -430,7 +272,7 @@ struct OnboardingView: View {
                         .background(Color.white.opacity(0.08))
                         .clipShape(Capsule())
                     }
-                    if let stravaStatus {
+                    if let stravaStatus = viewModel.stravaStatus {
                         Text(stravaStatus)
                             .font(.footnote.weight(.medium))
                             .foregroundStyle(.white.opacity(0.55))
@@ -460,8 +302,8 @@ struct OnboardingView: View {
                                 .foregroundStyle(.white.opacity(0.4))
                                 .tracking(1.2)
                             let displayWeight = RidePreferences.shared.isImperial
-                                ? onboardingWeightKg * 2.20462
-                                : onboardingWeightKg
+                                ? viewModel.onboardingWeightKg * 2.20462
+                                : viewModel.onboardingWeightKg
                             let unit = RidePreferences.shared.isImperial ? "lb" : "kg"
                             Text(String(format: "%.0f %@", displayWeight, unit))
                                 .font(.system(size: 22, weight: .bold, design: .monospaced))
@@ -471,11 +313,11 @@ struct OnboardingView: View {
                         Stepper("", value: Binding(
                             get: {
                                 RidePreferences.shared.isImperial
-                                    ? (onboardingWeightKg * 2.20462).rounded()
-                                    : onboardingWeightKg
+                                    ? (viewModel.onboardingWeightKg * 2.20462).rounded()
+                                    : viewModel.onboardingWeightKg
                             },
                             set: { newVal in
-                                onboardingWeightKg = RidePreferences.shared.isImperial
+                                viewModel.onboardingWeightKg = RidePreferences.shared.isImperial
                                     ? (newVal / 2.20462) : newVal
                             }
                         ), in: RidePreferences.shared.isImperial ? 66.0...440.0 : 30.0...200.0,
@@ -492,8 +334,8 @@ struct OnboardingView: View {
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(.white.opacity(0.4))
                                 .tracking(1.2)
-                            let age = Calendar.current.component(.year, from: .now) - onboardingBirthYear
-                            Text("\(onboardingBirthYear)  ·  Age \(age)")
+                            let age = Calendar.current.component(.year, from: .now) - viewModel.onboardingBirthYear
+                            Text("\(viewModel.onboardingBirthYear)  ·  Age \(age)")
                                 .font(.system(size: 22, weight: .bold, design: .monospaced))
                                 .foregroundStyle(.white)
                         }
@@ -503,11 +345,11 @@ struct OnboardingView: View {
                             value: Binding(
                                 get: {
                                     let y = Calendar.current.component(.year, from: .now)
-                                    return y - onboardingBirthYear
+                                    return y - viewModel.onboardingBirthYear
                                 },
                                 set: { newAge in
                                     let y = Calendar.current.component(.year, from: .now)
-                                    onboardingBirthYear = y - newAge
+                                    viewModel.onboardingBirthYear = y - newAge
                                 }
                             ),
                             in: {
@@ -535,18 +377,18 @@ struct OnboardingView: View {
                 Circle()
                     .fill(AppColor.mango.opacity(0.08))
                     .frame(width: 200, height: 200)
-                    .scaleEffect(finishCelebration ? 1 : 0.92)
+                    .scaleEffect(viewModel.finishCelebration ? 1 : 0.92)
                 Circle()
                     .fill(AppColor.mango.opacity(0.04))
                     .frame(width: 260, height: 260)
-                    .scaleEffect(finishCelebration ? 1 : 0.94)
+                    .scaleEffect(viewModel.finishCelebration ? 1 : 0.94)
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 72, weight: .light))
                     .foregroundStyle(AppColor.mango)
-                    .scaleEffect(finishCelebration ? 1 : 0.5)
-                    .opacity(finishCelebration ? 1 : 0.001)
+                    .scaleEffect(viewModel.finishCelebration ? 1 : 0.5)
+                    .opacity(viewModel.finishCelebration ? 1 : 0.001)
             }
-            .animation(reduceMotion ? .none : .spring(response: 0.5, dampingFraction: 0.68), value: finishCelebration)
+            .animation(reduceMotion ? .none : .spring(response: 0.5, dampingFraction: 0.68), value: viewModel.finishCelebration)
 
             VStack(spacing: 12) {
                 Text("You're All Set")
@@ -554,7 +396,7 @@ struct OnboardingView: View {
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
 
-                Text("Connect your trainer for indoor rides, or start an outdoor ride with GPS whenever you’re ready.")
+                Text("Connect your trainer for indoor rides, or start an outdoor ride with GPS whenever you're ready.")
                     .font(.body)
                     .foregroundStyle(.white.opacity(0.55))
                     .multilineTextAlignment(.center)
@@ -818,10 +660,10 @@ private struct OnboardingPageView<ExtraContent: View>: View {
             startPulseIfNeeded()
             syncCheckmark(animated: false)
         }
-        .onChange(of: granted) { _, new in
+        .onChange(of: granted) { _, _ in
             syncCheckmark(animated: true)
         }
-        .onChange(of: reduceMotion) { _, _ in
+        .onChange(of: reduceMotion) {
             startPulseIfNeeded()
         }
     }
@@ -880,9 +722,13 @@ private struct OnboardingPageView<ExtraContent: View>: View {
 }
 
 #Preview {
-    OnboardingView()
-        .environment(HealthKitManager())
-        .environment(LocationManager())
-        .environment(StravaService())
-        .environment(WhoopService())
+    OnboardingView(viewModel: OnboardingViewModel(
+        healthKitService: HealthKitManager(),
+        locationService: LocationManager(),
+        stravaService: StravaService()
+    ))
+    .environment(HealthKitManager())
+    .environment(LocationManager())
+    .environment(StravaService())
+    .environment(WhoopService())
 }

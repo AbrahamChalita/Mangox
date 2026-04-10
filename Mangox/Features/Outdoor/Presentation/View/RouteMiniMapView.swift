@@ -2,14 +2,14 @@ import SwiftUI
 import MapKit
 
 struct RouteMiniMapView: View {
-    @Environment(RouteManager.self) private var routeManager
+    let routeService: RouteServiceProtocol
     let distance: Double
     var mapHeight: CGFloat = 130
 
     @State private var cameraPosition: MapCameraPosition = .automatic
 
     private var riderCoordinate: CLLocationCoordinate2D? {
-        routeManager.coordinate(forDistance: distance)
+        routeService.coordinate(forDistance: distance)
     }
 
     var body: some View {
@@ -22,17 +22,17 @@ struct RouteMiniMapView: View {
 
                 Spacer()
 
-                if routeManager.hasRoute {
-                    Text(String(format: "%.1f / %.1f km", distance / 1000, routeManager.totalDistance / 1000))
+                if routeService.hasRoute {
+                    Text(String(format: "%.1f / %.1f km", distance / 1000, routeService.totalDistance / 1000))
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.35))
                 }
             }
 
-            if routeManager.hasRoute {
+            if routeService.hasRoute {
                 Map(position: $cameraPosition) {
                     // Cache sanitized coordinates — polylines only change when route loads
-                    let segments = routeManager.polylineSegments
+                    let segments = routeService.polylineSegments
                     ForEach(segments.indices, id: \.self) { i in
                         let coordinates = segments[i].sanitizedForMapPolyline()
                         if coordinates.count > 1 {
@@ -79,13 +79,13 @@ struct RouteMiniMapView: View {
                 .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
         )
         .onAppear(perform: updateCamera)
-        .onChange(of: routeManager.points.count) { _, _ in
+        .onChange(of: routeService.points.count) { _, _ in
             updateCamera()
         }
     }
 
     private func updateCamera() {
-        if let region = routeManager.cameraRegion {
+        if let region = routeService.cameraRegion {
             cameraPosition = .region(region)
         }
     }

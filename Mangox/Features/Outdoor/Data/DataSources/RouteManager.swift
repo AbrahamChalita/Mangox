@@ -3,7 +3,8 @@ import CoreLocation
 import MapKit
 
 @Observable
-final class RouteManager {
+@MainActor
+final class RouteManager: RouteServiceProtocol {
     var routeName: String?
     var points: [CLLocationCoordinate2D] = []
     var elevations: [Double?] = []

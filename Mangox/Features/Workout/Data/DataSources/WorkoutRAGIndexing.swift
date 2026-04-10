@@ -116,6 +116,11 @@ enum WorkoutRAGIndex {
     private static var lastBackgroundSyncStarted: Date?
 
     /// Debounced kick from app lifecycle (does not block UI long — processes in batches).
+    static func scheduleBackgroundSync() {
+        scheduleBackgroundSync(modelContext: PersistenceContainer.shared.mainContext)
+    }
+
+    /// Debounced kick from app lifecycle (does not block UI long — processes in batches).
     static func scheduleBackgroundSync(modelContext: ModelContext) {
         let now = Date()
         if let t = lastBackgroundSyncStarted, now.timeIntervalSince(t) < 50 { return }

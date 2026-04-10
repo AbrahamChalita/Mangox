@@ -239,12 +239,12 @@ final class WorkoutManager {
     private var lastRecordedDistance: Double = 0
     private var integratedDistance: Double = 0
 
-    private(set) weak var bleManager: BLEManager?
-    private weak var dataSource: DataSourceCoordinator?
+    private(set) weak var bleService: (any BLEServiceProtocol)?
+    private weak var dataSource: (any DataSourceServiceProtocol)?
     /// Latest packet ingested (BLE or unified coordinator) — used for route simulation and distance when WiFi is active.
     private var lastIngestedMetrics: CyclingMetrics?
-    private var modelContext: ModelContext?
-    private weak var routeManager: RouteManager?
+    private var modelContext: ModelContext = PersistenceContainer.shared.mainContext
+    private weak var routeService: (any RouteServiceProtocol)?
     private var routeSnapshot: IndoorRouteSnapshot?
 
     /// How often (in seconds) to send grade updates to the trainer during simulation.
@@ -275,20 +275,20 @@ final class WorkoutManager {
     /// actor isolation guarantees across Swift toolchain versions.
     func tearDown() {
         stopTimer()
-        bleManager?.unsubscribe(id: Self.subscriberID)
+        bleService?.unsubscribe(id: Self.subscriberID)
         dataSource?.unsubscribeCyclingMetrics(id: Self.subscriberID)
     }
 
     // MARK: - Lifecycle
 
     func configure(
-        bleManager: BLEManager, modelContext: ModelContext, dataSource: DataSourceCoordinator? = nil
+        bleService: any BLEServiceProtocol,
+        dataSource: (any DataSourceServiceProtocol)? = nil
     ) {
-        self.bleManager = bleManager
-        self.modelContext = modelContext
+        self.bleService = bleService
         self.dataSource = dataSource
 
-        bleManager.unsubscribe(id: Self.subscriberID)
+        bleService.unsubscribe(id: Self.subscriberID)
         dataSource?.unsubscribeCyclingMetrics(id: Self.subscriberID)
 
         if let dataSource {
@@ -296,7 +296,7 @@ final class WorkoutManager {
                 self?.ingest(metrics)
             }
         } else {
-            bleManager.subscribe(id: Self.subscriberID) { [weak self] metrics in
+            bleService.subscribe(id: Self.subscriberID) { [weak self] metrics in
                 self?.ingest(metrics)
             }
         }
@@ -304,23 +304,23 @@ final class WorkoutManager {
 
     /// Attach a route manager for GPX-based simulation.
     /// Call before starting the workout if a route is loaded.
-    func configureRoute(_ routeManager: RouteManager?) {
-        self.routeManager = routeManager
-        routeSnapshot = Self.makeRouteSnapshot(from: routeManager)
+    func configureRoute(_ routeService: (any RouteServiceProtocol)?) {
+        self.routeService = routeService
+        routeSnapshot = Self.makeRouteSnapshot(from: routeService)
     }
 
     // MARK: - Trainer Control
 
     /// Enable ERG mode — trainer locks to a fixed wattage.
     func setERGMode(watts: Int) {
-        guard let bleManager else { return }
+        guard let bleService else { return }
         baseErgTarget = watts
         let scaledWatts = Int(Double(watts) * intensityMultiplier)
         ergTarget = scaledWatts
         Task { @MainActor in
             do {
-                try await bleManager.ftmsControl.setTargetPower(watts: scaledWatts)
-                self.trainerMode = bleManager.ftmsControl.activeMode
+                try await bleService.setTargetPower(watts: scaledWatts)
+                self.trainerMode = bleService.ftmsControlActiveMode
                 workoutLogger.info("ERG mode set: \(watts)W")
             } catch FTMSControlError.superseded {
                 // A newer command arrived before this one completed — not an error.
@@ -333,13 +333,13 @@ final class WorkoutManager {
 
     /// Enable simulation mode with a specific grade (manual override, not from GPX).
     func setSimulationMode(grade: Double) {
-        guard let bleManager else { return }
+        guard let bleService else { return }
         baseErgTarget = nil
         ergTarget = nil
         Task { @MainActor in
             do {
-                try await bleManager.ftmsControl.setGrade(grade)
-                self.trainerMode = bleManager.ftmsControl.activeMode
+                try await bleService.setSimulationGrade(grade)
+                self.trainerMode = bleService.ftmsControlActiveMode
                 self.currentGrade = grade
                 self.lastSentGrade = grade
                 workoutLogger.info("Simulation mode set: \(String(format: "%.1f", grade))% grade")
@@ -354,13 +354,13 @@ final class WorkoutManager {
 
     /// Enable resistance mode — raw resistance level (0.0–1.0).
     func setResistanceMode(level: Double) {
-        guard let bleManager else { return }
+        guard let bleService else { return }
         baseErgTarget = nil
         ergTarget = nil
         Task { @MainActor in
             do {
-                try await bleManager.ftmsControl.setResistanceLevel(level)
-                self.trainerMode = bleManager.ftmsControl.activeMode
+                try await bleService.setResistanceLevel(level)
+                self.trainerMode = bleService.ftmsControlActiveMode
                 workoutLogger.info("Resistance mode set: \(String(format: "%.0f%%", level * 100))")
             } catch FTMSControlError.superseded {
                 // A newer command arrived before this one completed — not an error.
@@ -373,12 +373,12 @@ final class WorkoutManager {
 
     /// Return to free ride — release trainer control.
     func releaseTrainerControl() {
-        guard let bleManager else { return }
+        guard let bleService else { return }
         baseErgTarget = nil
         ergTarget = nil
         lastSentGrade = nil
         Task { @MainActor in
-            await bleManager.ftmsControl.releaseControl()
+            await bleService.releaseTrainerControl()
             self.trainerMode = .none
             self.currentGrade = 0
             workoutLogger.info("Trainer control released — free ride")
@@ -387,11 +387,11 @@ final class WorkoutManager {
 
     /// Start GPX route simulation — automatically sends grade updates based on distance.
     func startRouteSimulation() {
-        guard let bleManager, routeManager?.hasRoute == true else {
+        guard let bleService, routeService?.hasRoute == true else {
             workoutLogger.warning("Cannot start route simulation — no route loaded")
             return
         }
-        guard bleManager.ftmsControl.supportsSimulation else {
+        guard bleService.ftmsControlSupportsSimulation else {
             workoutLogger.warning("Trainer does not support simulation mode")
             return
         }
@@ -409,7 +409,7 @@ final class WorkoutManager {
     /// already in ERG or free-ride.
     func stopRouteSimulation() {
         lastSentGrade = nil
-        guard case .simulation = bleManager?.ftmsControl.activeMode else { return }
+        guard case .simulation = bleService?.ftmsControlActiveMode else { return }
         setSimulationMode(grade: 0)
     }
 
@@ -418,21 +418,21 @@ final class WorkoutManager {
 
         let w = Workout(startDate: .now, planDayID: activePlanDayID, planID: activePlanID)
         w.status = .active
-        routeSnapshot = Self.makeRouteSnapshot(from: routeManager)
+        routeSnapshot = Self.makeRouteSnapshot(from: routeService)
         if let routeSnapshot {
             w.savedRouteName = routeSnapshot.routeName
             w.plannedRouteDistanceMeters = routeSnapshot.plannedDistanceMeters
         }
-        modelContext?.insert(w)
+        modelContext.insert(w)
         workout = w
 
         // Start first lap
         let lap = LapSplit(lapNumber: 1, startTime: .now)
         lap.workout = w
-        modelContext?.insert(lap)
+        modelContext.insert(lap)
 
         resetAccumulators()
-        let initialDistance = dataSource?.totalDistance ?? bleManager?.metrics.totalDistance ?? 0
+        let initialDistance = dataSource?.totalDistance ?? bleService?.metrics.totalDistance ?? 0
         workoutStartDistance = initialDistance
         lapStartDistance = 0
         lastRecordedDistance = initialDistance
@@ -446,8 +446,8 @@ final class WorkoutManager {
         // Route simulation is only auto-started on free rides (no guided session).
         // Guided sessions control the trainer mode themselves step-by-step.
         if onTick == nil,
-            routeManager?.hasRoute == true,
-            bleManager?.ftmsControl.supportsSimulation == true
+            routeService?.hasRoute == true,
+            bleService?.ftmsControlSupportsSimulation == true
         {
             startRouteSimulation()
         }
@@ -456,7 +456,7 @@ final class WorkoutManager {
     func pause() {
         guard state == .recording else { return }
         flushPendingSamples()
-        do { try modelContext?.save() } catch { workoutLogger.error("pause save failed: \(error)") }
+        do { try modelContext.save() } catch { workoutLogger.error("pause save failed: \(error)") }
         state = .paused
         stopTimer()
         workout?.status = .paused
@@ -478,7 +478,7 @@ final class WorkoutManager {
 
         let newLap = LapSplit(lapNumber: currentLapNumber, startTime: .now)
         newLap.workout = workout
-        modelContext?.insert(newLap)
+        modelContext.insert(newLap)
 
         resetLapAccumulators()
         lapStartDistance = activeDistance
@@ -490,7 +490,7 @@ final class WorkoutManager {
     func endWorkout() {
         stopTimer()
         flushPendingSamples()
-        do { try modelContext?.save() } catch {
+        do { try modelContext.save() } catch {
             workoutLogger.error("endWorkout pre-summary save failed: \(error)")
         }
         finishCurrentLap()
@@ -505,7 +505,7 @@ final class WorkoutManager {
         releaseTrainerControl()
 
         do {
-            try modelContext?.save()
+            try modelContext.save()
             MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
         } catch {
             workoutLogger.error("endWorkout final save failed: \(error)")
@@ -544,9 +544,9 @@ final class WorkoutManager {
 
         // Delete the workout (cascade rule removes samples & laps automatically).
         if let workout {
-            modelContext?.delete(workout)
+            modelContext.delete(workout)
             do {
-                try modelContext?.save()
+                try modelContext.save()
                 MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
             } catch {
                 workoutLogger.error("discardWorkout save failed: \(error)")
@@ -629,7 +629,7 @@ final class WorkoutManager {
         // Detect BLE dropout: if no packets arrived for > 5 seconds, it's a dropout.
         // During short gaps (< 5s), carry over the last power.
         let timeSinceLastPacket: TimeInterval
-        if let lastPacket = bleManager?.lastPacketReceived {
+        if let lastPacket = bleService?.lastPacketReceived {
             timeSinceLastPacket = Date().timeIntervalSince(lastPacket)
         } else {
             timeSinceLastPacket = .infinity
@@ -686,7 +686,7 @@ final class WorkoutManager {
         let validHR = hrAccumulator.filter { $0 > 0 }
         if validHR.isEmpty {
             // Prefer unified coordinator snapshot (WiFi sessions), then BLE.
-            avgHR = lastIngestedMetrics?.heartRate ?? bleManager?.metrics.heartRate ?? 0
+            avgHR = lastIngestedMetrics?.heartRate ?? bleService?.metrics.heartRate ?? 0
         } else {
             avgHR = validHR.reduce(0, +) / validHR.count
         }
@@ -818,7 +818,7 @@ final class WorkoutManager {
         }
         if elapsedSeconds % 30 == 0 {
             flushPendingSamples()
-            do { try modelContext?.save() } catch {
+            do { try modelContext.save() } catch {
                 workoutLogger.error("periodic save failed: \(error)")
             }
         }
@@ -857,7 +857,7 @@ final class WorkoutManager {
             zeroPowerSeconds += 1
             if zeroPowerSeconds >= autoPauseThreshold {
                 flushPendingSamples()
-                do { try modelContext?.save() } catch {
+                do { try modelContext.save() } catch {
                     workoutLogger.error("auto-pause save failed: \(error)")
                 }
                 state = .autoPaused
@@ -969,7 +969,8 @@ final class WorkoutManager {
 
     /// Drains `pendingSamples` into SwiftData. Call before summary / pause / end, and on batch boundaries.
     private func flushPendingSamples() {
-        guard let context = modelContext, let w = workout, !pendingSamples.isEmpty else { return }
+        let context = modelContext
+        guard let w = workout, !pendingSamples.isEmpty else { return }
         let start = w.startDate
         for p in pendingSamples {
             let s = WorkoutSample(
@@ -1123,7 +1124,7 @@ final class WorkoutManager {
         let ftp = Double(PowerZone.ftp)
         let latestDistance = max(
             lastRecordedDistance,
-            lastIngestedMetrics?.totalDistance ?? bleManager?.metrics.totalDistance
+            lastIngestedMetrics?.totalDistance ?? bleService?.metrics.totalDistance
                 ?? lastRecordedDistance
         )
         let sensorDistance = max(0, latestDistance - workoutStartDistance)
@@ -1213,13 +1214,14 @@ final class WorkoutManager {
         metrics.power > 0 || metrics.cadence > 0 || metrics.speed > 0
     }
 
-    private static func makeRouteSnapshot(from routeManager: RouteManager?) -> IndoorRouteSnapshot?
+    private static func makeRouteSnapshot(from routeService: (any RouteServiceProtocol)?)
+        -> IndoorRouteSnapshot?
     {
-        guard let routeManager, routeManager.hasRoute else { return nil }
+        guard let routeService, routeService.hasRoute else { return nil }
         return IndoorRouteSnapshot(
-            routeName: routeManager.routeName,
-            plannedDistanceMeters: routeManager.totalDistance,
-            elevationProfilePoints: routeManager.elevationProfilePoints
+            routeName: routeService.routeName,
+            plannedDistanceMeters: routeService.totalDistance,
+            elevationProfilePoints: routeService.elevationProfilePoints
         )
     }
 
@@ -1254,8 +1256,8 @@ final class WorkoutManager {
     /// Compute the current grade from GPX elevation data at the current distance
     /// and send it to the trainer if it has changed meaningfully.
     private func updateRouteGrade() {
-        guard let routeManager, routeManager.hasRoute else { return }
-        guard let bleManager, bleManager.ftmsControl.supportsSimulation else { return }
+        guard let routeService, routeService.hasRoute else { return }
+        guard let bleService, bleService.ftmsControlSupportsSimulation else { return }
         // Only update if we're in simulation mode or haven't started yet
         guard ergTarget == nil else { return }
 
@@ -1264,14 +1266,14 @@ final class WorkoutManager {
         // Look up elevation at current position and a point slightly ahead.
         // Time-based preview: at 30 km/h (~8 m/s), 3s preview = 24m; at 10 km/h (~3 m/s), 3s preview = 9m.
         // This maintains consistent grade-change responsiveness regardless of speed.
-        let speedKmh = lastIngestedMetrics?.speed ?? bleManager.metrics.speed
+        let speedKmh = lastIngestedMetrics?.speed ?? bleService.metrics.speed
         let speedMPS = max(0, speedKmh) / 3.6
         let previewSeconds: Double = 3
         let lookAheadMeters = max(5, speedMPS * previewSeconds)
-        guard let elevHere = routeManager.elevation(forDistance: distance) else { return }
+        guard let elevHere = routeService.elevation(forDistance: distance) else { return }
         currentElevation = elevHere
 
-        let elevAhead = routeManager.elevation(forDistance: distance + lookAheadMeters)
+        let elevAhead = routeService.elevation(forDistance: distance + lookAheadMeters)
         let grade: Double
         if let elevAhead {
             // Grade = (rise / run) × 100
@@ -1295,8 +1297,8 @@ final class WorkoutManager {
 
         Task { @MainActor in
             do {
-                try await bleManager.ftmsControl.setSimulation(grade: clampedGrade)
-                self.trainerMode = bleManager.ftmsControl.activeMode
+                try await bleService.setSimulationGrade(clampedGrade)
+                self.trainerMode = bleService.ftmsControlActiveMode
             } catch {
                 workoutLogger.error("Grade update failed: \(error.localizedDescription)")
             }

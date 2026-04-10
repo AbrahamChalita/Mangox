@@ -17,6 +17,7 @@ protocol WhoopServiceProtocol: AnyObject {
     var isBusy: Bool { get }
     var lastError: String? { get }
     var isConfigured: Bool { get }
+    var lastSuccessfulRefreshAt: Date? { get }
     var syncHeartBaselinesFromWhoop: Bool { get set }
     var readinessTrainingHint: String { get }
 

@@ -758,9 +758,9 @@ struct CoachEmptyStartersPanel: View {
     let subhead: String
     /// Topic-style tags from `SystemLanguageModel(useCase: .contentTagging)` (Apple Intelligence).
     let topicTags: [String]
-    let prompts: [AIService.QuickPrompt]
+    let prompts: [QuickPrompt]
     let onPlanBuilder: () -> Void
-    let onPrompt: (AIService.QuickPrompt) -> Void
+    let onPrompt: (QuickPrompt) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
@@ -1210,4 +1210,3 @@ struct CoachTypingRow: View {
         .accessibilityLabel("Coach is typing")
     }
 }
-

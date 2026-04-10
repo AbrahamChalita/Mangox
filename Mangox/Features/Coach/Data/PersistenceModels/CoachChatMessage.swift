@@ -1,4 +1,4 @@
-// Features/Coach/Domain/Entities/CoachChatMessage.swift
+// Features/Coach/Data/PersistenceModels/CoachChatMessage.swift
 import Foundation
 import SwiftData
 

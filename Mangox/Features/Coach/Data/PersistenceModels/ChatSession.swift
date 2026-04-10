@@ -1,4 +1,4 @@
-// Features/Coach/Domain/Entities/ChatSession.swift
+// Features/Coach/Data/PersistenceModels/ChatSession.swift
 import Foundation
 import SwiftData
 

@@ -9,7 +9,7 @@ private let liveActivityLogger = Logger(
 /// `ActivityConfiguration(for: MangoxRideAttributes.self)` and embeds the `.appex` in the Mangox app.
 @MainActor
 @Observable
-final class RideLiveActivityManager {
+final class RideLiveActivityManager: LiveActivityServiceProtocol {
     static let shared = RideLiveActivityManager()
 
     private var activity: Activity<MangoxRideAttributes>?
@@ -22,8 +22,8 @@ final class RideLiveActivityManager {
         isRecording: Bool,
         prefs: RidePreferences,
         navigationService: NavigationService,
-        locationManager: LocationManager,
-        bleManager: BLEManager
+        locationManager: LocationServiceProtocol,
+        bleService: BLEServiceProtocol
     ) async {
         guard prefs.outdoorLiveActivityEnabled else {
             await endIfNeeded()
@@ -46,9 +46,9 @@ final class RideLiveActivityManager {
             nextTurn = nil
         }
 
-        let hr = max(0, bleManager.metrics.heartRate)
-        let power = max(0, bleManager.smoothedPower)
-        let cadence = bleManager.metrics.cadence
+        let hr = max(0, bleService.metrics.heartRate)
+        let power = max(0, bleService.smoothedPower)
+        let cadence = bleService.metrics.cadence
         let hrZoneId: Int = hr > 0 ? HeartRateZone.zone(for: hr).id : 0
         let powerZoneId: Int = power > 0 ? PowerZone.zone(for: power).id : 0
 
@@ -104,7 +104,7 @@ final class RideLiveActivityManager {
         isRecording: Bool,
         prefs: RidePreferences,
         workoutManager: WorkoutManager,
-        bleManager: BLEManager
+        bleService: BLEServiceProtocol
     ) async {
         guard prefs.indoorLiveActivityEnabled else {
             await endIfNeeded()
@@ -116,9 +116,9 @@ final class RideLiveActivityManager {
         }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
-        let hr = max(0, bleManager.metrics.heartRate)
+        let hr = max(0, bleService.metrics.heartRate)
         let power = workoutManager.displayPower
-        let cadence = bleManager.metrics.cadence
+        let cadence = bleService.metrics.cadence
         let speed = workoutManager.metricsSpeed
         let distanceM = workoutManager.activeDistance
         let duration = Double(workoutManager.elapsedSeconds)

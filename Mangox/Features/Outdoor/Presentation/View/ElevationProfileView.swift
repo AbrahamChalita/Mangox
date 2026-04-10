@@ -6,7 +6,7 @@ import SwiftUI
 /// Shows the full route elevation silhouette with a live rider-position indicator.
 /// Only rendered when a GPX route with elevation data is loaded.
 struct ElevationProfileView: View {
-    @Environment(RouteManager.self) private var routeManager
+    let routeService: RouteServiceProtocol
 
     let currentDistance: Double     // meters — rider's current position
     var height: CGFloat = 72
@@ -14,7 +14,7 @@ struct ElevationProfileView: View {
     // MARK: - Derived
 
     private var elevations: [Double] {
-        routeManager.elevations.compactMap { $0 }
+        routeService.elevations.compactMap { $0 }
     }
 
     private var hasElevation: Bool {
@@ -34,7 +34,7 @@ struct ElevationProfileView: View {
     }
 
     private var totalDistance: Double {
-        max(routeManager.totalDistance, 1)
+        max(routeService.totalDistance, 1)
     }
 
     private var riderFraction: Double {
@@ -42,11 +42,11 @@ struct ElevationProfileView: View {
     }
 
     private var currentElevation: Double? {
-        routeManager.elevation(forDistance: currentDistance)
+        routeService.elevation(forDistance: currentDistance)
     }
 
     private var totalGain: Int {
-        Int(routeManager.totalElevationGain.rounded())
+        Int(routeService.totalElevationGain.rounded())
     }
 
     // MARK: - Body
@@ -121,7 +121,7 @@ struct ElevationProfileView: View {
 
     /// Builds the full-route elevation path sampled at a fixed number of points.
     private func elevationPath(in size: CGSize, sampleCount: Int = 200) -> Path {
-        let points = routeManager.points
+        let points = routeService.points
         guard points.count > 1 else { return Path() }
 
         let w = size.width
@@ -134,7 +134,7 @@ struct ElevationProfileView: View {
                 let fraction = Double(i) / Double(sampleCount)
                 let dist = fraction * totalDistance
 
-                guard let elev = routeManager.elevation(forDistance: dist) else { continue }
+                guard let elev = routeService.elevation(forDistance: dist) else { continue }
 
                 let x = CGFloat(fraction) * w
                 let normalised = (elev - minElevation) / elevationRange
@@ -239,8 +239,7 @@ struct ElevationProfileView: View {
 #Preview {
     ZStack {
         Color(red: 0.03, green: 0.04, blue: 0.06).ignoresSafeArea()
-        ElevationProfileView(currentDistance: 12_000, height: 80)
+        ElevationProfileView(routeService: RouteManager(), currentDistance: 12_000, height: 80)
             .padding(20)
-            .environment(RouteManager())
     }
 }

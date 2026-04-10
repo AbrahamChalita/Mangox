@@ -2,6 +2,7 @@ import SwiftUI
 
 struct WorkoutRowView: View {
     let workout: Workout
+    let trainingPlanLookupService: TrainingPlanLookupServiceProtocol
 
     private var zone: PowerZone {
         PowerZone.zone(for: Int(workout.avgPower))
@@ -147,7 +148,10 @@ struct WorkoutRowView: View {
 
     @ViewBuilder
     private func planDayBadge(dayID: String) -> some View {
-        let day = PlanLibrary.resolveDay(planID: workout.planID, dayID: dayID)
+        let day = trainingPlanLookupService.resolveDay(
+            planID: workout.planID,
+            dayID: dayID
+        )
         if let day = day {
             HStack(spacing: 0) {
                 // Plan icon + week/day tag

@@ -1,27 +1,18 @@
 import SwiftUI
 
 struct FTPTestView: View {
-    @Environment(BLEManager.self) private var bleManager
-    @Environment(DataSourceCoordinator.self) private var dataSource
-    @Environment(HealthKitManager.self) private var healthKitManager
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @Bindable var viewModel: FTPTestViewModel
     @Binding var navigationPath: NavigationPath
 
-    @State private var manager = FTPTestManager()
     @State private var showEndConfirmation = false
     @State private var showApplyConfirmation = false
     @State private var showHistory = false
 
-    private var metrics: CyclingMetrics {
-        var m = CyclingMetrics(lastUpdate: Date())
-        m.power = dataSource.power
-        m.cadence = dataSource.cadence
-        m.speed = dataSource.speed
-        m.heartRate = dataSource.heartRate
-        m.totalDistance = dataSource.totalDistance
-        m.hrSource = bleManager.metrics.hrSource
-        return m
-    }
+    /// Convenience accessor for the test manager.
+    private var manager: FTPTestManager { viewModel.manager }
+
+    private var metrics: CyclingMetrics { viewModel.metrics }
 
     var body: some View {
         FTPRefreshScope {
@@ -73,11 +64,10 @@ struct FTPTestView: View {
             }
         }
         .onAppear {
-            dataSource.updateActiveSource()
-            manager.configure(bleManager: bleManager, dataSource: dataSource)
+            viewModel.onAppear()
         }
         .onDisappear {
-            manager.tearDown()
+            viewModel.onDisappear()
         }
         .onChange(of: manager.state) { _, newState in
             if newState == .completed {
@@ -785,12 +775,13 @@ struct FTPTestView: View {
     let ble = BLEManager()
     let wifi = WiFiTrainerService()
     let ds = DataSourceCoordinator(bleManager: ble, wifiService: wifi)
+    let vm = FTPTestViewModel(bleService: ble, dataSourceService: ds)
     FTPTestView(
+        viewModel: vm,
         navigationPath: .constant(NavigationPath())
     )
     .environment(ble)
     .environment(wifi)
     .environment(ds)
-    .environment(HealthKitManager())
     .environment(FTPRefreshTrigger.shared)
 }

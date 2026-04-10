@@ -1,4 +1,4 @@
-// Features/Coach/Domain/Entities/AIGeneratedPlan.swift
+// Features/Coach/Data/PersistenceModels/AIGeneratedPlan.swift
 import Foundation
 import SwiftData
 
