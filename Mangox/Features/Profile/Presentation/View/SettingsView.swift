@@ -85,7 +85,7 @@ struct SettingsView: View {
                             navRow(
                                 icon: "flag.checkered",
                                 iconColor: AppColor.yellow,
-                                title: "Goal & season",
+                                title: "Goal & Season",
                                 value: MangoxTrainingGoals.eventName.isEmpty
                                     ? "Optional" : MangoxTrainingGoals.eventName,
                                 route: .goalEvent
@@ -119,7 +119,7 @@ struct SettingsView: View {
                             navRow(
                                 icon: "calendar.badge.clock",
                                 iconColor: AppColor.blue,
-                                title: "Calendar & file sharing",
+                                title: "Calendar & File Sharing",
                                 value: ".ics export · guides",
                                 route: .integrations
                             )
@@ -158,7 +158,7 @@ struct SettingsView: View {
                             navRow(
                                 icon: "bicycle",
                                 iconColor: .white.opacity(0.55),
-                                title: "Gear labels",
+                                title: "Gear Labels",
                                 value: "",
                                 route: .gear
                             )
@@ -186,8 +186,8 @@ struct SettingsView: View {
                             navRow(
                                 icon: "bell.badge.fill",
                                 iconColor: AppColor.blue,
-                                title: "Data, privacy & alerts",
-                                value: "Export · notifications",
+                                title: "Data, Privacy & Alerts",
+                                value: "Export and notifications",
                                 route: .dataPrivacyHub
                             )
                             rowDivider
@@ -427,6 +427,9 @@ struct SettingsView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(value.isEmpty ? title : "\(title), \(value)")
+        .accessibilityHint("Opens \(title) settings")
     }
 
     private func rowContent(
@@ -440,12 +443,15 @@ struct SettingsView: View {
             Text(title)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
             Spacer(minLength: 8)
             if !value.isEmpty {
                 Text(value)
                     .font(.system(size: 13))
                     .foregroundStyle(valueColor)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             Image(systemName: "chevron.right")
                 .font(.system(size: 11, weight: .semibold))

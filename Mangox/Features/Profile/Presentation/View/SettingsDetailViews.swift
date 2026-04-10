@@ -81,7 +81,7 @@ struct AICoachSettingsView: View {
                         settingsField(
                             title: "API Key",
                             text: $apiKeyDraft,
-                            placeholder: "sk-…",
+                            placeholder: "sk-...",
                             textContentType: .password,
                             secure: true
                         )
@@ -235,6 +235,7 @@ struct AICoachSettingsView: View {
             .keyboardType(keyboard)
             .font(.system(size: 14))
             .foregroundStyle(.white.opacity(0.9))
+            .accessibilityLabel(title)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .background(Color.white.opacity(0.06))
@@ -515,8 +516,17 @@ struct HeartRateSettingsView: View {
                                     syncHealthKit()
                                 }
                             }
+
+                            NavigationLink {
+                                WhoopSettingsView(viewModel: viewModel)
+                            } label: {
+                                Label("Open WHOOP details", systemImage: "chevron.right.circle")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(AppColor.whoop)
+                            }
+                            .buttonStyle(.plain)
                         } else {
-                            Text("Connect WHOOP under Settings → Connections to sync baselines.")
+                            Text("Connect WHOOP in Connections to sync baselines.")
                                 .font(.system(size: 11))
                                 .foregroundStyle(.white.opacity(0.35))
                         }
@@ -537,14 +547,14 @@ struct HeartRateSettingsView: View {
                                 .foregroundStyle(.white.opacity(0.7))
                         }
                         Text(
-                            "Enable HealthKit to sync Max HR and Resting HR from Apple Watch or other Health-connected devices."
+                            "Enable Apple Health to sync max and resting heart rate from Apple Watch or other Health-connected devices."
                         )
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.38))
                         Button {
                             Task { await viewModel.requestHealthKitAuthorization() }
                         } label: {
-                            Text("Enable HealthKit")
+                            Text("Enable Apple Health")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(AppColor.success)
                                 .padding(.horizontal, 14)
@@ -588,7 +598,7 @@ struct HeartRateSettingsView: View {
                         .tint(AppColor.mango)
 
                         Text(
-                            "Plan calendar (.ics), FIT export, and Zwift (.zwo): go back, then under Connections open Calendar & file sharing."
+                            "For calendar (.ics), FIT export, and Zwift (.zwo), open Connections > Calendar & File Sharing."
                         )
                         .font(.system(size: 10))
                         .foregroundStyle(.white.opacity(0.28))
@@ -602,7 +612,7 @@ struct HeartRateSettingsView: View {
                 NavigationLink {
                     FitnessThresholdTimelineView()
                 } label: {
-                    Label("FTP + heart-rate change log", systemImage: "list.bullet.rectangle")
+                    Label("FTP + heart rate change log", systemImage: "list.bullet.rectangle")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white.opacity(0.85))
                 }
@@ -626,6 +636,7 @@ struct HeartRateSettingsView: View {
                             TextField("100–240", text: $manualMaxHRInput)
                                 .keyboardType(.numberPad)
                                 .autocorrectionDisabled()
+                                .accessibilityLabel("Max heart rate")
                                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(.white.opacity(0.9))
                                 .padding(.horizontal, 10)
@@ -640,6 +651,7 @@ struct HeartRateSettingsView: View {
                             TextField("30–120", text: $manualRestingHRInput)
                                 .keyboardType(.numberPad)
                                 .autocorrectionDisabled()
+                                .accessibilityLabel("Resting heart rate")
                                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(.white.opacity(0.9))
                                 .padding(.horizontal, 10)
@@ -963,7 +975,7 @@ struct WhoopSettingsView: View {
                                         .font(.system(size: 13, weight: .semibold))
                                         .foregroundStyle(.white.opacity(0.88))
                                     Text(
-                                        "Writes WHOOP profile max HR and recovery resting HR into Mangox heart-rate zones when you don’t use manual overrides. Also in Settings → Heart Rate."
+                                        "Writes WHOOP profile max HR and recovery resting HR into Mangox heart-rate zones when you don't use manual overrides. You can also manage this in Settings > Heart Rate."
                                     )
                                     .font(.system(size: 10))
                                     .foregroundStyle(.white.opacity(0.32))
@@ -1031,14 +1043,14 @@ struct WhoopSettingsView: View {
                         .disabled(viewModel.whoopIsBusy)
 
                         Text(
-                            "Read-only: recovery, sleep, workouts, and strain context from WHOOP. Mangox cannot upload activities to WHOOP via their API — turn on “Save rides to Apple Health” in Heart Rate settings if you want WHOOP to import indoor rides through Apple Health."
+                            "Read-only: recovery, sleep, workouts, and strain context from WHOOP. Mangox cannot upload activities to WHOOP via their API - turn on \"Save rides to Apple Health\" in Heart Rate settings if you want WHOOP to import indoor rides through Apple Health."
                         )
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.3))
                         .fixedSize(horizontal: false, vertical: true)
 
                         Text(
-                            "VO₂ max is not available from WHOOP’s developer API. Enable Apple Health in Mangox to show VO₂ from Apple Watch or other Health sources."
+                            "VO₂ max is not available from WHOOP's developer API. Enable Apple Health in Mangox to show VO₂ from Apple Watch or other Health sources."
                         )
                         .font(.system(size: 10))
                         .foregroundStyle(.white.opacity(0.26))
@@ -1571,14 +1583,14 @@ struct IntegrationsSettingsView: View {
     @State private var icsValarm = PlanICSPreferences.includeWorkoutReminder
 
     var body: some View {
-        SettingsSubviewShell(title: "Calendar & file sharing") {
+        SettingsSubviewShell(title: "Calendar & File Sharing") {
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 14) {
-                    Label("Training plan → calendar (.ics)", systemImage: "calendar")
+                    Label("Training Plan to Calendar (.ics)", systemImage: "calendar")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.88))
                     Text(
-                        "From your active plan, open the ••• menu and choose Export calendar (timed .ics), then import the file into Apple Calendar, Google Calendar, or Outlook."
+                        "From your active plan, open the menu and choose Export Calendar (.ics), then import it into Apple Calendar, Google Calendar, or Outlook."
                     )
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.42))
@@ -1640,7 +1652,7 @@ struct IntegrationsSettingsView: View {
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.5))
                         Text(
-                            "Home → Indoor Ride Setup → Custom Workout → Import .zwo. Mangox maps common Zwift steps (steady state, intervals, ramps, warm up / cool down, free ride, short max efforts) to guided ERG."
+                            "Home > Indoor Ride Setup > Custom Workout > Import .zwo. Mangox maps common Zwift steps (steady state, intervals, ramps, warm up/cool down, free ride, short max efforts) to guided ERG."
                         )
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.42))
@@ -1665,7 +1677,7 @@ struct GoalEventSettingsView: View {
     @State private var eventDate = Date()
 
     var body: some View {
-        SettingsSubviewShell(title: "Goal & season") {
+        SettingsSubviewShell(title: "Goal & Season") {
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Optional context for the AI coach and your own planning—not tied to calendar export.")
@@ -1679,6 +1691,7 @@ struct GoalEventSettingsView: View {
                             .foregroundStyle(.white.opacity(0.35))
                         TextField("e.g. Local fondo, gravel race", text: $eventName)
                             .textFieldStyle(.plain)
+                            .accessibilityLabel("Goal event name")
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
                             .background(Color.white.opacity(0.05))
@@ -1706,6 +1719,7 @@ struct GoalEventSettingsView: View {
                             .foregroundStyle(.white.opacity(0.35))
                         TextField("e.g. Base, Build, Peak, Taper", text: $phaseLabel)
                             .textFieldStyle(.plain)
+                            .accessibilityLabel("Training phase label")
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
                             .background(Color.white.opacity(0.05))
@@ -1749,7 +1763,7 @@ struct GearSettingsView: View {
     @Bindable private var prefs = RidePreferences.shared
 
     var body: some View {
-        SettingsSubviewShell(title: "Gear labels") {
+        SettingsSubviewShell(title: "Gear Labels") {
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(
@@ -1765,6 +1779,7 @@ struct GearSettingsView: View {
                             .foregroundStyle(.white.opacity(0.35))
                         TextField("e.g. Road / Race bike", text: $prefs.primaryOutdoorBikeName)
                             .textFieldStyle(.plain)
+                            .accessibilityLabel("Outdoor bike label")
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
                             .background(Color.white.opacity(0.05))
@@ -1778,6 +1793,7 @@ struct GearSettingsView: View {
                             .foregroundStyle(.white.opacity(0.35))
                         TextField("e.g. Wahoo KICKR", text: $prefs.primaryIndoorBikeName)
                             .textFieldStyle(.plain)
+                            .accessibilityLabel("Indoor trainer label")
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
                             .background(Color.white.opacity(0.05))
@@ -1799,13 +1815,13 @@ struct DataPrivacyNotificationsHubView: View {
     @State private var notifyHour = TrainingNotificationsPreferences.tomorrowReminderHour
     @State private var notifyMissed = TrainingNotificationsPreferences.missedKeyWorkoutNudge
     @State private var notifyFtp = TrainingNotificationsPreferences.ftpTestReminder
-    @State private var authStatusText = "…"
+    @State private var authStatusText = "Loading..."
     @State private var exportURL: URL?
     @State private var showExportShare = false
     @State private var exportError: String?
 
     var body: some View {
-        SettingsSubviewShell(title: "Data, privacy & alerts") {
+        SettingsSubviewShell(title: "Data, Privacy & Alerts") {
             MangoxSectionLabel(title: "Where rides go")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 10) {
@@ -1827,7 +1843,7 @@ struct DataPrivacyNotificationsHubView: View {
                         ok: viewModel.healthKitSyncWorkoutsToAppleHealth
                     )
                     Text(
-                        "Files: Ride Summary → Share for FIT, GPX, or TCX. Plan calendar: Connections → Calendar & file sharing."
+                        "Ride files: Ride Summary > Share for FIT, GPX, or TCX. Plan calendar: Connections > Calendar & File Sharing."
                     )
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.35))
@@ -1853,9 +1869,18 @@ struct DataPrivacyNotificationsHubView: View {
             MangoxSectionLabel(title: "Training alerts")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Notifications: \(authStatusText)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.38))
+                    HStack(spacing: 8) {
+                        Image(systemName: authStatusIcon)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(authStatusColor)
+                        Text("Notifications permission: \(authStatusText)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                    Text("Turn on reminders to get evening previews, missed-key nudges, and FTP test prompts.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.34))
+                        .fixedSize(horizontal: false, vertical: true)
 
                     Toggle(isOn: Binding(
                         get: { MangoxFeatureFlags.allowsTrainingNotifications },
@@ -1875,6 +1900,7 @@ struct DataPrivacyNotificationsHubView: View {
                             Text("Master switch for evening previews, missed-key nudges, and FTP reminders.")
                                 .font(.system(size: 10))
                                 .foregroundStyle(.white.opacity(0.32))
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .tint(AppColor.mango)
@@ -1887,6 +1913,7 @@ struct DataPrivacyNotificationsHubView: View {
                             Text("One reminder with your next plan day after you leave the app.")
                                 .font(.system(size: 10))
                                 .foregroundStyle(.white.opacity(0.32))
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .tint(AppColor.mango)
@@ -1920,6 +1947,7 @@ struct DataPrivacyNotificationsHubView: View {
                             Text("When you open the app after a priority day was missed.")
                                 .font(.system(size: 10))
                                 .foregroundStyle(.white.opacity(0.32))
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .tint(AppColor.mango)
@@ -1937,6 +1965,7 @@ struct DataPrivacyNotificationsHubView: View {
                             Text("Nudge if no FTP test in about 90 days.")
                                 .font(.system(size: 10))
                                 .foregroundStyle(.white.opacity(0.32))
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .tint(AppColor.mango)
@@ -1954,18 +1983,36 @@ struct DataPrivacyNotificationsHubView: View {
                             .foregroundStyle(.white.opacity(0.7))
                     }
                     .buttonStyle(.plain)
+
+                    if authStatusText == "Denied in Settings" {
+                        Button {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        } label: {
+                            Text("Open iOS notification settings")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(AppColor.mango)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
 
-            MangoxSectionLabel(title: "Export my data")
+            MangoxSectionLabel(title: "Data export")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(
-                        "Download JSON with ride summaries (no per-second samples) and your threshold change log. Extended adds sample counts, max power, elevation, and completion status per ride."
+                        "Download JSON with ride summaries (no per-second samples) and your threshold change log."
                     )
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.38))
                     .fixedSize(horizontal: false, vertical: true)
+
+                    Text("Extended export adds sample counts, max power, elevation, and completion status per ride.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.32))
+                        .fixedSize(horizontal: false, vertical: true)
 
                     if let exportError {
                         Text(exportError)
@@ -1982,7 +2029,7 @@ struct DataPrivacyNotificationsHubView: View {
                             exportError = error.localizedDescription
                         }
                     } label: {
-                        Text("Export JSON…")
+                        Text("Export JSON...")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.black)
                             .frame(maxWidth: .infinity)
@@ -2001,7 +2048,7 @@ struct DataPrivacyNotificationsHubView: View {
                             exportError = error.localizedDescription
                         }
                     } label: {
-                        Text("Export extended JSON…")
+                        Text("Export extended JSON...")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.85))
                             .frame(maxWidth: .infinity)
@@ -2030,6 +2077,30 @@ struct DataPrivacyNotificationsHubView: View {
             Text(value)
                 .font(.system(size: 12))
                 .foregroundStyle(ok ? AppColor.success : .white.opacity(0.35))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+    }
+
+    private var authStatusColor: Color {
+        switch authStatusText {
+        case "Allowed", "Provisional", "Ephemeral":
+            return AppColor.success
+        case "Denied in Settings":
+            return AppColor.orange
+        default:
+            return .white.opacity(0.45)
+        }
+    }
+
+    private var authStatusIcon: String {
+        switch authStatusText {
+        case "Allowed", "Provisional", "Ephemeral":
+            return "checkmark.circle.fill"
+        case "Denied in Settings":
+            return "xmark.circle.fill"
+        default:
+            return "bell.badge"
         }
     }
 
@@ -2037,12 +2108,12 @@ struct DataPrivacyNotificationsHubView: View {
         let s = await UNUserNotificationCenter.current().notificationSettings()
         await MainActor.run {
             switch s.authorizationStatus {
-            case .authorized: authStatusText = "allowed"
-            case .denied: authStatusText = "denied in Settings"
-            case .notDetermined: authStatusText = "not asked yet"
-            case .provisional: authStatusText = "provisional"
-            case .ephemeral: authStatusText = "ephemeral"
-            @unknown default: authStatusText = "unknown"
+            case .authorized: authStatusText = "Allowed"
+            case .denied: authStatusText = "Denied in Settings"
+            case .notDetermined: authStatusText = "Not asked yet"
+            case .provisional: authStatusText = "Provisional"
+            case .ephemeral: authStatusText = "Ephemeral"
+            @unknown default: authStatusText = "Unknown"
             }
         }
     }

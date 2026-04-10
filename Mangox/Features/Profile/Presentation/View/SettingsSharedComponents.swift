@@ -22,9 +22,12 @@ func settingsSubToggle(title: String, subtitle: String, isOn: Binding<Bool>) -> 
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.85))
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
             Text(subtitle)
                 .font(.system(size: 11))
                 .foregroundStyle(.white.opacity(0.35))
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
     .tint(AppColor.mango)
@@ -50,6 +53,8 @@ struct SettingsSubviewShell<Content: View>: View {
                     content()
                     Spacer().frame(height: 40)
                 }
+                .frame(maxWidth: 760, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
             .scrollDismissesKeyboard(.interactively)
             .scrollIndicators(.hidden)
