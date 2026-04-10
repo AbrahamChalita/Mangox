@@ -28,8 +28,8 @@ struct ContentView: View {
         ZStack {
             if prewarmSecondaryTabRoots {
                 SecondaryTabRootsPrewarm()
-                    .frame(width: 1, height: 1)
-                    .opacity(0.02)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .opacity(0.001)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }

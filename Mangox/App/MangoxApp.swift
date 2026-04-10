@@ -78,6 +78,7 @@ private struct NotificationLifecycleHook: View {
                 switch phase {
                 case .active:
                     FitnessSettingsSnapshotBackfill.runIfNeeded()
+                    TrainingPlanProgressCleanupMigration.runIfNeeded()
                     TrainingNotificationsScheduler.evaluateMissedKeyIfNeeded()
                     TrainingNotificationsScheduler.rescheduleFTPReminder()
                     WorkoutRAGIndex.scheduleBackgroundSync()

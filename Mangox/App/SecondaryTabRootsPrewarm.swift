@@ -17,9 +17,12 @@ struct SecondaryTabRootsPrewarm: View {
                     viewModel: di.makeCoachViewModel()
                 )
             }
+            .toolbar(.hidden, for: .navigationBar)
+
             NavigationStack(path: $settingsPath) {
                 SettingsView(navigationPath: $settingsPath, viewModel: di.makeProfileViewModel())
             }
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 }
