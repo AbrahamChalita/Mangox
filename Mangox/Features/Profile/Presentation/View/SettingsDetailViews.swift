@@ -1332,10 +1332,44 @@ struct AudioHapticsSettingsView: View {
                     settingsSubToggle(
                         title: "Training tips",
                         subtitle:
-                            "Occasional cadence, fueling, and posture nudges while you ride (indoor). Off by default.",
+                            "Occasional cadence, fueling, and posture nudges while you ride (indoor).",
                         isOn: $prefs.rideTipsEnabled
                     )
                     if prefs.rideTipsEnabled {
+                        Divider().background(Color.white.opacity(0.06))
+                        HStack {
+                            Text("Tip categories")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.white.opacity(0.6))
+                            Spacer()
+                            Button {
+                                prefs.applyRideTipsEssentialsPreset()
+                            } label: {
+                                Text("Use Essentials")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(AppColor.mango)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        ForEach(RideNudgeCategory.allCases, id: \.self) { category in
+                            Divider().background(Color.white.opacity(0.06))
+                            settingsSubToggle(
+                                title: category.label,
+                                subtitle: category == .fueling
+                                    ? "Fuel and hydration timing reminders"
+                                    : category == .cadence
+                                    ? "Low-rpm torque relief nudges"
+                                    : category == .posture
+                                    ? "Upper-body relaxation and form cues"
+                                    : category == .recovery
+                                    ? "Easy-step guidance during guided recoveries"
+                                    : "Extra indoor fluid reminders for warm setups",
+                                isOn: Binding(
+                                    get: { prefs.rideTipCategoryEnabled(category) },
+                                    set: { prefs.setRideTipCategory(category, isEnabled: $0) }
+                                )
+                            )
+                        }
                         Divider().background(Color.white.opacity(0.06))
                         settingsSubToggle(
                             title: "Spoken tips",

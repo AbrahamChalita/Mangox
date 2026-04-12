@@ -139,6 +139,11 @@ struct DashboardView: View {
                     indoorEndWorkoutOverlay
                         .zIndex(200)
                 }
+
+                if viewModel.showRideTipsOnboardingPrompt {
+                    rideTipsOnboardingOverlay
+                        .zIndex(201)
+                }
             }
             .overlay {
                 // Edge glow — zone color washes in from both screen edges on zone change.
@@ -171,6 +176,10 @@ struct DashboardView: View {
                     planID: planID,
                     allProgress: allProgress,
                     plan: plan
+                )
+                viewModel.evaluateRideTipsOnboardingPrompt(
+                    prefs: prefs,
+                    isInPreRide: workoutManager.state == .idle
                 )
             }
             .onDisappear {
@@ -215,6 +224,10 @@ struct DashboardView: View {
                         prefs: prefs
                     )
                 }
+                viewModel.evaluateRideTipsOnboardingPrompt(
+                    prefs: prefs,
+                    isInPreRide: newState == .idle
+                )
             }
             .onChange(of: workoutManager.currentLapNumber) { old, new in
                 if new > old { hapticManager.lapCompleted() }
@@ -381,6 +394,34 @@ struct DashboardView: View {
                     .mangoxButtonChrome(.destructive)
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    private var rideTipsOnboardingOverlay: some View {
+        MangoxConfirmOverlay(
+            title: "Try Smart Ride Tips?",
+            message:
+                "Get occasional fueling, cadence, and posture nudges for long indoor rides. You can change this anytime in Settings.",
+            onDismiss: { viewModel.applyRideTipsOnboardingDecline(prefs: prefs) }
+        ) {
+            HStack(spacing: 12) {
+                Button {
+                    viewModel.applyRideTipsOnboardingDecline(prefs: prefs)
+                } label: {
+                    Text("Not now")
+                        .mangoxFont(.bodyBold)
+                        .mangoxButtonChrome(.secondary)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    viewModel.applyRideTipsOnboardingEnable(prefs: prefs)
+                } label: {
+                    Text("Enable Essentials")
+                        .mangoxButtonChrome(.hero)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -1101,6 +1142,8 @@ struct DashboardView: View {
     }
 
     private func tickRideTipsIfNeeded() {
+        let distanceGoalKm = prefs.activeGoals.first(where: { $0.kind == .distance && $0.target > 0 })?.target
+
         let guidedStepIndex: Int = {
             guard guidedSession.isActive, guidedSession.currentStep != nil else { return -1 }
             return guidedSession.currentStepIndex
@@ -1115,6 +1158,8 @@ struct DashboardView: View {
             rideTipsEnabled: prefs.rideTipsEnabled,
             isRecording: workoutManager.state == .recording,
             elapsedSeconds: workoutManager.elapsedSeconds,
+            activeDistanceMeters: workoutManager.activeDistance,
+            activeDistanceGoalKm: distanceGoalKm,
             displayPower: workoutManager.displayPower,
             displayCadenceRpm: workoutManager.displayCadenceRpm,
             zoneId: zone.id,

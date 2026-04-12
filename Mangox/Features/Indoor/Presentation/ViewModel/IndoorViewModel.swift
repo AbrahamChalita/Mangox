@@ -47,6 +47,7 @@ final class IndoorViewModel {
     var isMilestoneVisible = false
     var pendingRideBriefing: String?
     var showEndConfirmation = false
+    var showRideTipsOnboardingPrompt = false
 
     // MARK: - Computed Display Properties (for DashboardView)
 
@@ -170,6 +171,8 @@ final class IndoorViewModel {
         rideTipsEnabled: Bool,
         isRecording: Bool,
         elapsedSeconds: Int,
+        activeDistanceMeters: Double,
+        activeDistanceGoalKm: Double?,
         displayPower: Int,
         displayCadenceRpm: Double,
         zoneId: Int,
@@ -194,9 +197,16 @@ final class IndoorViewModel {
             displayPower: displayPower,
             displayCadenceRpm: displayCadenceRpm,
             zoneId: zoneId,
-            lowCadenceThreshold: prefs.lowCadenceThreshold,
+            lowCadenceThreshold: lowCadenceThreshold,
             lowCadenceStreakSeconds: lowCadenceStreakSeconds,
             showLowCadenceHardWarning: showLowCadenceHardWarning,
+            activeDistanceMeters: activeDistanceMeters,
+            distanceGoalKm: activeDistanceGoalKm,
+            distanceGoalProgress: {
+                guard let goalKm = activeDistanceGoalKm, goalKm > 0 else { return nil }
+                let progress = activeDistanceMeters / (goalKm * 1000.0)
+                return min(max(progress, 0), 1)
+            }(),
             guidedIsActive: guidedIsActive,
             guidedStepIsRecovery: guidedStepIsRecovery,
             guidedSecondsIntoStep: guidedSecondsIntoStep,
@@ -253,6 +263,28 @@ final class IndoorViewModel {
 
     func dismissEndConfirmation() {
         showEndConfirmation = false
+    }
+
+    func evaluateRideTipsOnboardingPrompt(prefs: RidePreferences, isInPreRide: Bool) {
+        guard isInPreRide else {
+            showRideTipsOnboardingPrompt = false
+            return
+        }
+        if prefs.shouldShowRideTipsOnboardingPrompt {
+            showRideTipsOnboardingPrompt = true
+        }
+    }
+
+    func applyRideTipsOnboardingEnable(prefs: RidePreferences) {
+        prefs.applyRideTipsEssentialsPreset()
+        prefs.rideTipsPromptSeen = true
+        showRideTipsOnboardingPrompt = false
+    }
+
+    func applyRideTipsOnboardingDecline(prefs: RidePreferences) {
+        prefs.rideTipsEnabled = false
+        prefs.rideTipsPromptSeen = true
+        showRideTipsOnboardingPrompt = false
     }
 
     func configureGuidedSession(

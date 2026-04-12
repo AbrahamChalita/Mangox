@@ -29,12 +29,26 @@ enum RideNudgeSpacing: String, CaseIterable, Codable {
 
 // MARK: - Category (cooldown grouping)
 
-enum RideNudgeCategory: String, CaseIterable {
+enum RideNudgeCategory: String, CaseIterable, Codable {
     case fueling
     case cadence
     case posture
     case recovery
     case heatFluids
+
+    var label: String {
+        switch self {
+        case .fueling: return "Fueling"
+        case .cadence: return "Cadence"
+        case .posture: return "Posture"
+        case .recovery: return "Recovery"
+        case .heatFluids: return "Heat & Fluids"
+        }
+    }
+
+    static var essentials: Set<RideNudgeCategory> {
+        [.fueling, .cadence]
+    }
 }
 
 // MARK: - Display payload
@@ -62,6 +76,9 @@ struct RideNudgeContext: Sendable {
     /// Consecutive seconds cadence has been below threshold while pedaling (mirrors warning counter).
     var lowCadenceStreakSeconds: Int
     var showLowCadenceHardWarning: Bool
+    var activeDistanceMeters: Double
+    var distanceGoalKm: Double?
+    var distanceGoalProgress: Double?
     var guidedIsActive: Bool
     var guidedStepIsRecovery: Bool
     /// Seconds since start of current guided step; `nil` if not in a step.

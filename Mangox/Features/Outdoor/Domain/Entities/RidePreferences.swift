@@ -205,6 +205,8 @@ final class RidePreferences {
         static let rideTipsAudio        = "ride_pref_ride_tips_audio_v1"
         static let rideTipsSpacing      = "ride_pref_ride_tips_spacing_v1"
         static let rideTipsIndoorHeat   = "ride_pref_ride_tips_indoor_heat_v1"
+        static let rideTipsCategories   = "ride_pref_ride_tips_categories_v1"
+        static let rideTipsPromptSeen   = "ride_pref_ride_tips_prompt_seen_v1"
         static let unitSystem            = "ride_pref_unit_system"
         static let outdoorAutoLapMeters  = "ride_pref_outdoor_auto_lap_meters"
         static let prioritizeNavMapless  = "ride_pref_prioritize_nav_mapless_v1"
@@ -274,7 +276,7 @@ final class RidePreferences {
 
     // MARK: - Ride tips (in-ride coaching nudges)
 
-    /// Short contextual tips during rides (fueling, cadence, posture). **Off** until the rider opts in.
+    /// Short contextual tips during rides (fueling, cadence, posture).
     var rideTipsEnabled: Bool {
         didSet { UserDefaults.standard.set(rideTipsEnabled, forKey: Key.rideTipsEnabled) }
     }
@@ -292,6 +294,26 @@ final class RidePreferences {
     /// Unlocks indoor heat / fluid reminders (still obeys global spacing).
     var rideTipsIndoorHeatAwareness: Bool {
         didSet { UserDefaults.standard.set(rideTipsIndoorHeatAwareness, forKey: Key.rideTipsIndoorHeat) }
+    }
+
+    /// Enabled in-ride tip categories.
+    var rideTipsEnabledCategories: Set<RideNudgeCategory> {
+        didSet { persistRideTipsCategories() }
+    }
+
+    /// One-time indoor onboarding prompt guard.
+    var rideTipsPromptSeen: Bool {
+        didSet { UserDefaults.standard.set(rideTipsPromptSeen, forKey: Key.rideTipsPromptSeen) }
+    }
+
+    /// True when the user has explicitly set the tip master toggle at least once.
+    var hasStoredRideTipsEnabledPreference: Bool {
+        UserDefaults.standard.object(forKey: Key.rideTipsEnabled) != nil
+    }
+
+    /// One-time indoor onboarding prompt should be shown if the rider has never chosen a tip preference.
+    var shouldShowRideTipsOnboardingPrompt: Bool {
+        !rideTipsPromptSeen && !hasStoredRideTipsEnabledPreference
     }
 
     // MARK: - Unit System
@@ -459,11 +481,11 @@ final class RidePreferences {
             self.navigationTurnCuesEnabled = true
         }
 
-        // Ride tips — default off
+        // Ride tips — default ON for new installs
         if UserDefaults.standard.object(forKey: Key.rideTipsEnabled) != nil {
             self.rideTipsEnabled = UserDefaults.standard.bool(forKey: Key.rideTipsEnabled)
         } else {
-            self.rideTipsEnabled = false
+            self.rideTipsEnabled = true
         }
         if UserDefaults.standard.object(forKey: Key.rideTipsAudio) != nil {
             self.rideTipsAudioEnabled = UserDefaults.standard.bool(forKey: Key.rideTipsAudio)
@@ -474,12 +496,24 @@ final class RidePreferences {
            let spacing = RideNudgeSpacing(rawValue: raw) {
             self.rideTipsSpacing = spacing
         } else {
-            self.rideTipsSpacing = .normal
+            self.rideTipsSpacing = .rare
         }
         if UserDefaults.standard.object(forKey: Key.rideTipsIndoorHeat) != nil {
             self.rideTipsIndoorHeatAwareness = UserDefaults.standard.bool(forKey: Key.rideTipsIndoorHeat)
         } else {
             self.rideTipsIndoorHeatAwareness = false
+        }
+        if let data = UserDefaults.standard.data(forKey: Key.rideTipsCategories),
+           let decoded = try? JSONDecoder().decode([RideNudgeCategory].self, from: data) {
+            let restored = Set(decoded)
+            self.rideTipsEnabledCategories = restored.isEmpty ? RideNudgeCategory.essentials : restored
+        } else {
+            self.rideTipsEnabledCategories = RideNudgeCategory.essentials
+        }
+        if UserDefaults.standard.object(forKey: Key.rideTipsPromptSeen) != nil {
+            self.rideTipsPromptSeen = UserDefaults.standard.bool(forKey: Key.rideTipsPromptSeen)
+        } else {
+            self.rideTipsPromptSeen = false
         }
 
         // Unit system — default metric
@@ -602,6 +636,13 @@ final class RidePreferences {
         }
     }
 
+    private func persistRideTipsCategories() {
+        let payload = Array(rideTipsEnabledCategories)
+        if let data = try? JSONEncoder().encode(payload) {
+            UserDefaults.standard.set(data, forKey: Key.rideTipsCategories)
+        }
+    }
+
     // MARK: - Convenience Mutators
 
     /// Toggle a goal's enabled state by kind.
@@ -614,6 +655,28 @@ final class RidePreferences {
     func setGoalTarget(_ kind: RideGoal.Kind, target: Double) {
         guard let idx = goals.firstIndex(where: { $0.kind == kind }) else { return }
         goals[idx].target = target.clamped(to: kind.range)
+    }
+
+    func applyRideTipsEssentialsPreset() {
+        rideTipsEnabled = true
+        rideTipsEnabledCategories = RideNudgeCategory.essentials
+        rideTipsSpacing = .rare
+        rideTipsAudioEnabled = false
+    }
+
+    func setRideTipCategory(_ category: RideNudgeCategory, isEnabled: Bool) {
+        if isEnabled {
+            rideTipsEnabledCategories.insert(category)
+        } else {
+            rideTipsEnabledCategories.remove(category)
+        }
+        if rideTipsEnabledCategories.isEmpty {
+            rideTipsEnabledCategories = RideNudgeCategory.essentials
+        }
+    }
+
+    func rideTipCategoryEnabled(_ category: RideNudgeCategory) -> Bool {
+        rideTipsEnabledCategories.contains(category)
     }
 }
 
