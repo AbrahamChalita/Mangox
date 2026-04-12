@@ -48,7 +48,8 @@ final class WiFiTrainerService: NSObject, NetServiceBrowserDelegate, NetServiceD
     private var powerEMA: Double = 0
 
     private var connection: NWConnection?
-    private var pollingTask: Task<Void, Never>?
+    private var receiveTask: Task<Void, Never>?
+    private var isReceiving = false
 
     private var metricsSubscribers: [String: (Int, Double, Double, Int, Double) -> Void] = [:]
 
@@ -241,7 +242,7 @@ final class WiFiTrainerService: NSObject, NetServiceBrowserDelegate, NetServiceD
                 case .ready:
                     wifiLogger.info("Connected to \(trainerName)")
                     self.connectionState = .connected(trainerName)
-                    self.startPolling()
+                    self.startReceivingLoop()
 
                 case .failed(let error):
                     wifiLogger.error("Connection failed: \(error.localizedDescription)")
@@ -261,8 +262,9 @@ final class WiFiTrainerService: NSObject, NetServiceBrowserDelegate, NetServiceD
 
     func disconnect() {
         stopDiscovery()
-        pollingTask?.cancel()
-        pollingTask = nil
+        receiveTask?.cancel()
+        receiveTask = nil
+        isReceiving = false
         connection?.cancel()
         connection = nil
         connectedTrainer = nil
@@ -278,34 +280,43 @@ final class WiFiTrainerService: NSObject, NetServiceBrowserDelegate, NetServiceD
         lastPacketReceived = nil
     }
 
-    // MARK: - Data Polling
+    // MARK: - Data Receive Loop
 
-    private func startPolling() {
-        pollingTask?.cancel()
-        pollingTask = Task { [weak self] in
+    private func startReceivingLoop() {
+        receiveTask?.cancel()
+        receiveTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            while !Task.isCancelled {
-                await self.receiveData()
-                try? await Task.sleep(nanoseconds: 125_000_000) // ~8Hz
-            }
+            await self.receiveNextPacket()
         }
     }
 
-    private func receiveData() async {
-        connection?.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] content, _, isComplete, error in
+    private func receiveNextPacket() async {
+        guard !Task.isCancelled else { return }
+        guard !isReceiving else { return }
+        guard let connection else { return }
+
+        isReceiving = true
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] content, _, isComplete, error in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                self.isReceiving = false
+
                 if let data = content, !data.isEmpty {
                     self.parseTrainerData(data)
                 }
 
-                if let error = error {
+                if let error {
                     wifiLogger.error("Receive error: \(error.localizedDescription)")
+                    self.disconnect()
+                    return
                 }
 
                 if isComplete {
                     self.disconnect()
+                    return
                 }
+
+                await self.receiveNextPacket()
             }
         }
     }

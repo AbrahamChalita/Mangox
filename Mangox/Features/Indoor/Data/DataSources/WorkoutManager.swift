@@ -238,6 +238,7 @@ final class WorkoutManager {
     private var workoutStartDistance: Double = 0
     private var lastRecordedDistance: Double = 0
     private var integratedDistance: Double = 0
+    private var integratedDistanceAnchor: Double = 0
 
     private(set) weak var bleService: (any BLEServiceProtocol)?
     private weak var dataSource: (any DataSourceServiceProtocol)?
@@ -436,6 +437,7 @@ final class WorkoutManager {
         workoutStartDistance = initialDistance
         lapStartDistance = 0
         lastRecordedDistance = initialDistance
+        integratedDistanceAnchor = 0
 
         state = .recording
         startTimer()
@@ -704,9 +706,14 @@ final class WorkoutManager {
         latestDistanceInWindow = nil
 
         // Distance: integrate speed as fallback when FTMS omits total distance
-        integratedDistance += (max(0, effectiveSpeed) / 3.6) * dt  // km/h → m/s
+        let integratedDistanceIncrement = (max(0, effectiveSpeed) / 3.6) * dt  // km/h → m/s
+        integratedDistance += integratedDistanceIncrement
         let sensorDistance = max(0, lastRecordedDistance - workoutStartDistance)
-        activeDistance = max(sensorDistance, integratedDistance)
+        if sensorDistance > integratedDistanceAnchor {
+            integratedDistanceAnchor = sensorDistance
+            integratedDistance = 0
+        }
+        activeDistance = max(sensorDistance, integratedDistanceAnchor + integratedDistance)
 
         // --- Route simulation: update grade from GPX every N seconds ---
         // Skip until trainerEngageDelay has passed so the trainer doesn't
@@ -1069,6 +1076,7 @@ final class WorkoutManager {
         previousLapDuration = 0
         activeDistance = 0
         integratedDistance = 0
+        integratedDistanceAnchor = 0
         workoutStartDistance = 0
 
         trainerMode = .none

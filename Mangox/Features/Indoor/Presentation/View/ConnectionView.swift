@@ -433,8 +433,15 @@ struct ConnectionView: View {
                         await MainActor.run {
                             let t = CustomWorkoutTemplate(name: parsed.name, intervals: parsed.intervals)
                             modelContext.insert(t)
-                            try? modelContext.save()
-                            selectedCustomTemplateID = t.id
+                            do {
+                                try modelContext.save()
+                                selectedCustomTemplateID = t.id
+                            } catch {
+                                modelContext.delete(t)
+                                zwoImportError =
+                                    (error as? LocalizedError)?.errorDescription
+                                    ?? error.localizedDescription
+                            }
                         }
                     } catch {
                         await MainActor.run {
@@ -792,6 +799,14 @@ struct ConnectionView: View {
                     .strokeBorder(accentSuccess.opacity(0.15), lineWidth: 1)
             )
         }
+        .accessibilityLabel(
+            bleService.isScanningForDevices ? "Stop scanning for devices" : "Scan for devices"
+        )
+        .accessibilityHint(
+            bleService.isScanningForDevices
+                ? "Stops Bluetooth scanning"
+                : "Find nearby trainers and sensors"
+        )
     }
 
     // MARK: - Devices Card
@@ -818,26 +833,11 @@ struct ConnectionView: View {
         return rows
     }
 
-    /// IDs of peripherals that are already connected — used to filter scan results so
-    /// the same device doesn't appear twice (once in "Connected" and once in scan list).
-    private var connectedPeripheralIDs: Set<UUID> {
-        var ids = Set<UUID>()
-        // Match by name since we don't expose the CBPeripheral from BLEManager for
-        // already-connected devices. Discovered peripherals whose name matches a
-        // connected device are considered duplicates.
-        let connectedNames = Set(connectedDeviceRows.map(\.name))
-        for d in bleService.discoveredPeripherals where connectedNames.contains(d.name) {
-            ids.insert(d.id)
-        }
-        return ids
-    }
-
     private var devicesCard: some View {
         let connected = connectedDeviceRows
-        let dupIDs = connectedPeripheralIDs
 
         // Scan results minus already-connected devices
-        let scanResults = bleService.discoveredPeripherals.filter { !dupIDs.contains($0.id) }
+        let scanResults = bleService.discoveredPeripherals.filter { !bleService.activePeripheralIDs.contains($0.id) }
         let scanForDisplay =
             outdoorSensorsOnly ? scanResults.filter { $0.deviceType != .trainer } : scanResults
         let trainers = scanForDisplay.filter { $0.deviceType == .trainer }
@@ -1070,6 +1070,14 @@ struct ConnectionView: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 16)
         .padding(.top, 14)
+        .accessibilityLabel(
+            isWiFiDiscovering ? "Stop searching Wi-Fi trainers" : "Search Wi-Fi trainers"
+        )
+        .accessibilityHint(
+            isWiFiDiscovering
+                ? "Stops Bonjour discovery"
+                : "Find trainers on your local network"
+        )
     }
 
     private func wifiConnectedRow(trainer: DiscoveredWiFiTrainer) -> some View {
@@ -1103,6 +1111,9 @@ struct ConnectionView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(trainer.name), connected Wi-Fi trainer")
+        .accessibilityValue("\(trainer.ipAddress), port \(trainer.port)")
     }
 
     private func wifiConnectingRow(name: String) -> some View {
@@ -1123,6 +1134,8 @@ struct ConnectionView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(name), connecting Wi-Fi trainer")
     }
 
     private func wifiTrainerRow(trainer: DiscoveredWiFiTrainer, connectDisabled: Bool) -> some View
@@ -1167,6 +1180,9 @@ struct ConnectionView: View {
         }
         .buttonStyle(.plain)
         .disabled(connectDisabled)
+        .accessibilityLabel("Connect \(trainer.name)")
+        .accessibilityValue("\(trainer.ipAddress), port \(trainer.port)")
+        .accessibilityHint(connectDisabled ? "Another trainer is already connected" : "Connect to trainer over Wi-Fi")
     }
 
     // MARK: - Connected Devices Section
@@ -1415,6 +1431,14 @@ struct ConnectionView: View {
     }
 
     private func deviceRow(device: DiscoveredPeripheral, type: DeviceType) -> some View {
+        let typeLabel: String = {
+            switch type {
+            case .heartRateMonitor: return "Heart rate monitor"
+            case .trainer: return "Trainer"
+            case .cyclingSpeedCadence: return "Speed and cadence sensor"
+            case .unknown: return "Unknown device"
+            }
+        }()
         let connState: BLEConnectionState = {
             switch type {
             case .trainer: return bleService.trainerConnectionState
@@ -1423,12 +1447,9 @@ struct ConnectionView: View {
             case .unknown: return bleService.trainerConnectionState
             }
         }()
-        let isThisConnected = {
-            if case .connected(let n) = connState, n == device.name { return true }
-            return false
-        }()
-        let isThisConnecting = {
-            if case .connecting(let n) = connState, n == device.name { return true }
+        let isThisConnected = bleService.activePeripheralIDs.contains(device.id) && connState.isConnected
+        let isThisConnecting = bleService.activePeripheralIDs.contains(device.id) && {
+            if case .connecting = connState { return true }
             return false
         }()
         let rowColor =
@@ -1514,6 +1535,13 @@ struct ConnectionView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(device.name), \(typeLabel)")
+        .accessibilityValue(
+            isThisConnected
+                ? "Connected"
+                : (isThisConnecting ? "Connecting" : "Not connected")
+        )
+        .accessibilityHint("Signal \(signalBars(rssi: device.rssi)) of 4")
     }
 
     // MARK: - Custom workout library (.zwo)
@@ -1638,7 +1666,11 @@ struct ConnectionView: View {
             selectedCustomTemplateID = nil
         }
         modelContext.delete(template)
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            zwoImportError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 
     // MARK: - Route Card

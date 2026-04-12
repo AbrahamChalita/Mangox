@@ -104,6 +104,7 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
         isRecording: Bool,
         prefs: RidePreferences,
         workoutManager: WorkoutManager,
+        dataSourceService: DataSourceServiceProtocol,
         bleService: BLEServiceProtocol
     ) async {
         guard prefs.indoorLiveActivityEnabled else {
@@ -116,9 +117,9 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
         }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
-        let hr = max(0, bleService.metrics.heartRate)
+        let hr = max(0, dataSourceService.heartRate)
         let power = workoutManager.displayPower
-        let cadence = bleService.metrics.cadence
+        let cadence = dataSourceService.cadence
         let speed = workoutManager.metricsSpeed
         let distanceM = workoutManager.activeDistance
         let duration = Double(workoutManager.elapsedSeconds)

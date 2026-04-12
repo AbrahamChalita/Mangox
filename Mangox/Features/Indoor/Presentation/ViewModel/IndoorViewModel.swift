@@ -111,6 +111,7 @@ final class IndoorViewModel {
     private var crossedDistanceGoalPercents: Set<Int> = []
     private var lastDelightOverlayAt: Date?
     private var rideNudgeSession = RideNudgeSessionState()
+    private var lastPersistenceError: String?
 
     // MARK: - Trainer metrics helpers
     func meanPower(samples: [Int]) -> Int {
@@ -164,6 +165,15 @@ final class IndoorViewModel {
         if activeRideTip?.id == tipID {
             activeRideTip = nil
         }
+    }
+
+    func consumePersistenceError() -> String? {
+        defer { lastPersistenceError = nil }
+        return lastPersistenceError
+    }
+
+    func clearPersistenceError() {
+        lastPersistenceError = nil
     }
 
     func nextRideTip(
@@ -368,6 +378,7 @@ final class IndoorViewModel {
             isRecording: isRecording,
             prefs: prefs,
             workoutManager: workoutManager,
+            dataSourceService: dataSourceService,
             bleService: bleService
         )
     }
@@ -380,8 +391,13 @@ final class IndoorViewModel {
         if let customWorkoutTemplateID {
             workoutManager.activePlanDayID = nil
             workoutManager.activePlanID = nil
-            return try? workoutPersistenceRepository.fetchCustomWorkoutTemplate(
-                id: customWorkoutTemplateID)
+            do {
+                return try workoutPersistenceRepository.fetchCustomWorkoutTemplate(
+                    id: customWorkoutTemplateID)
+            } catch {
+                lastPersistenceError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                return nil
+            }
         }
 
         workoutManager.activePlanDayID = planDayID
@@ -558,7 +574,12 @@ final class IndoorViewModel {
         allProgress: [TrainingPlanProgress]
     ) {
         if let progress = allProgress.first(where: { $0.planID == resolvedPlanID }) {
-            try? trainingPlanPersistenceRepository.markCompleted(dayID, progress: progress)
+            do {
+                try trainingPlanPersistenceRepository.markCompleted(dayID, progress: progress)
+            } catch {
+                lastPersistenceError =
+                    (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
 
         if let workout = completedWorkout,
@@ -570,7 +591,12 @@ final class IndoorViewModel {
                 planDay: linkedPlanDay,
                 progress: progress
             )
-            try? trainingPlanPersistenceRepository.save(progress: progress)
+            do {
+                try trainingPlanPersistenceRepository.save(progress: progress)
+            } catch {
+                lastPersistenceError =
+                    (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
 }

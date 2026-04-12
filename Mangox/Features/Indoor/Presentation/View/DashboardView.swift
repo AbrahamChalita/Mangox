@@ -26,6 +26,13 @@ struct DashboardView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     // Delight state
     @State private var zonePulse = false
+    @State private var zonePulseResetTask: Task<Void, Never>?
+    @State private var rideBriefingTask: Task<Void, Never>?
+    @State private var liveActivitySyncTask: Task<Void, Never>?
+    @State private var milestoneTasks: [UUID: Task<Void, Never>] = [:]
+    @State private var tipDismissTask: Task<Void, Never>?
+    @State private var milestoneHideTask: Task<Void, Never>?
+    @State private var persistenceErrorMessage: String?
     private let prefs = RidePreferences.shared
 
     /// Whole-km toast + haptic when crossing each multiple (e.g. 5 → 5 km, 10 km, …).
@@ -144,6 +151,11 @@ struct DashboardView: View {
                     rideTipsOnboardingOverlay
                         .zIndex(201)
                 }
+
+                if let persistenceErrorMessage {
+                    persistenceErrorOverlay(message: persistenceErrorMessage)
+                        .zIndex(202)
+                }
             }
             .overlay {
                 // Edge glow — zone color washes in from both screen edges on zone change.
@@ -181,11 +193,15 @@ struct DashboardView: View {
                     prefs: prefs,
                     isInPreRide: workoutManager.state == .idle
                 )
+                persistenceErrorMessage = viewModel.consumePersistenceError()
             }
             .onDisappear {
-                // Clean up BLE subscriptions and timer without relying on deinit
-                // actor isolation (which is inconsistent across Swift toolchain versions).
-                viewModel.tearDownWorkoutSession()
+                cancelTransientTasks()
+                // Only tear down subscriptions/timer when the ride session is inactive.
+                // Active sessions should survive transient view transitions.
+                if workoutManager.state == .idle || workoutManager.state == .finished {
+                    viewModel.tearDownWorkoutSession()
+                }
             }
             .onChange(of: zone.id) { _, newZone in
                 if workoutManager.state == .recording {
@@ -194,8 +210,10 @@ struct DashboardView: View {
                         zonePulse = false
                     } else {
                         zonePulse = true
-                        Task { @MainActor in
+                        zonePulseResetTask?.cancel()
+                        zonePulseResetTask = Task { @MainActor in
                             try? await Task.sleep(for: .milliseconds(250))
+                            guard !Task.isCancelled else { return }
                             zonePulse = false
                         }
                     }
@@ -206,8 +224,10 @@ struct DashboardView: View {
                     oldState: oldState,
                     newState: newState
                 ) {
-                    Task { @MainActor in
+                    rideBriefingTask?.cancel()
+                    rideBriefingTask = Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(1800))
+                        guard !Task.isCancelled else { return }
                         guard workoutManager.state == .recording else { return }
                         presentRideTip(RideNudgeDisplay(
                             id: "ai_ride_briefing",
@@ -218,7 +238,8 @@ struct DashboardView: View {
                         ))
                     }
                 }
-                Task {
+                liveActivitySyncTask?.cancel()
+                liveActivitySyncTask = Task {
                     await viewModel.syncLiveActivity(
                         isRecording: newState == .recording,
                         prefs: prefs
@@ -228,6 +249,9 @@ struct DashboardView: View {
                     prefs: prefs,
                     isInPreRide: newState == .idle
                 )
+                if persistenceErrorMessage == nil {
+                    persistenceErrorMessage = viewModel.consumePersistenceError()
+                }
             }
             .onChange(of: workoutManager.currentLapNumber) { old, new in
                 if new > old { hapticManager.lapCompleted() }
@@ -252,7 +276,8 @@ struct DashboardView: View {
             }
             .onChange(of: workoutManager.elapsedSeconds) { _, _ in
                 tickRideTipsIfNeeded()
-                Task {
+                liveActivitySyncTask?.cancel()
+                liveActivitySyncTask = Task {
                     await viewModel.syncLiveActivity(
                         isRecording: workoutManager.state == .recording,
                         prefs: prefs
@@ -422,6 +447,22 @@ struct DashboardView: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+
+    private func persistenceErrorOverlay(message: String) -> some View {
+        MangoxConfirmOverlay(
+            title: "Save Failed",
+            message: message,
+            onDismiss: { persistenceErrorMessage = nil }
+        ) {
+            Button {
+                persistenceErrorMessage = nil
+            } label: {
+                Text("OK")
+                    .mangoxButtonChrome(.hero)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -1133,8 +1174,10 @@ struct DashboardView: View {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
             viewModel.isMilestoneVisible = true
         }
-        Task { @MainActor in
+        milestoneHideTask?.cancel()
+        milestoneHideTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.4)) {
                 viewModel.hideMilestone()
             }
@@ -1182,8 +1225,10 @@ struct DashboardView: View {
         hapticManager.rideTipNudge()
         AudioCueManager.shared.announceRideTip(script: tip.audioScript)
         let tipID = tip.id
-        Task { @MainActor in
+        tipDismissTask?.cancel()
+        tipDismissTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(11))
+            guard !Task.isCancelled else { return }
             viewModel.clearRideTip(ifMatching: tipID)
         }
     }
@@ -1198,8 +1243,11 @@ struct DashboardView: View {
         )
         for (index, trigger) in triggers.enumerated() {
             let delay = Double(index) * 3.5
-            Task { @MainActor in
+            let taskID = UUID()
+            let task = Task { @MainActor in
+                defer { milestoneTasks[taskID] = nil }
                 try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled else { return }
                 guard workoutManager.state == .recording else { return }
                 switch trigger {
                 case .distanceInterval(let km):
@@ -1212,6 +1260,24 @@ struct DashboardView: View {
                 }
                 hapticManager.milestone()
             }
+            milestoneTasks[taskID] = task
+        }
+    }
+
+    private func cancelTransientTasks() {
+        zonePulseResetTask?.cancel()
+        zonePulseResetTask = nil
+        rideBriefingTask?.cancel()
+        rideBriefingTask = nil
+        liveActivitySyncTask?.cancel()
+        liveActivitySyncTask = nil
+        tipDismissTask?.cancel()
+        tipDismissTask = nil
+        milestoneHideTask?.cancel()
+        milestoneHideTask = nil
+        for (id, task) in milestoneTasks {
+            task.cancel()
+            milestoneTasks[id] = nil
         }
     }
 

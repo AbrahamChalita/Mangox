@@ -16,6 +16,7 @@ protocol LiveActivityServiceProtocol: AnyObject {
         isRecording: Bool,
         prefs: RidePreferences,
         workoutManager: WorkoutManager,
+        dataSourceService: DataSourceServiceProtocol,
         bleService: BLEServiceProtocol
     ) async
 

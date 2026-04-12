@@ -47,6 +47,14 @@ final class DataSourceCoordinator: DataSourceServiceProtocol {
     private var bleSubscriberID = "DataSourceCoordinatorBLE"
     private var wifiSubscriberID = "DataSourceCoordinatorWiFi"
 
+    private var lastBLEMetrics: CyclingMetrics?
+    private var lastWiFiMetrics: CyclingMetrics?
+    private var pendingSourceCandidate: PrimaryDataSource?
+    private var pendingSourceSince: Date?
+
+    private let sourceStaleThreshold: TimeInterval = 2.0
+    private let sourceSwitchHysteresis: TimeInterval = 1.2
+
     init(bleManager: BLEManager, wifiService: WiFiTrainerService) {
         self.bleManager = bleManager
         self.wifiService = wifiService
@@ -68,36 +76,131 @@ final class DataSourceCoordinator: DataSourceServiceProtocol {
     }
 
     private func handleBLEMetrics(_ metrics: CyclingMetrics) {
-        // WiFi stream takes priority whenever a WiFi trainer session is active.
-        if wifiService.connectionState.isConnected {
+        lastBLEMetrics = metrics
+        updateActiveSourcePolicy(now: Date())
+        publishActiveMetrics()
+    }
+
+    private func handleWiFiMetrics(power p: Int, cadence c: Double, speed s: Double, heartRate hr: Int, distance dist: Double) {
+        var metrics = CyclingMetrics(lastUpdate: Date())
+        metrics.power = p
+        metrics.cadence = c
+        metrics.speed = s
+        metrics.heartRate = hr
+        metrics.totalDistance = dist
+        metrics.hrSource = bleManager.metrics.hrSource
+        lastWiFiMetrics = metrics
+
+        updateActiveSourcePolicy(now: Date())
+        publishActiveMetrics()
+    }
+
+    private func updateActiveSourcePolicy(now: Date) {
+        let wifiConnected = wifiService.connectionState.isConnected
+        let bleConnected = bleManager.trainerConnectionState.isConnected
+
+        let wifiFresh = isWiFiFresh(now)
+        let bleFresh = isBLEFresh(now)
+
+        let preferred: PrimaryDataSource
+        if wifiFresh {
+            preferred = .wifi
+        } else if bleFresh {
+            preferred = .bluetooth
+        } else if wifiConnected {
+            preferred = .wifi
+        } else if bleConnected {
+            preferred = .bluetooth
+        } else {
+            preferred = .none
+        }
+
+        // Immediate switch if current source is stale/missing and an alternate source is available.
+        if shouldSwitchImmediately(to: preferred, now: now) {
+            activeDataSource = preferred
+            pendingSourceCandidate = nil
+            pendingSourceSince = nil
             return
         }
 
-        activeDataSource = .bluetooth
+        guard preferred != activeDataSource else {
+            pendingSourceCandidate = nil
+            pendingSourceSince = nil
+            return
+        }
+
+        if pendingSourceCandidate != preferred {
+            pendingSourceCandidate = preferred
+            pendingSourceSince = now
+            return
+        }
+
+        guard let pendingSourceSince else { return }
+        if now.timeIntervalSince(pendingSourceSince) >= sourceSwitchHysteresis {
+            activeDataSource = preferred
+            self.pendingSourceCandidate = nil
+            self.pendingSourceSince = nil
+        }
+    }
+
+    private func shouldSwitchImmediately(to preferred: PrimaryDataSource, now: Date) -> Bool {
+        guard preferred != activeDataSource else { return false }
+        switch activeDataSource {
+        case .wifi:
+            return !isWiFiFresh(now) && preferred != .wifi
+        case .bluetooth:
+            return !isBLEFresh(now) && preferred != .bluetooth
+        case .none:
+            return true
+        }
+    }
+
+    private func isWiFiFresh(_ now: Date) -> Bool {
+        guard wifiService.connectionState.isConnected, let last = wifiService.lastPacketReceived else {
+            return false
+        }
+        return now.timeIntervalSince(last) <= sourceStaleThreshold
+    }
+
+    private func isBLEFresh(_ now: Date) -> Bool {
+        guard bleManager.trainerConnectionState.isConnected, let last = bleManager.lastPacketReceived else {
+            return false
+        }
+        return now.timeIntervalSince(last) <= sourceStaleThreshold
+    }
+
+    private func publishActiveMetrics() {
+        let selectedMetrics: CyclingMetrics?
+        switch activeDataSource {
+        case .wifi:
+            selectedMetrics = lastWiFiMetrics ?? lastBLEMetrics
+            smoothedPower = wifiService.connectionState.isConnected ? wifiService.smoothedPower : bleManager.smoothedPower
+        case .bluetooth:
+            selectedMetrics = lastBLEMetrics ?? lastWiFiMetrics
+            smoothedPower = bleManager.smoothedPower
+        case .none:
+            selectedMetrics = nil
+            smoothedPower = 0
+        }
+
+        guard let metrics = selectedMetrics else {
+            power = 0
+            cadence = 0
+            speed = 0
+            heartRate = 0
+            totalDistance = 0
+            notifySubscribers()
+            notifyCyclingMetricsSubscribersWiFi()
+            return
+        }
+
         power = metrics.power
         cadence = metrics.cadence
         speed = metrics.speed
         heartRate = metrics.heartRate
         totalDistance = metrics.totalDistance
-        smoothedPower = bleManager.smoothedPower
-
         notifySubscribers()
         notifyCyclingMetricsSubscribers(metrics: metrics)
-    }
-
-    private func handleWiFiMetrics(power p: Int, cadence c: Double, speed s: Double, heartRate hr: Int, distance dist: Double) {
-        // WiFi always takes priority
-        activeDataSource = .wifi
-
-        power = p
-        cadence = c
-        speed = s
-        heartRate = hr
-        totalDistance = dist
-        smoothedPower = wifiService.smoothedPower
-
-        notifySubscribers()
-        notifyCyclingMetricsSubscribersWiFi()
     }
 
     // MARK: - Public API
@@ -177,17 +280,8 @@ final class DataSourceCoordinator: DataSourceServiceProtocol {
 
     /// Called when either data source changes state
     func updateActiveSource() {
-        let wifiConnected = wifiService.connectionState.isConnected
-        let bleConnected = bleManager.trainerConnectionState.isConnected
-
-        // WiFi takes priority if available
-        if wifiConnected {
-            activeDataSource = .wifi
-        } else if bleConnected {
-            activeDataSource = .bluetooth
-        } else {
-            activeDataSource = .none
-        }
+        updateActiveSourcePolicy(now: Date())
+        publishActiveMetrics()
     }
 
     // MARK: - Computed Properties
