@@ -16,10 +16,11 @@ final class CoachViewModel {
     var planProgress: PlanGenerationProgress? { coach.planProgress }
     var planConfirmationDraft: PlanGenerationDraft? { coach.planConfirmationDraft }
     var planSaveCelebration: PlanSaveCelebration? { coach.planSaveCelebration }
+    var workoutConfirmationDraft: WorkoutGenerationDraft? { coach.workoutConfirmationDraft }
+    var workoutSaveCelebration: WorkoutSaveCelebration? { coach.workoutSaveCelebration }
     var streamDraftText: String { coach.streamDraftText }
     var streamStatusText: String? { coach.streamStatusText }
     var streamIsThinking: Bool { coach.streamIsThinking }
-    var streamUsesOnDeviceAppearance: Bool { coach.streamUsesOnDeviceAppearance }
     var todayMessageCount: Int { coach.todayMessageCount }
     var contextWindowSize: Int { coach.contextWindowSize }
     var currentContextCount: Int { coach.currentContextCount }
@@ -87,19 +88,14 @@ final class CoachViewModel {
 
     func sendMessage(
         _ text: String,
-        isPro: Bool,
-        delivery: CoachChatDelivery = .automatic
+        isPro: Bool
     ) async {
-        await coach.sendMessage(text, isPro: isPro, delivery: delivery)
+        await coach.sendMessage(text, isPro: isPro)
     }
 
     func createNewSession() {
         starterContent = nil
         coach.createNewSession()
-    }
-
-    func escalateStarterOnDeviceToCloud(isPro: Bool) async {
-        await coach.escalateStarterOnDeviceToCloud(isPro: isPro)
     }
 
     func switchToSession(_ sessionID: UUID) {
@@ -121,6 +117,18 @@ final class CoachViewModel {
 
     func clearPlanSaveCelebration() {
         coach.planSaveCelebration = nil
+    }
+
+    func clearWorkoutConfirmationDraft() {
+        coach.workoutConfirmationDraft = nil
+    }
+
+    func clearWorkoutSaveCelebration() {
+        coach.workoutSaveCelebration = nil
+    }
+
+    func saveConfirmedWorkoutDraft(_ draft: WorkoutGenerationDraft) throws {
+        try coach.saveConfirmedWorkoutDraft(draft)
     }
 
     func stagePlanRegeneration(from aiPlan: AIGeneratedPlanDraft) -> Bool {

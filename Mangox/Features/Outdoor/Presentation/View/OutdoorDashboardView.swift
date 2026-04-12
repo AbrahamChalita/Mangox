@@ -15,9 +15,9 @@ import UniformTypeIdentifiers
 /// - **Turn-by-Turn**: Apple Maps directions + navigation HUD
 struct OutdoorDashboardView: View {
     @State private var viewModel: OutdoorViewModel
-    @Environment(DIContainer.self) private var di
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
+    let di: DIContainer
     @Binding var navigationPath: NavigationPath
 
     // searchQuery, searchFieldFocused moved into DestinationSearchOverlay / RouteSearchPage
@@ -41,8 +41,9 @@ struct OutdoorDashboardView: View {
     /// Match `LocationManager` acceptable accuracy for a “ready” outdoor fix.
     private let outdoorReadyAccuracyMeters: Double = 50
 
-    init(navigationPath: Binding<NavigationPath>, viewModel: OutdoorViewModel) {
+    init(navigationPath: Binding<NavigationPath>, di: DIContainer, viewModel: OutdoorViewModel) {
         self._navigationPath = navigationPath
+        self.di = di
         self._viewModel = State(initialValue: viewModel)
     }
 
@@ -189,6 +190,7 @@ struct OutdoorDashboardView: View {
             )
         }
         .onDisappear {
+            ls.persistRecordingCheckpointIfNeeded()
             viewModel.handleDisappear(locationManager: ls)
         }
         .task(id: ls.isAuthorized) {
@@ -3198,6 +3200,7 @@ struct OutdoorDashboardView: View {
 
     private func endRide() {
         ls.stopRecording()
+        Task { await viewModel.endLiveActivity() }
         let plannedRouteDistanceMeters =
             ns.routeDistance > 0
             ? ns.routeDistance
@@ -3235,6 +3238,7 @@ struct OutdoorDashboardView: View {
 
     private func discardRide() {
         viewModel.discardRide(using: ls)
+        Task { await viewModel.endLiveActivity() }
         navigationPath.removeLast()
     }
 }

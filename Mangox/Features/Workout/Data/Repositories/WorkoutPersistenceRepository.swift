@@ -35,6 +35,13 @@ final class WorkoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol {
         return template.id
     }
 
+    func saveCustomWorkoutTemplate(name: String, intervals: [IntervalSegment]) throws -> UUID {
+        let template = CustomWorkoutTemplate(name: name, intervals: intervals)
+        modelContext.insert(template)
+        try modelContext.save()
+        return template.id
+    }
+
     func deleteWorkout(_ workout: Workout) throws {
         if let dayID = workout.planDayID, let planID = workout.planID {
             unmarkPlanDay(dayID, planID: planID)
@@ -53,6 +60,68 @@ final class WorkoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol {
         }
         try modelContext.save()
         MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
+    }
+
+    @discardableResult
+    func saveImportedWorkout(_ payload: ImportedWorkoutPayload) throws -> Workout {
+        let workout = Workout(startDate: payload.startDate)
+        workout.duration = TimeInterval(payload.durationSeconds)
+        workout.distance = payload.distanceMeters
+        workout.avgPower = payload.avgPower
+        workout.maxPower = payload.maxPower
+        workout.avgHR = payload.avgHR
+        workout.maxHR = payload.maxHR
+        workout.avgCadence = averageCadence(from: payload.samples)
+        workout.avgSpeed = averageSpeed(from: payload.samples, fallbackDistance: payload.distanceMeters, durationSeconds: payload.durationSeconds)
+        workout.endDate = payload.startDate.addingTimeInterval(TimeInterval(payload.durationSeconds))
+        workout.status = .completed
+        workout.origin = .imported
+        workout.importFormat = payload.format
+        workout.notes = "Imported from \(payload.format.rawValue.uppercased()) · \(payload.fileName)"
+        workout.sampleCount = payload.samples.count
+
+        let powerSamples = payload.samples.map(\.power).filter { $0 > 0 }
+        if !powerSamples.isEmpty {
+            let metrics = WorkoutMetricsAggregator.normalizedPowerIntensityAndTSS(
+                powerSamples: powerSamples,
+                durationSeconds: payload.durationSeconds,
+                ftp: Double(PowerZone.ftp)
+            )
+            workout.normalizedPower = metrics.np
+            workout.intensityFactor = metrics.intensityFactor
+            workout.tss = metrics.tss
+        }
+
+        let lap = LapSplit(lapNumber: 1, startTime: payload.startDate)
+        lap.endTime = workout.endDate
+        lap.duration = workout.duration
+        lap.avgPower = workout.avgPower
+        lap.maxPower = workout.maxPower
+        lap.avgCadence = workout.avgCadence
+        lap.avgSpeed = workout.avgSpeed
+        lap.avgHR = workout.avgHR
+        lap.distance = workout.distance
+        lap.workout = workout
+
+        modelContext.insert(workout)
+        modelContext.insert(lap)
+
+        for samplePayload in payload.samples {
+            let sample = WorkoutSample(
+                timestamp: samplePayload.timestamp,
+                elapsedSeconds: samplePayload.elapsedSeconds,
+                power: samplePayload.power,
+                cadence: samplePayload.cadence,
+                speed: samplePayload.speed,
+                heartRate: samplePayload.heartRate
+            )
+            sample.workout = workout
+            modelContext.insert(sample)
+        }
+
+        try modelContext.save()
+        MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
+        return workout
     }
 
     func fetchCustomWorkoutTemplate(id: UUID) throws -> PlanDay? {
@@ -98,5 +167,24 @@ final class WorkoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol {
             // The final `try modelContext.save()` in `deleteWorkout` will persist this change
             // together with the workout deletion, so no extra save is needed here.
         }
+    }
+
+    private func averageCadence(from samples: [ImportedWorkoutSamplePayload]) -> Double {
+        let cadenceSamples = samples.map(\.cadence).filter { $0 > 0 }
+        guard !cadenceSamples.isEmpty else { return 0 }
+        return cadenceSamples.reduce(0, +) / Double(cadenceSamples.count)
+    }
+
+    private func averageSpeed(
+        from samples: [ImportedWorkoutSamplePayload],
+        fallbackDistance: Double,
+        durationSeconds: Int
+    ) -> Double {
+        let speedSamples = samples.map(\.speed).filter { $0 > 0 }
+        if !speedSamples.isEmpty {
+            return speedSamples.reduce(0, +) / Double(speedSamples.count)
+        }
+        guard durationSeconds > 0, fallbackDistance > 0 else { return 0 }
+        return (fallbackDistance / Double(durationSeconds)) * 3.6
     }
 }

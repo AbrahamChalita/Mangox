@@ -29,7 +29,7 @@ func appRouteDestination(_ route: AppRoute, path: Binding<NavigationPath>, di: D
             .toolbar(.hidden, for: .navigationBar)
             .toolbar(.hidden, for: .tabBar)
     case .outdoorDashboard:
-        OutdoorDashboardView(navigationPath: path, viewModel: di.makeOutdoorViewModel())
+        OutdoorDashboardView(navigationPath: path, di: di, viewModel: di.makeOutdoorViewModel())
             .toolbar(.hidden, for: .navigationBar)
             .toolbar(.hidden, for: .tabBar)
     case .planDashboard(let planID, let dayID):
@@ -71,7 +71,7 @@ func appRouteDestination(_ route: AppRoute, path: Binding<NavigationPath>, di: D
         ConnectionView(navigationPath: path, outdoorSensorsOnly: true, bleService: di.bleManager, dataSourceService: di.dataSourceCoordinator, routeService: di.routeManager, locationService: di.locationManager)
             .toolbar(.hidden, for: .tabBar)
     case .calendar:
-        CalendarView(navigationPath: path)
+        CalendarView(di: di, navigationPath: path)
             .toolbar(.hidden, for: .navigationBar)
     case .pmc:
         PMChartView(navigationPath: path, viewModel: di.makeFitnessViewModel())

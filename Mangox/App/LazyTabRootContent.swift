@@ -135,22 +135,22 @@ struct LazyTabPlaceholderView: View {
 struct LazyTabRootContent<Content: View>: View {
     let tabIndex: Int
     let selectedTab: Int
+    @Binding var loadedTabs: Set<Int>
     var placeholderStyle: LazyTabPlaceholderStyle = .plain
     @ViewBuilder var content: () -> Content
 
-    @State private var hasLoaded = false
     @State private var renderReady = false
 
     var body: some View {
         Group {
-            if hasLoaded && renderReady {
+            if loadedTabs.contains(tabIndex) || renderReady {
                 content()
             } else {
                 LazyTabPlaceholderView(style: placeholderStyle)
             }
         }
         .onAppear {
-            if selectedTab == tabIndex {
+            if selectedTab == tabIndex && !loadedTabs.contains(tabIndex) {
                 activate()
             }
         }
@@ -162,9 +162,12 @@ struct LazyTabRootContent<Content: View>: View {
     }
 
     private func activate() {
-        hasLoaded = true
+        if loadedTabs.contains(tabIndex) {
+            return
+        }
         Task { @MainActor in
             await Task.yield()
+            loadedTabs.insert(tabIndex)
             renderReady = true
         }
     }

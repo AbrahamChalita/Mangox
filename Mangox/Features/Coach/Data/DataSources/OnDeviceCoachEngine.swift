@@ -9,7 +9,7 @@ import os.log
 enum CoachOnDevicePromptVersion {
     static let routing = 1
     static let narrow = 6
-    static let quickPrompts = 2
+    static let quickPrompts = 3
 }
 
 /// - `MangoxCoachFMVerboseLog`: full `LanguageModelSession.transcript` string after calls.
@@ -76,6 +76,36 @@ struct NarrowCoachReply: Equatable {
             "1-3 short tappable follow-up chips the user might want next. Empty array if no obvious next step.",
         .maximumCount(3))
     var suggestedActions: [NarrowSuggestedAction]
+}
+
+// MARK: - Guided generation: single workout
+
+@Generable
+struct OnDeviceWorkoutInterval: Equatable {
+    var name: String
+    var durationSeconds: Int
+    var zone: String
+    var repeats: Int
+    var cadenceLow: Int?
+    var cadenceHigh: Int?
+    var recoverySeconds: Int
+    var recoveryZone: String
+    var notes: String
+    var suggestedTrainerMode: String
+    var simulationGrade: Double?
+}
+
+@Generable
+struct OnDeviceGeneratedWorkout: Equatable {
+    var reasoning: String
+    var title: String
+    var purpose: String
+    var rationale: String
+    var goal: String
+    var durationMinutes: Int
+    var zone: String
+    var notes: String
+    var intervals: [OnDeviceWorkoutInterval]
 }
 
 // MARK: - Guided generation: quick prompts
@@ -438,7 +468,12 @@ enum OnDeviceCoachEngine {
             Version \(CoachOnDevicePromptVersion.quickPrompts).
             Each item.text is exactly what the USER would type or tap to ask the coach — first person or "my …", e.g. "How hard was my last ride?", "What should I do for recovery today?", "Explain my power zones".
             Wrong style (do not output): coach-to-user questions like "How did you feel?", "Want to review your week?", "Should we check your FTP?".
-            Be specific to the rider context when possible; otherwise sensible defaults.
+            Only suggest prompts that are supported by the rider context provided below.
+            Do not mention a last ride if there is no ride history.
+            Do not mention FTP history or "last FTP" if no FTP history is provided.
+            Do not mention an active plan or today's planned workout if no plan exists.
+            Do not mention WHOOP or recovery metrics unless WHOOP recovery data is present.
+            Be specific to the rider context when possible; otherwise sensible defaults grounded in the available data.
             No quotation marks in text. Keep under 8 words per item.
             Icons must be valid SF Symbol names (snake case with dots), e.g. chart.bar.fill, bolt.fill, calendar.badge.clock.
             """
@@ -793,6 +828,13 @@ enum OnDeviceCoachEngine {
 // MARK: - AIService: fact sheet + tool factory
 
 extension AIService {
+    struct CoachStarterPromptAvailability {
+        let hasRecentRide: Bool
+        let hasAnyRideData: Bool
+        let hasFTPHistory: Bool
+        let hasActivePlan: Bool
+        let hasWhoopRecovery: Bool
+    }
 
     func coachFactSheetText() -> String {
         coachFactSheetText(modelContext: persistenceContext)
@@ -859,6 +901,9 @@ extension AIService {
         } else {
             lines.append("No completed ride on file.")
         }
+        if let digest = ctx.recentRideDigest, !digest.isEmpty {
+            lines.append("Recent ride history:\n\(digest)")
+        }
         let joined = lines.joined(separator: "\n")
         if joined.count > 2800 {
             return String(joined.prefix(2800)) + "\n…"
@@ -896,6 +941,12 @@ extension AIService {
         } else {
             lines.append("No last ride.")
         }
+        if let digest = ctx.recentRideDigest, !digest.isEmpty {
+            let firstLine = digest.split(separator: "\n").prefix(2).joined(separator: " | ")
+            if !firstLine.isEmpty {
+                lines.append("Recent rides: \(firstLine)")
+            }
+        }
         return lines.joined(separator: "\n")
     }
 
@@ -928,6 +979,7 @@ extension AIService {
     func loadCoachEmptyStartersContent(modelContext: ModelContext) async
         -> CoachEmptyStartersContent
     {
+        let availability = starterPromptAvailability(modelContext: modelContext)
         let fallback = CoachEmptyStartersContent(
             prompts: contextualQuickPrompts(modelContext: modelContext),
             topicTags: []
@@ -946,9 +998,16 @@ extension AIService {
         let prompts: [QuickPrompt]
         do {
             let pack = try await OnDeviceCoachEngine.generateQuickPrompts(factSheet: factSheet)
-            let sanitized = OnDeviceCoachEngine.sanitizeQuickPromptItems(pack.items)
+            let sanitizedItems = OnDeviceCoachEngine.sanitizeQuickPromptItems(pack.items).map {
+                QuickPrompt(text: $0.text, icon: $0.icon)
+            }
+            let sanitized = groundedQuickPrompts(
+                from: sanitizedItems,
+                availability: availability,
+                fallback: contextualQuickPrompts(modelContext: modelContext)
+            )
             if sanitized.count >= 2 {
-                prompts = sanitized.map { QuickPrompt(text: $0.text, icon: $0.icon) }
+                prompts = sanitized
             } else {
                 prompts = contextualQuickPrompts(modelContext: modelContext)
             }
@@ -1027,5 +1086,236 @@ extension AIService {
             let applied = r.applied ? "applied" : "not applied"
             return "\(df.string(from: r.date)): \(r.estimatedFTP)W est (\(applied))"
         }.joined(separator: "\n")
+    }
+
+    func coachWhoopRecoveryToolPayload(modelContext: ModelContext) -> String {
+        let ctx = buildUserContext(modelContext: modelContext)
+        guard ctx.whoopLinked else { return "No WHOOP account connected." }
+
+        var lines = ["WHOOP connected."]
+        if let pct = ctx.whoopRecoveryPercent {
+            lines.append("Recovery: \(Int(pct))%")
+        }
+        if let rhr = ctx.whoopRestingHR {
+            lines.append("Resting HR: \(rhr) bpm")
+        }
+        if let hrv = ctx.whoopHrvMs {
+            lines.append("HRV: \(hrv) ms")
+        }
+        if let maxHR = ctx.whoopMaxHeartRate {
+            lines.append("Profile max HR: \(maxHR) bpm")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    func coachActivePlanContextToolPayload(modelContext: ModelContext) -> String {
+        let ctx = buildUserContext(modelContext: modelContext)
+        var lines: [String] = []
+        if let plan = ctx.activePlanName, !plan.isEmpty {
+            lines.append("Active plan: \(plan)")
+            if let progress = ctx.activePlanProgress, !progress.isEmpty {
+                lines.append("Progress: \(progress)")
+            }
+            lines.append("Adaptive ERG: \(ctx.adaptiveErgPercent)%")
+        } else {
+            lines.append("No active plan in app.")
+        }
+        lines.append("Current week TSS: \(ctx.weekActualTss)")
+        if let goal = ctx.seasonGoalSummary, !goal.isEmpty {
+            lines.append("Season goal: \(goal)")
+        }
+        if let hint = ctx.planKeyDaySemanticsHint, !hint.isEmpty {
+            lines.append("Plan note: \(hint)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    func starterPromptAvailability(modelContext: ModelContext) -> CoachStarterPromptAvailability {
+        let ctx = buildUserContext(modelContext: modelContext)
+        return CoachStarterPromptAvailability(
+            hasRecentRide: ctx.lastRide != nil,
+            hasAnyRideData: ctx.recentWorkoutsCount > 0 || ctx.lastRide != nil,
+            hasFTPHistory: !(ctx.ftpHistory?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true),
+            hasActivePlan: !(ctx.activePlanName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true),
+            hasWhoopRecovery: ctx.whoopLinked && ctx.whoopRecoveryPercent != nil
+        )
+    }
+
+    func groundedQuickPrompts(
+        from candidates: [QuickPromptItem],
+        availability: CoachStarterPromptAvailability,
+        fallback: [QuickPrompt]
+    ) -> [QuickPrompt] {
+        groundedQuickPrompts(
+            from: candidates.map { QuickPrompt(text: $0.text, icon: $0.icon) },
+            availability: availability,
+            fallback: fallback
+        )
+    }
+
+    func groundedQuickPrompts(
+        from candidates: [QuickPrompt],
+        availability: CoachStarterPromptAvailability,
+        fallback: [QuickPrompt]
+    ) -> [QuickPrompt] {
+        var grounded: [QuickPrompt] = []
+        var seen = Set<String>()
+
+        func appendIfAllowed(_ prompt: QuickPrompt) {
+            let trimmed = prompt.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            let normalized = trimmed.lowercased()
+            guard !seen.contains(normalized) else { return }
+            guard starterPromptIsSupported(normalized, availability: availability) else { return }
+            seen.insert(normalized)
+            grounded.append(QuickPrompt(text: trimmed, icon: prompt.icon))
+        }
+
+        candidates.forEach(appendIfAllowed)
+        fallback.forEach(appendIfAllowed)
+        return Array(grounded.prefix(4))
+    }
+
+    func starterPromptIsSupported(
+        _ normalizedPrompt: String,
+        availability: CoachStarterPromptAvailability
+    ) -> Bool {
+        let mentionsWhoop =
+            normalizedPrompt.contains("whoop") || normalizedPrompt.contains("recovery")
+            || normalizedPrompt.contains("hrv")
+        if mentionsWhoop, !availability.hasWhoopRecovery { return false }
+
+        let mentionsPlan =
+            normalizedPrompt.contains("plan") || normalizedPrompt.contains("workout today")
+            || normalizedPrompt.contains("today's workout")
+            || normalizedPrompt.contains("todays workout")
+            || normalizedPrompt.contains("training load")
+        if mentionsPlan, !availability.hasActivePlan { return false }
+
+        let mentionsRide =
+            normalizedPrompt.contains("last ride") || normalizedPrompt.contains("recent ride")
+            || normalizedPrompt.contains("my ride") || normalizedPrompt.contains("how hard was")
+        if mentionsRide, !availability.hasRecentRide { return false }
+
+        let mentionsFTPHistory =
+            normalizedPrompt.contains("ftp trend") || normalizedPrompt.contains("last ftp")
+            || normalizedPrompt.contains("ftp test")
+        if mentionsFTPHistory, !availability.hasFTPHistory { return false }
+
+        if normalizedPrompt.contains("ftp"), !availability.hasFTPHistory,
+            !normalizedPrompt.contains("power zone"), !normalizedPrompt.contains("power zones")
+        {
+            return false
+        }
+
+        if !availability.hasAnyRideData,
+            normalizedPrompt.contains("training load")
+                || normalizedPrompt.contains("how tired")
+                || normalizedPrompt.contains("recovery today")
+        {
+            return false
+        }
+
+        return true
+    }
+
+    static func generateSingleWorkoutDraft(
+        userMessage: String,
+        trainingSnapshot: String,
+        ftp: Int
+    ) async throws -> GeneratedWorkout {
+        try MangoxFoundationModelsSupport.throwIfLocaleUnsupported()
+
+        let instructions = """
+            Generate one structured indoor cycling workout for Mangox.
+            Use the rider snapshot as ground truth. Do not invent missing metrics.
+            Keep the workout realistic for the requested duration. Include warm-up and cool-down when appropriate.
+            Use simple zone labels like Z1, Z2, Z3, Z4, Z5, Mixed.
+            """
+        let model = MangoxFoundationModelsSupport.coachSystemLanguageModel()
+        let session = LanguageModelSession(
+            model: model,
+            tools: [],
+            instructions: Instructions(instructions)
+        )
+        let prompt = """
+            Rider snapshot:
+            \(trainingSnapshot)
+
+            Current FTP:
+            \(ftp) W
+
+            User request:
+            \(userMessage)
+            """
+
+        let response = try await session.respond(
+            to: prompt,
+            generating: OnDeviceGeneratedWorkout.self,
+            options: GenerationOptions(sampling: .greedy)
+        )
+        let generated = response.content
+        let intervals = generated.intervals.enumerated().map { index, item in
+            IntervalSegment(
+                order: index + 1,
+                name: item.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "Interval \(index + 1)" : item.name,
+                durationSeconds: max(30, item.durationSeconds),
+                zone: Self.trainingZoneTarget(from: item.zone),
+                repeats: max(1, item.repeats),
+                cadenceLow: item.cadenceLow,
+                cadenceHigh: item.cadenceHigh,
+                recoverySeconds: max(0, item.recoverySeconds),
+                recoveryZone: Self.trainingZoneTarget(from: item.recoveryZone),
+                notes: item.notes,
+                suggestedTrainerMode: Self.trainerMode(from: item.suggestedTrainerMode),
+                simulationGrade: item.simulationGrade
+            )
+        }
+        let day = PlanDay(
+            id: "single-workout",
+            weekNumber: 0,
+            dayOfWeek: 1,
+            dayType: .workout,
+            title: generated.title,
+            durationMinutes: max(15, generated.durationMinutes),
+            zone: Self.trainingZoneTarget(from: generated.zone),
+            notes: generated.notes,
+            intervals: intervals,
+            isKeyWorkout: true,
+            requiresFTPTest: false
+        )
+        return GeneratedWorkout(
+            title: generated.title,
+            purpose: generated.purpose,
+            rationale: generated.rationale.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? nil : generated.rationale,
+            day: day
+        )
+    }
+
+    private static func trainingZoneTarget(from raw: String) -> TrainingZoneTarget {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "Z1": return .z1
+        case "Z2": return .z2
+        case "Z3": return .z3
+        case "Z4": return .z4
+        case "Z5": return .z5
+        case "Z1-Z2": return .z1z2
+        case "Z2-Z3": return .z2z3
+        case "Z3-Z4": return .z3z4
+        case "Z3-Z5": return .z3z5
+        case "Z4-Z5": return .z4z5
+        case "REST": return .rest
+        default: return .mixed
+        }
+    }
+
+    private static func trainerMode(from raw: String) -> SuggestedTrainerMode {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "simulation", "sim": return .simulation
+        case "free", "free ride", "free_ride", "freeride": return .freeRide
+        default: return .erg
+        }
     }
 }

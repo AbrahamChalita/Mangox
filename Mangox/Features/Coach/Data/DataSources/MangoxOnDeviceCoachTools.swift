@@ -70,3 +70,33 @@ struct MangoxOnDeviceFTPHistoryTool: Tool {
         MangoxOnDeviceLineFilter.apply(arguments.filterSubstring, to: digest)
     }
 }
+
+/// Latest WHOOP recovery/profile values when connected.
+struct MangoxOnDeviceWhoopRecoveryTool: Tool {
+    let digest: String
+
+    var name: String { "mangox_whoop_recovery" }
+
+    var description: String {
+        "Latest WHOOP recovery and profile values such as recovery score, resting HR, HRV, and max heart rate when available."
+    }
+
+    @concurrent func call(arguments: MangoxOnDeviceToolFilter) async throws -> String {
+        MangoxOnDeviceLineFilter.apply(arguments.filterSubstring, to: digest)
+    }
+}
+
+/// Active plan and current load/scheduling context.
+struct MangoxOnDeviceActivePlanTool: Tool {
+    let digest: String
+
+    var name: String { "mangox_active_plan_context" }
+
+    var description: String {
+        "Current active plan summary, progress, adaptive ERG scaling, weekly TSS, season goal, and related scheduling notes."
+    }
+
+    @concurrent func call(arguments: MangoxOnDeviceToolFilter) async throws -> String {
+        MangoxOnDeviceLineFilter.apply(arguments.filterSubstring, to: digest)
+    }
+}

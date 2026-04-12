@@ -286,85 +286,73 @@ struct OnboardingView: View {
     }
 
     private var riderProfilePage: some View {
-        OnboardingPageView(
+        let isImperial = RidePreferences.shared.isImperial
+        let displayWeight = isImperial
+            ? viewModel.onboardingWeightKg * 2.20462
+            : viewModel.onboardingWeightKg
+        let weightUnit = isImperial ? "lb" : "kg"
+        let weightRange: ClosedRange<Double> = isImperial ? 66.0...440.0 : RidePreferences.riderWeightRange
+        let weightStep = isImperial ? 1.0 : 0.5
+
+        return OnboardingPageView(
             hero: .sfSymbol("figure.outdoor.cycle"),
             title: "Your Rider Profile",
-            subtitle: "Enter your weight and age for accurate W/kg, calorie estimates, and personalized AI coaching.",
+            subtitle: "Enter your weight and birth date for accurate W/kg, calorie estimates, and personalized AI coaching.",
             color: AppColor.blue,
             reduceMotion: reduceMotion,
             extraContent: {
-                VStack(spacing: 16) {
-                    // Weight
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("WEIGHT")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(.white.opacity(0.4))
-                                .tracking(1.2)
-                            let displayWeight = RidePreferences.shared.isImperial
-                                ? viewModel.onboardingWeightKg * 2.20462
-                                : viewModel.onboardingWeightKg
-                            let unit = RidePreferences.shared.isImperial ? "lb" : "kg"
-                            Text(String(format: "%.0f %@", displayWeight, unit))
-                                .font(.system(size: 22, weight: .bold, design: .monospaced))
-                                .foregroundStyle(.white)
-                        }
-                        Spacer()
-                        Stepper("", value: Binding(
-                            get: {
-                                RidePreferences.shared.isImperial
-                                    ? (viewModel.onboardingWeightKg * 2.20462).rounded()
-                                    : viewModel.onboardingWeightKg
-                            },
-                            set: { newVal in
-                                viewModel.onboardingWeightKg = RidePreferences.shared.isImperial
-                                    ? (newVal / 2.20462) : newVal
-                            }
-                        ), in: RidePreferences.shared.isImperial ? 66.0...440.0 : 30.0...200.0,
-                        step: RidePreferences.shared.isImperial ? 1.0 : 0.5)
-                        .labelsHidden()
-                    }
-
-                    Divider().background(Color.white.opacity(0.08))
-
-                    // Birth year
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("BIRTH YEAR")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(.white.opacity(0.4))
-                                .tracking(1.2)
-                            let age = Calendar.current.component(.year, from: .now) - viewModel.onboardingBirthYear
-                            Text("\(viewModel.onboardingBirthYear)  ·  Age \(age)")
-                                .font(.system(size: 22, weight: .bold, design: .monospaced))
-                                .monospacedDigit()
-                                .foregroundStyle(.white)
-                        }
-                        Spacer()
-                        Stepper(
-                            "",
+                VStack(spacing: 12) {
+                    riderInputCard(
+                        icon: "scalemass.fill",
+                        title: "WEIGHT",
+                        value: "\(Int(displayWeight.rounded())) \(weightUnit)",
+                        accent: AppColor.mango
+                    ) {
+                        Slider(
                             value: Binding(
                                 get: {
-                                    let y = Calendar.current.component(.year, from: .now)
-                                    return y - viewModel.onboardingBirthYear
+                                    isImperial ? viewModel.onboardingWeightKg * 2.20462 : viewModel.onboardingWeightKg
                                 },
-                                set: { newAge in
-                                    let y = Calendar.current.component(.year, from: .now)
-                                    viewModel.onboardingBirthYear = y - newAge
+                                set: { newValue in
+                                    viewModel.onboardingWeightKg = isImperial ? (newValue / 2.20462) : newValue
                                 }
                             ),
-                            in: {
-                                let y = Calendar.current.component(.year, from: .now)
-                                return (y - 2010)...(y - 1940)
-                            }()
+                            in: weightRange,
+                            step: weightStep
                         )
-                            .labelsHidden()
+                        .tint(AppColor.mango)
+
+                        HStack {
+                            Text("\(Int(weightRange.lowerBound)) \(weightUnit)")
+                            Spacer()
+                            Text("\(Int(weightRange.upperBound)) \(weightUnit)")
+                        }
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.35))
+                    }
+
+                    riderInputCard(
+                        icon: "calendar",
+                        title: "BIRTH DATE",
+                        value: "\(viewModel.onboardingBirthYear)  ·  Age \(onboardingAge)",
+                        accent: AppColor.blue
+                    ) {
+                        DatePicker(
+                            "Birth date",
+                            selection: onboardingBirthDateBinding,
+                            in: onboardingBirthDateRange,
+                            displayedComponents: .date
+                        )
+                        .labelsHidden()
+                        .datePickerStyle(.wheel)
+                        .tint(AppColor.blue)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 150)
+                        .clipped()
+                        .background(Color.white.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                 }
-                .padding(.horizontal, 32)
-                .padding(.vertical, 16)
-                .background(Color.white.opacity(0.04))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
                 .padding(.horizontal, 32)
             }
         )
@@ -410,6 +398,69 @@ struct OnboardingView: View {
     }
 
     // MARK: - Helper Views
+
+    private var onboardingAge: Int {
+        max(0, Calendar.current.component(.year, from: .now) - viewModel.onboardingBirthYear)
+    }
+
+    private var onboardingBirthDateBinding: Binding<Date> {
+        Binding(
+            get: { dateFromBirthYear(viewModel.onboardingBirthYear) },
+            set: { newDate in
+                viewModel.onboardingBirthYear = Calendar.current.component(.year, from: newDate)
+            }
+        )
+    }
+
+    private var onboardingBirthDateRange: ClosedRange<Date> {
+        let calendar = Calendar.current
+        let currentYear = calendar.component(.year, from: .now)
+        let minimum = calendar.date(from: DateComponents(year: 1940, month: 1, day: 1)) ?? .distantPast
+        let maximum = calendar.date(from: DateComponents(year: currentYear - 16, month: 12, day: 31)) ?? .now
+        return minimum...maximum
+    }
+
+    private func dateFromBirthYear(_ year: Int) -> Date {
+        Calendar.current.date(from: DateComponents(year: year, month: 7, day: 1)) ?? .now
+    }
+
+    private func riderInputCard<Content: View>(
+        icon: String,
+        title: String,
+        value: String,
+        accent: Color,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .tracking(1.1)
+
+                    Text(value)
+                        .font(.system(size: 20, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                }
+            }
+
+            content()
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.05))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
 
     private func featureRow(icon: String, text: String) -> some View {
         HStack(spacing: 12) {

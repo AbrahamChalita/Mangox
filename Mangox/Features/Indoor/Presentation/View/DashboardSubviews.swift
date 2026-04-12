@@ -1032,6 +1032,10 @@ struct GuidedSessionCard: View {
     let session: GuidedSessionManager
     /// Shorter layout for portrait single-screen fits (drops up-next and stats bar).
     var condensed: Bool = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .largeTitle) private var countdownFontSize = 32
+    @ScaledMetric(relativeTo: .headline) private var metricValueFontSize = 18
+    @ScaledMetric(relativeTo: .body) private var contentPadding = 14
 
     private func guidedZoneColor(_ zone: TrainingZoneTarget) -> Color { zone.color }
 
@@ -1092,24 +1096,21 @@ struct GuidedSessionCard: View {
 
     private func activeStepCondensed(_ step: TimelineStep) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text(step.label)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                Spacer(minLength: 4)
-                Text(GuidedSessionManager.formatCountdown(session.stepSecondsRemaining))
-                    .font(.system(size: 22, weight: .heavy, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .contentTransition(.numericText())
-                Text(step.zone.label)
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(guidedZoneColor(step.zone))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(guidedZoneColor(step.zone).opacity(0.15))
-                    .clipShape(Capsule())
+            Text(step.label)
+                .font(.headline)
+                .foregroundStyle(.white)
+                .lineLimit(2)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    condensedCountdown
+                    stepZoneChip(step)
+                    Spacer(minLength: 0)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    condensedCountdown
+                    stepZoneChip(step)
+                }
             }
 
             GeometryReader { geo in
@@ -1124,24 +1125,68 @@ struct GuidedSessionCard: View {
             .frame(height: 4)
             .clipShape(Capsule())
 
-            HStack(spacing: 8) {
-                HStack(spacing: 4) {
-                    Image(systemName: session.compliance.icon)
-                        .font(.system(size: 10))
-                        .foregroundStyle(complianceColor)
-                    Text(session.compliance.label)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(complianceColor)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    compliancePill
+                    if let range = session.scaledTargetWattRange(for: step) {
+                        targetMetricPill(
+                            title: "Target",
+                            value: "\(range.lowerBound)-\(range.upperBound)",
+                            unit: "W",
+                            color: guidedZoneColor(step.zone)
+                        )
+                    }
+                    Spacer(minLength: 0)
                 }
-                if let range = session.scaledTargetWattRange(for: step) {
-                    Text("\(range.lowerBound)–\(range.upperBound) W")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundStyle(guidedZoneColor(step.zone))
+                VStack(alignment: .leading, spacing: 6) {
+                    compliancePill
+                    if let range = session.scaledTargetWattRange(for: step) {
+                        targetMetricPill(
+                            title: "Target",
+                            value: "\(range.lowerBound)-\(range.upperBound)",
+                            unit: "W",
+                            color: guidedZoneColor(step.zone)
+                        )
+                    }
                 }
-                Spacer(minLength: 0)
             }
         }
         .padding(10)
+    }
+
+    private var condensedCountdown: some View {
+        Text(GuidedSessionManager.formatCountdown(session.stepSecondsRemaining))
+            .font(.system(size: max(22, countdownFontSize - 6), weight: .heavy, design: .monospaced))
+            .foregroundStyle(.white)
+            .contentTransition(.numericText())
+    }
+
+    private func targetMetricPill(title: String, value: String, unit: String, color: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white.opacity(0.45))
+            Text(value)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(color)
+            Text(unit)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.white.opacity(0.4))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(color.opacity(0.12))
+        .clipShape(Capsule())
+    }
+
+    private func stepZoneChip(_ step: TimelineStep) -> some View {
+        Text(step.zone.label)
+            .font(.caption.bold())
+            .foregroundStyle(guidedZoneColor(step.zone))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(guidedZoneColor(step.zone).opacity(0.15))
+            .clipShape(Capsule())
     }
 
     private var pastPlanCondensed: some View {
@@ -1189,74 +1234,27 @@ struct GuidedSessionCard: View {
     }
 
     private func activeStepView(_ step: TimelineStep) -> some View {
-        VStack(spacing: 10) {
-            // Top row
-            HStack(spacing: 8) {
-                Text(step.label)
-                    .font(.system(size: 14, weight: .bold))
+        VStack(alignment: .leading, spacing: 12) {
+            Text(step.label)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.white)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
+
+            stepMetaChips(step)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("REMAINING")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.35))
+                Text(GuidedSessionManager.formatCountdown(session.stepSecondsRemaining))
+                    .font(.system(size: countdownFontSize, weight: .heavy, design: .monospaced))
                     .foregroundStyle(.white)
-                    .lineLimit(1)
-                Spacer()
-                Text(step.zone.label)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(guidedZoneColor(step.zone))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(guidedZoneColor(step.zone).opacity(0.15))
-                    .clipShape(Capsule())
-                HStack(spacing: 3) {
-                    Image(systemName: step.suggestedTrainerMode.icon)
-                        .font(.system(size: 10))
-                    Text(step.suggestedTrainerMode.label)
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .foregroundStyle(AppColor.success.opacity(0.8))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(AppColor.success.opacity(0.1))
-                .clipShape(Capsule())
+                    .contentTransition(.numericText())
+                    .animation(.easeInOut(duration: 0.3), value: session.stepSecondsRemaining)
+                    .minimumScaleFactor(0.75)
             }
 
-            // Countdown + targets
-            HStack(alignment: .firstTextBaseline, spacing: 16) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("REMAINING")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.25))
-                    Text(GuidedSessionManager.formatCountdown(session.stepSecondsRemaining))
-                        .font(.system(size: 32, weight: .heavy, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .contentTransition(.numericText())
-                        .animation(.easeInOut(duration: 0.3), value: session.stepSecondsRemaining)
-                }
-                Spacer()
-                if let range = session.scaledTargetWattRange(for: step) {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("TARGET")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.25))
-                        Text("\(range.lowerBound)–\(range.upperBound)")
-                            .font(.system(size: 18, weight: .bold, design: .monospaced))
-                            .foregroundStyle(guidedZoneColor(step.zone))
-                        Text("watts")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.25))
-                    }
-                }
-                if let low = step.cadenceLow, let high = step.cadenceHigh {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("CADENCE")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.25))
-                        Text("\(low)–\(high)")
-                            .font(.system(size: 18, weight: .bold, design: .monospaced))
-                            .foregroundStyle(AppColor.blue)
-                        Text("rpm")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.25))
-                    }
-                }
-            }
+            stepMetricsSection(step)
 
             // Step progress bar
             GeometryReader { geo in
@@ -1271,45 +1269,161 @@ struct GuidedSessionCard: View {
             .frame(height: 6)
             .clipShape(Capsule())
 
-            // Compliance row
-            HStack(spacing: 8) {
-                HStack(spacing: 4) {
-                    Image(systemName: session.compliance.icon)
-                        .font(.system(size: 11))
-                        .foregroundStyle(complianceColor)
-                    Text(session.compliance.label)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(complianceColor)
-                }
-                Spacer()
-                HStack(spacing: 4) {
-                    Image(systemName: "target")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.white.opacity(0.3))
-                    Text(String(format: "%.0f%% in zone", session.stepInZonePercent))
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.45))
-                }
-                if step.suggestedTrainerMode == .simulation, let grade = step.simulationGrade {
-                    HStack(spacing: 3) {
-                        Image(systemName: "mountain.2.fill")
-                            .font(.system(size: 9))
-                        Text(String(format: "%.1f%%", grade))
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    }
-                    .foregroundStyle(gradeColor(for: grade))
-                }
-            }
+            complianceSummaryRow(step)
 
-            // Motivational message
             Text(session.motivationalMessage)
-                .font(.system(size: 11, weight: .medium))
+                .font(.callout.weight(.medium))
                 .foregroundStyle(Color.white.opacity(0.7))
-                .lineLimit(2)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .animation(.easeInOut(duration: 0.3), value: session.motivationalMessage)
         }
-        .padding(14)
+        .padding(contentPadding)
+    }
+
+    private func stepMetaChips(_ step: TimelineStep) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                stepMetaChip(
+                    title: step.zone.label,
+                    icon: nil,
+                    foreground: guidedZoneColor(step.zone),
+                    background: guidedZoneColor(step.zone).opacity(0.15)
+                )
+                stepMetaChip(
+                    title: step.suggestedTrainerMode.label,
+                    icon: step.suggestedTrainerMode.icon,
+                    foreground: AppColor.success.opacity(0.9),
+                    background: AppColor.success.opacity(0.1)
+                )
+                Spacer(minLength: 0)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                stepMetaChip(
+                    title: step.zone.label,
+                    icon: nil,
+                    foreground: guidedZoneColor(step.zone),
+                    background: guidedZoneColor(step.zone).opacity(0.15)
+                )
+                stepMetaChip(
+                    title: step.suggestedTrainerMode.label,
+                    icon: step.suggestedTrainerMode.icon,
+                    foreground: AppColor.success.opacity(0.9),
+                    background: AppColor.success.opacity(0.1)
+                )
+            }
+        }
+    }
+
+    private func stepMetaChip(title: String, icon: String?, foreground: Color, background: Color) -> some View {
+        HStack(spacing: 4) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.caption.weight(.semibold))
+            }
+            Text(title)
+                .font(.caption.weight(.bold))
+        }
+        .foregroundStyle(foreground)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(background)
+        .clipShape(Capsule())
+    }
+
+    private func stepMetricsSection(_ step: TimelineStep) -> some View {
+        let columns = [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 150 : 120), spacing: 8)]
+        return LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+            if let range = session.scaledTargetWattRange(for: step) {
+                guidedMetricBlock(
+                    title: "Target",
+                    value: "\(range.lowerBound)-\(range.upperBound)",
+                    unit: "watts",
+                    color: guidedZoneColor(step.zone)
+                )
+            }
+            if let low = step.cadenceLow, let high = step.cadenceHigh {
+                guidedMetricBlock(
+                    title: "Cadence",
+                    value: "\(low)-\(high)",
+                    unit: "rpm",
+                    color: AppColor.blue
+                )
+            }
+        }
+    }
+
+    private func guidedMetricBlock(title: String, value: String, unit: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title.uppercased())
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.white.opacity(0.35))
+            Text(value)
+                .font(.system(size: metricValueFontSize, weight: .bold, design: .monospaced))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(unit)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.white.opacity(0.35))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func complianceSummaryRow(_ step: TimelineStep) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                compliancePill
+                Spacer(minLength: 0)
+                inZonePill
+                if step.suggestedTrainerMode == .simulation, let grade = step.simulationGrade {
+                    gradePill(grade)
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                compliancePill
+                HStack(spacing: 8) {
+                    inZonePill
+                    if step.suggestedTrainerMode == .simulation, let grade = step.simulationGrade {
+                        gradePill(grade)
+                    }
+                }
+            }
+        }
+    }
+
+    private var compliancePill: some View {
+        HStack(spacing: 5) {
+            Image(systemName: session.compliance.icon)
+                .font(.caption.weight(.semibold))
+            Text(session.compliance.label)
+                .font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(complianceColor)
+    }
+
+    private var inZonePill: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "target")
+                .font(.caption2)
+            Text(String(format: "%.0f%% in zone", session.stepInZonePercent))
+                .font(.caption.weight(.medium))
+        }
+        .foregroundStyle(.white.opacity(0.55))
+    }
+
+    private func gradePill(_ grade: Double) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "mountain.2.fill")
+                .font(.caption2)
+            Text(String(format: "%.1f%%", grade))
+                .font(.caption.weight(.bold))
+        }
+        .foregroundStyle(gradeColor(for: grade))
     }
 
     private var pastPlanView: some View {
@@ -1364,31 +1478,49 @@ struct GuidedSessionCard: View {
                 .fill(Color.white.opacity(0.06))
                 .frame(height: 1)
 
-            HStack(spacing: 8) {
-                Text("UP NEXT")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.25))
-                    .tracking(1.0)
-                Circle()
-                    .fill(guidedZoneColor(next.zone))
-                    .frame(width: 6, height: 6)
-                Text(next.label)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .lineLimit(1)
-                Spacer()
-                Text(GuidedSessionManager.formatCountdown(next.durationSeconds))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.35))
-                Text(next.zone.label)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(guidedZoneColor(next.zone).opacity(0.7))
-                Text(next.suggestedTrainerMode.label)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.3))
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    upNextLead(next)
+                    Spacer()
+                    upNextTrailing(next)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    upNextLead(next)
+                    upNextTrailing(next)
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
+        }
+    }
+
+    private func upNextLead(_ next: TimelineStep) -> some View {
+        HStack(spacing: 8) {
+            Text("UP NEXT")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.25))
+                .tracking(1.0)
+            Circle()
+                .fill(guidedZoneColor(next.zone))
+                .frame(width: 6, height: 6)
+            Text(next.label)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(2)
+        }
+    }
+
+    private func upNextTrailing(_ next: TimelineStep) -> some View {
+        HStack(spacing: 8) {
+            Text(GuidedSessionManager.formatCountdown(next.durationSeconds))
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.white.opacity(0.35))
+            Text(next.zone.label)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(guidedZoneColor(next.zone).opacity(0.7))
+            Text(next.suggestedTrainerMode.label)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.white.opacity(0.3))
         }
     }
 
@@ -1399,7 +1531,10 @@ struct GuidedSessionCard: View {
                 .fill(Color.white.opacity(0.06))
                 .frame(height: 1)
 
-            HStack(spacing: 0) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 110 : 78), spacing: 8)],
+                spacing: 8
+            ) {
                 guidedStatPill(
                     label: "OVERALL",
                     value: String(format: "%.0f%%", session.overallProgress * 100))
@@ -1416,22 +1551,26 @@ struct GuidedSessionCard: View {
                     )
                 )
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 8)
             .padding(.horizontal, 8)
         }
     }
 
     private func guidedStatPill(label: String, value: String) -> some View {
-        VStack(spacing: 2) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 10, weight: .bold))
+                .font(.caption2.weight(.bold))
                 .foregroundStyle(.white.opacity(0.2))
                 .tracking(1.0)
             Text(value)
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .font(.callout.weight(.bold).monospacedDigit())
                 .foregroundStyle(.white.opacity(0.6))
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.white.opacity(0.03))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

@@ -91,6 +91,7 @@ struct ConnectionView: View {
     @State private var zwoImportError: String?
     @State private var showRouteImportErrorOverlay = false
     @State private var showZWOImportErrorOverlay = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private let prefs = RidePreferences.shared
 
@@ -101,6 +102,11 @@ struct ConnectionView: View {
     private let accentBlue = AppColor.blue
     private let accentMango = AppColor.mango
     private let bg = AppColor.bg
+
+    private var selectedCustomWorkout: CustomWorkoutTemplate? {
+        guard let selectedCustomTemplateID else { return nil }
+        return customWorkoutTemplates.first(where: { $0.id == selectedCustomTemplateID })
+    }
 
     private var canStartRide: Bool {
         if outdoorSensorsOnly { return true }
@@ -259,7 +265,7 @@ struct ConnectionView: View {
                         if startMode == .ride, rideLaunchMode == .indoor, !outdoorSensorsOnly,
                             planDayID == nil
                         {
-                            sectionHeader(title: "CUSTOM WORKOUT", icon: "doc.text.fill")
+                            sectionHeader(title: "GUIDED WORKOUT", icon: "figure.indoor.cycle")
                                 .padding(.horizontal, MangoxSpacing.page)
                                 .padding(.bottom, 10)
 
@@ -1848,7 +1854,7 @@ struct ConnectionView: View {
                     Spacer()
                 }
 
-                HStack(spacing: 10) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 10) {
                     settingChip(label: "FTP", value: "\(PowerZone.ftp) W", color: accentYellow)
                     settingChip(
                         label: "Max HR", value: "\(HeartRateZone.maxHR) bpm", color: accentRed)
@@ -2075,6 +2081,10 @@ struct ConnectionView: View {
 
     private var stickyActionBar: some View {
         VStack(spacing: 10) {
+            if let selectedCustomWorkout, startMode == .ride, rideLaunchMode == .indoor {
+                selectedWorkoutSummary(selectedCustomWorkout)
+            }
+
             Button {
                 handlePrimaryAction()
             } label: {
@@ -2083,6 +2093,8 @@ struct ConnectionView: View {
                         .font(.system(size: 14))
                     Text(primaryActionTitle)
                         .font(.system(size: 16, weight: .bold))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
                 }
                 .foregroundStyle(canStartRide ? .black : .white.opacity(0.4))
                 .frame(maxWidth: .infinity)
@@ -2102,9 +2114,11 @@ struct ConnectionView: View {
                     .fill(canStartRide ? accentSuccess : accentOrange)
                     .frame(width: 5, height: 5)
                 Text(primaryActionHint)
-                    .font(.system(size: 11))
+                    .font(.callout)
                     .foregroundStyle(.white.opacity(0.35))
+                    .multilineTextAlignment(.leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, MangoxSpacing.page)
         .padding(.top, 16)
@@ -2134,6 +2148,37 @@ struct ConnectionView: View {
                 .allowsHitTesting(false)
             }
         }
+    }
+
+    private func selectedWorkoutSummary(_ template: CustomWorkoutTemplate) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "figure.indoor.cycle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(accentMango)
+                Text("Guided workout selected")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(accentMango.opacity(0.9))
+                    .tracking(0.8)
+                Spacer(minLength: 0)
+                Text("\(template.intervals.count) steps")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+
+            Text(template.name)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color.white.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(accentMango.opacity(0.18), lineWidth: 1)
+        )
     }
 
     // MARK: - Bluetooth Off
@@ -2204,7 +2249,11 @@ struct ConnectionView: View {
     private var primaryActionTitle: String {
         if outdoorSensorsOnly { return "Done" }
         switch startMode {
-        case .ride: return rideLaunchMode == .outdoor ? "Start Outdoor Ride" : "Start Indoor Ride"
+        case .ride:
+            if rideLaunchMode == .indoor, selectedCustomTemplateID != nil {
+                return "Start Guided Workout"
+            }
+            return rideLaunchMode == .outdoor ? "Start Outdoor Ride" : "Start Indoor Ride"
         case .ftpTest: return "Start FTP Test"
         }
     }

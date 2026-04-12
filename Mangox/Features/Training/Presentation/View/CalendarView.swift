@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 // MARK: - Layout mode (persisted, like Apple Calendar)
 
@@ -13,6 +14,62 @@ private enum CalendarScreenMode: String, CaseIterable, Identifiable {
         switch self {
         case .monthGrid: return "Calendar"
         case .list: return "List"
+        }
+    }
+}
+
+private enum WorkoutHistoryFilter: String, CaseIterable, Identifiable {
+    case all
+    case outdoor
+    case indoor
+    case planned
+    case imported
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "All"
+        case .outdoor: return "Outdoor"
+        case .indoor: return "Indoor"
+        case .planned: return "Planned"
+        case .imported: return "Imported"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .all: return "line.3.horizontal.decrease.circle"
+        case .outdoor: return "mountain.2"
+        case .indoor: return "bolt.heart"
+        case .planned: return "calendar.badge.checkmark"
+        case .imported: return "square.and.arrow.down"
+        }
+    }
+
+    func includes(_ workout: Workout) -> Bool {
+        switch self {
+        case .all:
+            return true
+        case .outdoor:
+            return workout.savedRouteKind != nil
+        case .indoor:
+            return workout.savedRouteKind == nil && workout.planDayID == nil && !workout.isImported
+        case .planned:
+            return workout.planDayID != nil
+        case .imported:
+            return workout.isImported
+        }
+    }
+}
+
+private enum WorkoutImportPickerError: LocalizedError {
+    case unsupportedFileType
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedFileType:
+            return "Select a .tcx or .fit workout file."
         }
     }
 }
@@ -43,13 +100,13 @@ private enum CalendarWorkoutQuery {
 /// Calendar month view showing ride history, with an optional list layout.
 /// Each day shows a colored dot for rides, with tap-to-inspect.
 struct CalendarView: View {
-    @Environment(DIContainer.self) private var di
-    @Environment(\.modelContext) private var modelContext
+    let di: DIContainer
     @Binding var navigationPath: NavigationPath
 
     @Query(CalendarWorkoutQuery.descriptor) private var allWorkouts: [Workout]
 
     @AppStorage("calendarScreenMode") private var screenModeRaw = CalendarScreenMode.monthGrid.rawValue
+    @AppStorage("workoutHistoryFilter") private var historyFilterRaw = WorkoutHistoryFilter.all.rawValue
 
     @State private var currentMonth: Date = Date()
     @State private var selectedDay: Date? = Date()
@@ -58,12 +115,20 @@ struct CalendarView: View {
     /// O(1) day lookup for month cells (avoids scanning all workouts per cell).
     @State private var workoutsByDayStart: [Date: [Workout]] = [:]
     @State private var calendarRegroupTask: Task<Void, Never>?
+    @State private var showWorkoutImporter = false
+    @State private var workoutImportError: String?
+    @State private var showWorkoutImportErrorOverlay = false
+    @State private var isImportingWorkout = false
 
     private let calendar = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
 
     private var screenMode: CalendarScreenMode {
         CalendarScreenMode(rawValue: screenModeRaw) ?? .monthGrid
+    }
+
+    private var historyFilter: WorkoutHistoryFilter {
+        WorkoutHistoryFilter(rawValue: historyFilterRaw) ?? .all
     }
 
     /// Always derived from `allWorkouts` so deletes (e.g. from Summary) remove rows immediately.
@@ -91,6 +156,10 @@ struct CalendarView: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 20)
 
+                subviewStatusRow
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+
                 if allWorkouts.count >= CalendarWorkoutQuery.maxRows {
                     calendarQueryScopeFootnote
                         .padding(.horizontal, 20)
@@ -98,7 +167,7 @@ struct CalendarView: View {
                         .padding(.bottom, 12)
                 } else {
                     Color.clear
-                        .frame(height: 20)
+                        .frame(height: 12)
                 }
 
                 if screenMode == .monthGrid {
@@ -108,6 +177,23 @@ struct CalendarView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            if showWorkoutImportErrorOverlay {
+                MangoxConfirmOverlay(
+                    title: "Workout Import Failed",
+                    message: workoutImportError ?? "",
+                    onDismiss: clearWorkoutImportError
+                ) {
+                    Button {
+                        clearWorkoutImportError()
+                    } label: {
+                        Text("OK")
+                            .mangoxButtonChrome(.hero)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .transition(.opacity)
+            }
         }
         .onChange(of: screenModeRaw) { _, _ in
             if screenMode == .list {
@@ -129,6 +215,24 @@ struct CalendarView: View {
         .onReceive(NotificationCenter.default.publisher(for: .mangoxWorkoutAggregatesMayHaveChanged)) {
             _ in
             applyCalendarWorkoutChanges(allWorkouts)
+        }
+        .fileImporter(
+            isPresented: $showWorkoutImporter,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                Task {
+                    await importWorkout(from: url)
+                }
+            case .failure(let error):
+                workoutImportError = error.localizedDescription
+            }
+        }
+        .onChange(of: workoutImportError) { _, value in
+            showWorkoutImportErrorOverlay = value != nil
         }
     }
 
@@ -261,13 +365,13 @@ struct CalendarView: View {
 
     private var listContent: some View {
         Group {
-            if allWorkouts.isEmpty {
+            if filteredWorkoutsGroupedByDay.isEmpty {
                 emptyRidesPlaceholder
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        ForEach(workoutsGroupedByDay, id: \.day) { group in
+                        ForEach(filteredWorkoutsGroupedByDay, id: \.day) { group in
                             Section {
                                 ForEach(group.workouts) { workout in
                                     Button {
@@ -314,13 +418,13 @@ struct CalendarView: View {
 
     private var emptyRidesPlaceholder: some View {
         VStack(spacing: 14) {
-            Image(systemName: "figure.outdoor.cycle")
+            Image(systemName: historyFilter == .imported ? "square.and.arrow.down" : "figure.outdoor.cycle")
                 .font(.system(size: 40))
                 .foregroundStyle(.white.opacity(0.18))
-            Text("No rides yet")
+            Text(emptyStateTitle)
                 .font(.headline)
                 .foregroundStyle(.white.opacity(0.45))
-            Text("Complete a ride to see it here.")
+            Text(emptyStateMessage)
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.28))
         }
@@ -332,7 +436,7 @@ struct CalendarView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text("Calendar")
+            Text("Workouts")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
 
@@ -358,6 +462,70 @@ struct CalendarView: View {
                 )
             }
 
+            if screenMode == .list {
+                Button {
+                    showWorkoutImporter = true
+                } label: {
+                    Image(systemName: isImportingWorkout ? "hourglass" : "square.and.arrow.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Color.white.opacity(AppOpacity.cardBg))
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(isImportingWorkout)
+                .accessibilityLabel("Import workout file")
+
+                Menu {
+                    ForEach(WorkoutHistoryFilter.allCases) { filter in
+                        Button {
+                            historyFilterRaw = filter.rawValue
+                        } label: {
+                            Label(filter.title, systemImage: filter.systemImage)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: historyFilter.systemImage)
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(historyFilter.title)
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.white.opacity(0.8))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(AppOpacity.cardBg))
+                    .clipShape(Capsule())
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
+                    )
+                }
+            }
+
+        }
+        .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+    }
+
+    private var subviewStatusRow: some View {
+        HStack(spacing: 10) {
+            Group {
+                if screenMode == .list {
+                    Text(listStatusText)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                } else {
+                    Color.clear
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 18)
         }
     }
 
@@ -475,5 +643,122 @@ struct CalendarView: View {
             total += workoutsByDayStart[sod]?.reduce(0.0) { $0 + $1.tss } ?? 0
         }
         return total
+    }
+
+    private var filteredWorkoutsGroupedByDay: [(day: Date, workouts: [Workout])] {
+        workoutsGroupedByDay.compactMap { group in
+            let filtered = group.workouts.filter { historyFilter.includes($0) }
+            guard !filtered.isEmpty else { return nil }
+            return (group.day, filtered)
+        }
+    }
+
+    private var filteredWorkoutCount: Int {
+        filteredWorkoutsGroupedByDay.reduce(0) { $0 + $1.workouts.count }
+    }
+
+    private var listStatusText: String {
+        if historyFilter == .all {
+            return "\(filteredWorkoutCount) workouts"
+        }
+        return "\(filteredWorkoutCount) \(historyFilter.title.lowercased()) workouts"
+    }
+
+    private var emptyStateTitle: String {
+        switch historyFilter {
+        case .all:
+            return "No workouts yet"
+        case .outdoor:
+            return "No outdoor rides yet"
+        case .indoor:
+            return "No indoor workouts yet"
+        case .planned:
+            return "No planned workouts yet"
+        case .imported:
+            return "No imported workouts yet"
+        }
+    }
+
+    private var emptyStateMessage: String {
+        switch historyFilter {
+        case .all:
+            return "Complete or import a workout to see it here."
+        case .outdoor:
+            return "Outdoor rides with a saved route will appear here."
+        case .indoor:
+            return "Unplanned indoor trainer sessions will appear here."
+        case .planned:
+            return "Workouts started from a training plan will appear here."
+        case .imported:
+            return "Import a TCX or FIT file to add older sessions to your history."
+        }
+    }
+
+    private func clearWorkoutImportError() {
+        showWorkoutImportErrorOverlay = false
+        workoutImportError = nil
+    }
+
+    @MainActor
+    private func importWorkout(from url: URL) async {
+        isImportingWorkout = true
+        defer { isImportingWorkout = false }
+
+        do {
+            let payload = try loadImportedWorkoutPayload(from: url)
+            _ = try di.workoutPersistenceRepository.saveImportedWorkout(payload)
+            screenModeRaw = CalendarScreenMode.list.rawValue
+            historyFilterRaw = WorkoutHistoryFilter.all.rawValue
+        } catch {
+            workoutImportError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func loadImportedWorkoutPayload(from url: URL) throws -> ImportedWorkoutPayload {
+        let data = try readFileData(from: url)
+        let ext = url.pathExtension.lowercased()
+        let importResult: FITWorkoutCodec.ImportResult
+        let format: WorkoutImportFormat
+
+        switch ext {
+        case "fit":
+            importResult = try FITWorkoutCodec.decodeActivity(data: data)
+            format = .fit
+        case "tcx":
+            importResult = try TCXWorkoutImportService.parse(data: data)
+            format = .tcx
+        default:
+            throw WorkoutImportPickerError.unsupportedFileType
+        }
+
+        return ImportedWorkoutPayload(
+            fileName: url.lastPathComponent,
+            format: format,
+            startDate: importResult.startDate,
+            durationSeconds: importResult.durationSeconds,
+            distanceMeters: importResult.distanceMeters,
+            avgPower: importResult.avgPower,
+            maxPower: importResult.maxPower,
+            avgHR: importResult.avgHR,
+            maxHR: importResult.maxHR,
+            samples: importResult.samples.map {
+                ImportedWorkoutSamplePayload(
+                    timestamp: importResult.startDate.addingTimeInterval(TimeInterval($0.elapsed)),
+                    elapsedSeconds: $0.elapsed,
+                    power: $0.power,
+                    cadence: $0.cadence,
+                    speed: $0.speed,
+                    heartRate: $0.hr
+                )
+            }
+        )
+    }
+
+    private func readFileData(from url: URL) throws -> Data {
+        if url.startAccessingSecurityScopedResource() {
+            defer { url.stopAccessingSecurityScopedResource() }
+            return try Data(contentsOf: url)
+        }
+        return try Data(contentsOf: url)
     }
 }

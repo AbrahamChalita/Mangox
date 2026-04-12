@@ -352,6 +352,10 @@ final class OutdoorViewModel {
         }
     }
 
+    func endLiveActivity() async {
+        await liveActivityService.endLiveActivity()
+    }
+
     func applyImportedRoute() {
         navigationService.followGPXRoute(
             points: routeService.points,
@@ -369,6 +373,13 @@ final class OutdoorViewModel {
     ) {
         locationService.setup()
         locationManager.lapIntervalMeters = autoLapIntervalMeters
+
+        if locationManager.isRecording {
+            showSetupPhase = false
+            if navigationService.mode == .freeRide {
+                setupMode = .freeRide
+            }
+        }
 
         if routeService.hasRoute, navigationService.mode == .freeRide {
             navigationService.followGPXRoute(
@@ -411,11 +422,10 @@ final class OutdoorViewModel {
     }
 
     func handleDisappear(locationManager: LocationServiceProtocol) {
-        if locationManager.isRecording {
-            locationManager.stopRecording()
+        if !locationManager.isRecording {
+            locationManager.stopOutdoorLocationPreviewIfIdle()
+            bleService.disconnectCSC()
         }
-        locationManager.stopOutdoorLocationPreviewIfIdle()
-        bleService.disconnectCSC()
     }
 
     func handleAuthorizationChange(

@@ -116,6 +116,8 @@ struct UserContext: Encodable {
     let seasonGoalSummary: String?
     /// Short hint about optional vs mandatory plan days when the active week includes flexible sessions.
     let planKeyDaySemanticsHint: String?
+    /// Compact multi-line digest of the most recent completed rides for broader training context.
+    let recentRideDigest: String?
     /// Rider body weight in kg when set. Used to compute W/kg context.
     let riderWeightKg: Double?
     /// Rider age in years when birth year is set.
@@ -164,6 +166,19 @@ struct PlanGenerationResponse: Decodable {
     let request_id: String?
     let validation_warnings: [String]?
     let generation_metrics: PlanGenerationMetrics?
+}
+
+struct WorkoutGenerationRequest: Encodable {
+    let inputs: WorkoutGenerationInputs
+    let is_pro: Bool
+    let user_context_encrypted: String?
+    let client_local_date: String
+    let client_time_zone: String
+}
+
+struct WorkoutGenerationResponse: Decodable {
+    let workout: GeneratedWorkout
+    let request_id: String?
 }
 
 struct ToolCall: Codable, Identifiable, Equatable, Sendable {
@@ -232,6 +247,16 @@ private struct GeneratePlanToolDetail: Decodable {
         }
         return nil
     }
+}
+
+private struct GenerateWorkoutToolDetail: Decodable {
+    let goal: String
+    let duration_minutes: Int?
+    let experience: String?
+    let preferred_intensity: String?
+    let environment: String?
+    let planned_date: String?
+    let plan_context: String?
 }
 
 /// Normalizes model-supplied dates to `yyyy-MM-dd` for `/api/generate-plan` and UI.
@@ -344,26 +369,6 @@ struct ChatWireEvent: Decodable, Sendable {
     let error: String?
 }
 
-// MARK: - Coach routing (quick starters vs typed input)
-
-/// Controls whether a send tries on-device narrow first or goes straight to Mangox Cloud.
-enum CoachChatDelivery: Sendable {
-    /// Heuristics + on-device classifier (default for typed messages).
-    case automatic
-    /// Quick starter tap: on-device narrow first, no cloud-biased classification.
-    case starter
-    /// Skip on-device (e.g. user chose “Go deeper with cloud coach”).
-    case cloudOnly
-
-    fileprivate var logLabel: String {
-        switch self {
-        case .automatic: "automatic"
-        case .starter: "starter"
-        case .cloudOnly: "cloudOnly"
-        }
-    }
-}
-
 // MARK: - AIService
 
 @Observable @MainActor
@@ -386,6 +391,10 @@ final class AIService: AIServiceProtocol, CoachRepository {
     var planConfirmationDraft: PlanGenerationDraft?
     /// After a successful save, celebration UI + optional navigation to the plan.
     var planSaveCelebration: PlanSaveCelebration?
+    /// Full single-workout draft awaiting save.
+    var workoutConfirmationDraft: WorkoutGenerationDraft?
+    /// Last saved generated workout, used for start-workout CTA.
+    var workoutSaveCelebration: WorkoutSaveCelebration?
 
     /// Shown while the backend streams the coach reply (`/api/chat/stream` extracts `content` text).
     /// Refreshes on a short debounce so the UI does not repaint every token.
@@ -394,15 +403,9 @@ final class AIService: AIServiceProtocol, CoachRepository {
     var streamStatusText: String?
     /// True while the model is emitting a `<think>` block with no visible content yet.
     var streamIsThinking: Bool = false
-    /// True while on-device Foundation Models is streaming (bubble chrome + status copy).
-    var streamUsesOnDeviceAppearance: Bool = false
 
     private var streamRawBuffer: String = ""
     private var streamDisplayThrottleTask: Task<Void, Never>?
-
-    /// Persistent on-device narrow-reply session. Reused across turns so the model has multi-turn
-    /// memory. Reset to nil on createNewSession / switchToSession / context-window overflow.
-    private var onDeviceNarrowSession: LanguageModelSession?
 
     /// The currently active chat session. Nil means no session selected.
     var currentSessionID: UUID?
@@ -424,15 +427,9 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
     func sendMessage(
         _ text: String,
-        isPro: Bool,
-        delivery: CoachChatDelivery = .automatic
+        isPro: Bool
     ) async {
-        await sendMessage(
-            text,
-            isPro: isPro,
-            modelContext: persistenceContext,
-            delivery: delivery
-        )
+        await sendMessage(text, isPro: isPro, modelContext: persistenceContext)
     }
 
     @discardableResult
@@ -460,6 +457,10 @@ final class AIService: AIServiceProtocol, CoachRepository {
         )
     }
 
+    func saveConfirmedWorkoutDraft(_ draft: WorkoutGenerationDraft) throws {
+        try saveConfirmedWorkoutDraft(draft, modelContext: persistenceContext)
+    }
+
     func regenerateFallbackPlanWeek(
         weekNumber: Int,
         celebration: PlanSaveCelebration,
@@ -479,10 +480,6 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
     func createNewSession() {
         createNewSession(modelContext: persistenceContext)
-    }
-
-    func escalateStarterOnDeviceToCloud(isPro: Bool) async {
-        await escalateStarterOnDeviceToCloud(isPro: isPro, modelContext: persistenceContext)
     }
 
     func switchToSession(_ sessionID: UUID) {
@@ -612,6 +609,17 @@ final class AIService: AIServiceProtocol, CoachRepository {
         ]
     }
 
+    private static func looksLikeSingleWorkoutRequest(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let workoutHints = [
+            "build me a workout", "generate a workout", "give me a workout",
+            "session for today", "session for tonight", "recovery ride", "threshold workout",
+            "vo2 workout", "sweet spot workout", "tempo workout", "endurance ride",
+        ]
+        if workoutHints.contains(where: { lower.contains($0) }) { return true }
+        return lower.contains(" workout") && !lower.contains("training plan")
+    }
+
     /// Matches server `used_web_search` only. References alone can be model-invented URLs;
     /// inferring "live search" from `references` caused false "Answer used live web sources" badges.
     private static func resolvedUsedWebSearch(_ response: ChatAPIResponse) -> Bool {
@@ -631,6 +639,10 @@ final class AIService: AIServiceProtocol, CoachRepository {
             parts.append(r)
         }
         return parts.joined(separator: " · ")
+    }
+
+    static func workoutSummaryLine(for inputs: WorkoutGenerationInputs) -> String {
+        inputs.summaryLine
     }
 
     private static func nonEmptyTrimmed(_ s: String?) -> String? {
@@ -704,7 +716,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
     /// REST base for `/api/generate-plan` etc. Matches Mangox Cloud provider URL from Settings; falls back to Info.plist or production when using OpenAI-compatible chat only.
     private var apiBaseURL: String {
         let cfg = ChatProviderResolver().resolve()
-        if cfg.kind == .mangoxBackend, !cfg.baseURL.isEmpty {
+        if !cfg.baseURL.isEmpty {
             return MangoxBackendBaseURLFormatting.normalizedRoot(cfg.baseURL)
         }
         let raw =
@@ -768,236 +780,15 @@ final class AIService: AIServiceProtocol, CoachRepository {
         streamIsThinking = false
     }
 
-    private func applyOnDeviceNarrowPartial(_ partial: NarrowCoachReply.PartiallyGenerated) {
-        let body = partial.body ?? ""
-        let reasoning = partial.reasoning ?? ""
-        let bodyTrim = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        if bodyTrim.isEmpty {
-            streamRawBuffer = ""
-            streamDraftText = ""
-            streamIsThinking = !reasoning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        } else {
-            streamIsThinking = false
-            streamStatusText = nil
-            streamRawBuffer = body
-            scheduleStreamDraftDisplayFlush()
-        }
-    }
-
-    /// When Mangox Cloud (or plan UI) is mid–multi-turn intake, typed replies must not be hijacked by the on-device narrow path.
-    private func resolveCoachDelivery(proposed: CoachChatDelivery) -> CoachChatDelivery {
-        if proposed == .cloudOnly { return .cloudOnly }
-        if planConfirmationDraft != nil || planSaveCelebration != nil {
-            return .cloudOnly
-        }
-        if proposed != .starter, shouldRouteToCloudAfterStructuredAssistantTurn() {
-            return .cloudOnly
-        }
-        return proposed
-    }
-
-    private func shouldRouteToCloudAfterStructuredAssistantTurn() -> Bool {
-        guard let assistant = messages.reversed().first(where: { $0.role == .assistant }) else {
-            return false
-        }
-        if assistant.category == "on_device_coach" { return false }
-        if assistant.category == "error" { return false }
-        let cat = (assistant.category ?? "").lowercased()
-        if cat == "clarification" || cat.contains("clarif") { return true }
-        if !assistant.followUpBlocks.isEmpty { return true }
-        // Mangox Cloud uses `ask_followup` chips for plan intake and other continuations; free-text replies must stay on-thread.
-        if assistant.suggestedActions.contains(where: { $0.type.lowercased() == "ask_followup" }) {
-            return true
-        }
-        return false
-    }
-
-    /// Streams an on-device narrow reply when routing allows. Returns `true` if handled (no cloud call).
-    private func streamOnDeviceNarrowIfEligible(
-        userMessage: String,
-        modelContext: ModelContext,
-        delivery: CoachChatDelivery
-    ) async -> Bool {
-        if delivery == .cloudOnly {
-            logCoachFlow("coachFlow onDevice skip reason=deliveryCloudOnly")
-            return false
-        }
-        guard OnDeviceCoachEngine.isSystemModelAvailable else {
-            logCoachFlow(
-                "coachFlow onDevice skip reason=systemModelUnavailable systemModel=\(OnDeviceCoachEngine.systemModelAvailabilityLogDescription)"
-            )
-            return false
-        }
-        guard SystemLanguageModel.default.supportsLocale(Locale.current) else {
-            logCoachFlow("coachFlow onDevice skip reason=unsupportedLocale")
-            return false
-        }
-        if OnDeviceCoachEngine.heuristicCloudRoute(for: userMessage) {
-            logCoachFlow("coachFlow onDevice skip reason=heuristicCloudRoute")
-            return false
-        }
-
-        let factSheet = coachFactSheetText(modelContext: modelContext)
-        let route: CoachRouteKind
-        if delivery == .starter {
-            route = .localNarrowReply
-            logCoachFlow("coachFlow onDevice route delivery=starter decision=forcedLocalNarrow")
-        } else {
-            do {
-                if OnDeviceCoachEngine.heuristicLocalPreferred(for: userMessage) {
-                    route = .localNarrowReply
-                    logCoachFlow("coachFlow onDevice route delivery=automatic decision=heuristicLocalPreferred")
-                } else {
-                    route = try await OnDeviceCoachEngine.classifyRoute(
-                        userMessage: userMessage,
-                        factSheet: factSheet
-                    )
-                    logCoachFlow(
-                        "coachFlow onDevice route delivery=automatic classifier=\(route.rawValue)"
-                    )
-                }
-            } catch {
-                logger.warning("On-device route classification failed: \(error.localizedDescription)")
-                logCoachFlow("coachFlow onDevice skip reason=classifierError")
-                return false
-            }
-            guard route == .localNarrowReply else {
-                logCoachFlow(
-                    "coachFlow onDevice skip reason=classifierNotLocalNarrow route=\(route.rawValue)"
-                )
-                return false
-            }
-        }
-
-        logCoachFlow("coachFlow onDevice streamNarrowReply begin")
-        var trainingSnapshot = await coachTrainingSnapshotForOnDeviceNarrow(modelContext: modelContext)
-        WorkoutRAGIndex.ensureRecentIndexed(modelContext: modelContext, maxNewEmbeddings: 16)
-        if let vectorAppendix = WorkoutRAGRetriever.appendixIfRelevant(
-            userMessage: userMessage,
-            modelContext: modelContext
-        ) {
-            trainingSnapshot += "\n\n\(vectorAppendix)"
-        }
-        if let ragAppendix = WorkoutHistoryKeywordRetriever.appendixIfRelevant(
-            userMessage: userMessage,
-            modelContext: modelContext
-        ) {
-            trainingSnapshot += "\n\n\(ragAppendix)"
-        }
-
-        // Create the narrow session once per coach conversation; reuse it across turns for multi-turn memory.
-        // Tools are bound at creation with a data snapshot from this moment.
-        if onDeviceNarrowSession == nil {
-            let narrowTools: [any Tool] = [
-                MangoxOnDeviceRecentWorkoutsTool(
-                    digest: coachWorkoutHistoryDigestForOnDeviceTools(modelContext: modelContext)),
-                MangoxOnDeviceRiderExtendedTool(
-                    digest: coachRiderExtendedProfileToolPayload(modelContext: modelContext)),
-                MangoxOnDeviceFTPHistoryTool(digest: coachFTPTestHistoryToolPayload()),
-            ]
-            let newSession = OnDeviceCoachEngine.makeNarrowSession(tools: narrowTools)
-            newSession.prewarm()
-            onDeviceNarrowSession = newSession
-            logCoachFlow("coachFlow onDevice narrowSession created prewarm=true")
-        }
-        let narrowSession = onDeviceNarrowSession!
-
-        streamUsesOnDeviceAppearance = true
-        streamStatusText = "On-device coach"
-        defer {
-            streamUsesOnDeviceAppearance = false
-            streamStatusText = nil
-        }
-
-        do {
-            let reply: NarrowCoachReply? = try await OnDeviceCoachEngine.signpostOnDeviceNarrow {
-                try await OnDeviceCoachEngine.streamNarrowReply(
-                    userMessage: userMessage,
-                    trainingSnapshot: trainingSnapshot,
-                    session: narrowSession
-                ) { [weak self] partial in
-                    await MainActor.run {
-                        self?.applyOnDeviceNarrowPartial(partial)
-                    }
-                }
-            }
-
-            flushStreamDraftToUI()
-            streamDraftText = ""
-            streamRawBuffer = ""
-            streamDisplayThrottleTask?.cancel()
-            streamDisplayThrottleTask = nil
-            streamIsThinking = false
-
-            guard let narrow = reply else {
-                logCoachFlow("coachFlow onDevice stream end emptyReply")
-                return false
-            }
-            let body = narrow.body.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !body.isEmpty else {
-                logCoachFlow("coachFlow onDevice stream end emptyBody")
-                return false
-            }
-
-            let fu = narrow.followUp.trimmingCharacters(in: .whitespacesAndNewlines)
-            let onDeviceChips = narrow.suggestedActions.map {
-                SuggestedAction(label: $0.label, type: "on_device_followup")
-            }
-            let escalateChip: [SuggestedAction] =
-                delivery == .starter
-                ? [SuggestedAction(label: "Go deeper with cloud coach", type: "escalate_cloud")]
-                : []
-            let aiMsg = ChatMessage(
-                id: UUID(),
-                role: .assistant,
-                content: body,
-                timestamp: .now,
-                suggestedActions: onDeviceChips + escalateChip,
-                followUpQuestion: fu.isEmpty ? nil : fu,
-                followUpBlocks: [],
-                thinkingSteps: [],
-                category: "on_device_coach",
-                tags: ["on_device"],
-                references: [],
-                usedWebSearch: false,
-                feedbackScore: nil,
-                confidence: 0.95
-            )
-            messages.append(aiMsg)
-            persistCoachMessage(aiMsg, modelContext: modelContext)
+    private func resetStreamingState(clearLoading: Bool) {
+        streamDraftText = ""
+        streamRawBuffer = ""
+        streamDisplayThrottleTask?.cancel()
+        streamDisplayThrottleTask = nil
+        streamStatusText = nil
+        streamIsThinking = false
+        if clearLoading {
             isLoading = false
-            logCoachFlow(
-                "coachFlow onDevice success category=on_device_coach escalateChip=\(delivery == .starter ? "yes" : "no") bodyChars=\(body.count)"
-            )
-            return true
-        } catch {
-            logger.warning("On-device narrow stream failed: \(error.localizedDescription)")
-            MangoxFoundationModelsSupport.logGenerationFailure(error, label: "coach_narrow_aiservice")
-            if let gen = error as? LanguageModelSession.GenerationError {
-                switch gen {
-                case .exceededContextWindowSize:
-                    // Reset session so the next turn starts fresh; this message falls to cloud.
-                    onDeviceNarrowSession = nil
-                    logCoachFlow("coachFlow onDevice stream error exceededContextWindow sessionReset=true")
-                case .guardrailViolation:
-                    logCoachFlow("coachFlow onDevice stream error guardrailViolation")
-                case .unsupportedLanguageOrLocale:
-                    logCoachFlow("coachFlow onDevice stream error unsupportedLanguageOrLocale")
-                default:
-                    logCoachFlow("coachFlow onDevice stream error generation")
-                }
-            } else if error is LanguageModelSession.ToolCallError {
-                logCoachFlow("coachFlow onDevice stream error toolCall")
-            } else {
-                logCoachFlow("coachFlow onDevice stream error narrowStreamFailed")
-            }
-            flushStreamDraftToUI()
-            streamDraftText = ""
-            streamRawBuffer = ""
-            streamDisplayThrottleTask?.cancel()
-            streamDisplayThrottleTask = nil
-            streamIsThinking = false
-            return false
         }
     }
 
@@ -1008,8 +799,6 @@ final class AIService: AIServiceProtocol, CoachRepository {
         isPro: Bool,
         modelContext: ModelContext
     ) async {
-        streamUsesOnDeviceAppearance = false
-
         let history = buildHistory()
         let context = buildUserContext(modelContext: modelContext)
         let encryptedContext = encryptUserContext(context)
@@ -1145,8 +934,8 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 }
             }
 
-            // For Mangox Cloud: use server-supplied thinkingSteps.
-            // For OpenAI-compatible (e.g. local Ollama): capture <redacted_thinking> blocks parsed from content.
+            // Use server-supplied thinkingSteps when present.
+            // Otherwise capture <redacted_thinking> blocks parsed from content.
             let thinkingSource =
                 response.thinkingSteps.isEmpty ? parsedThinkingBlocks : response.thinkingSteps
 
@@ -1174,6 +963,11 @@ final class AIService: AIServiceProtocol, CoachRepository {
             )
 
             await executePendingGeneratePlanToolIfNeeded(from: response, modelContext: modelContext)
+            await executePendingGenerateWorkoutToolIfNeeded(
+                from: response,
+                isPro: isPro,
+                modelContext: modelContext
+            )
         } catch {
             logger.error("runMangoxCloudCoachTurn failed: \(error)")
             logCoachFlow("coachFlow cloud catch transportOrDecodeError")
@@ -1240,60 +1034,12 @@ final class AIService: AIServiceProtocol, CoachRepository {
         bumpSessionUpdatedAt(modelContext: modelContext)
     }
 
-    /// Replaces the latest on-device starter reply with a full Mangox Cloud turn for the same user message (no extra daily count).
-    func escalateStarterOnDeviceToCloud(isPro: Bool, modelContext: ModelContext) async {
-        guard !isLoading else {
-            logCoachFlow("coachFlow escalate skip reason=alreadyLoading")
-            return
-        }
-        guard let assistantIdx = messages.lastIndex(where: {
-            $0.role == .assistant && $0.category == "on_device_coach"
-        }) else {
-            logCoachFlow("coachFlow escalate skip reason=noOnDeviceAssistant")
-            return
-        }
-        guard assistantIdx > 0 else {
-            logCoachFlow("coachFlow escalate skip reason=assistantAtIndexZero")
-            return
-        }
-
-        var userText: String?
-        for j in (0..<assistantIdx).reversed() {
-            if messages[j].role == .user {
-                userText = messages[j].content
-                break
-            }
-        }
-        guard let userText else {
-            logCoachFlow("coachFlow escalate skip reason=noPrecedingUserMessage")
-            return
-        }
-        let assistantID = messages[assistantIdx].id
-
-        logCoachFlow(
-            "coachFlow escalate begin removeAssistant=\(assistantID.uuidString) userChars=\(userText.count)"
-        )
-        removeCoachMessage(id: assistantID, modelContext: modelContext)
-
-        isLoading = true
-        error = nil
-        streamDraftText = ""
-        streamRawBuffer = ""
-        streamDisplayThrottleTask?.cancel()
-        streamDisplayThrottleTask = nil
-        streamStatusText = nil
-        streamUsesOnDeviceAppearance = false
-
-        await runMangoxCloudCoachTurn(userText: userText, isPro: isPro, modelContext: modelContext)
-    }
-
     // MARK: - Send Chat Message
 
     func sendMessage(
         _ text: String,
         isPro: Bool,
-        modelContext: ModelContext,
-        delivery: CoachChatDelivery = .automatic
+        modelContext: ModelContext
     ) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -1306,15 +1052,10 @@ final class AIService: AIServiceProtocol, CoachRepository {
         }
 
         let sessionBefore = currentSessionID
-        let effectiveDelivery = resolveCoachDelivery(proposed: delivery)
-        if effectiveDelivery != delivery {
-            logCoachFlow(
-                "coachFlow sendMessage deliveryOverride proposed=\(delivery.logLabel) effective=\(effectiveDelivery.logLabel)"
-            )
-        }
+        let deliveryLogLabel = "cloudOnly"
 
         logCoachFlow(
-            "coachFlow sendMessage start delivery=\(effectiveDelivery.logLabel) isPro=\(isPro) chars=\(trimmed.count) session=\(sessionBefore?.uuidString ?? "nil")"
+            "coachFlow sendMessage start delivery=\(deliveryLogLabel) isPro=\(isPro) chars=\(trimmed.count) session=\(sessionBefore?.uuidString ?? "nil")"
         )
 
         incrementDailyCount()
@@ -1338,25 +1079,9 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
         isLoading = true
         error = nil
-        streamDraftText = ""
-        streamRawBuffer = ""
-        streamDisplayThrottleTask?.cancel()
-        streamDisplayThrottleTask = nil
-        streamStatusText = nil
-        streamUsesOnDeviceAppearance = false
+        resetStreamingState(clearLoading: false)
 
-        if await streamOnDeviceNarrowIfEligible(
-            userMessage: trimmed,
-            modelContext: modelContext,
-            delivery: effectiveDelivery
-        ) {
-            logCoachFlow("coachFlow sendMessage path=finishedOnDeviceNarrow")
-            return
-        }
-
-        streamUsesOnDeviceAppearance = false
-
-        logCoachFlow("coachFlow sendMessage path=cloudAfterOnDeviceSkippedOrFailed")
+        logCoachFlow("coachFlow sendMessage path=cloudOnly")
         await runMangoxCloudCoachTurn(userText: trimmed, isPro: isPro, modelContext: modelContext)
     }
 
@@ -1406,6 +1131,26 @@ final class AIService: AIServiceProtocol, CoachRepository {
             creditsRemaining: response.credits_remaining,
             generationMetrics: response.generation_metrics
         )
+    }
+
+    private func generateWorkout(
+        inputs: WorkoutGenerationInputs,
+        isPro: Bool,
+        modelContext: ModelContext
+    ) async throws -> GeneratedWorkout {
+        let encrypted = encryptUserContext(buildUserContext(modelContext: modelContext))
+        let request = WorkoutGenerationRequest(
+            inputs: inputs,
+            is_pro: isPro,
+            user_context_encrypted: encrypted,
+            client_local_date: Self.dateFormatter.string(from: .now),
+            client_time_zone: TimeZone.current.identifier
+        )
+        let response: WorkoutGenerationResponse = try await post(
+            path: "/api/generate-workout",
+            body: request
+        )
+        return response.workout
     }
 
     /// Streaming plan generation with SSE progress events.
@@ -1536,6 +1281,25 @@ final class AIService: AIServiceProtocol, CoachRepository {
         appendLocalAssistantMessage(
             "Your plan **\(result.plan.name)** is saved. You can open it from **My Plans** or tap **Open plan** on the celebration screen.",
             category: "plan_analysis",
+            modelContext: modelContext
+        )
+    }
+
+    func saveConfirmedWorkoutDraft(_ draft: WorkoutGenerationDraft, modelContext: ModelContext) throws {
+        let repository = WorkoutPersistenceRepository(modelContext: modelContext, modelContainer: PersistenceContainer.shared)
+        let templateID = try repository.saveCustomWorkoutTemplate(
+            name: draft.workout.title,
+            intervals: draft.workout.day.intervals
+        )
+        workoutConfirmationDraft = nil
+        workoutSaveCelebration = WorkoutSaveCelebration(
+            templateID: templateID,
+            workoutTitle: draft.workout.title,
+            purpose: draft.workout.purpose
+        )
+        appendLocalAssistantMessage(
+            "Your workout **\(draft.workout.title)** is ready. You can start it now from the banner below.",
+            category: "training_advice",
             modelContext: modelContext
         )
     }
@@ -1693,6 +1457,77 @@ final class AIService: AIServiceProtocol, CoachRepository {
         // Confirmation UI is the bottom sheet; avoid a second bubble with duplicate "confirm" copy (it overlapped the card visually).
     }
 
+    private func executePendingGenerateWorkoutToolIfNeeded(
+        from response: ChatAPIResponse,
+        isPro: Bool,
+        modelContext: ModelContext
+    ) async {
+        guard let call = response.toolCalls.first(where: {
+            $0.name == "generate_workout" && $0.state == "pending"
+        }),
+            let raw = call.detail?.trimmingCharacters(in: .whitespacesAndNewlines),
+            let data = raw.data(using: .utf8)
+        else { return }
+
+        let detail: GenerateWorkoutToolDetail
+        do {
+            detail = try JSONDecoder().decode(GenerateWorkoutToolDetail.self, from: data)
+        } catch {
+            logger.error("generate_workout detail JSON decode failed: \(error.localizedDescription)")
+            appendLocalAssistantMessage(
+                "I couldn't read the workout details from that reply. Try again with the workout focus and duration.",
+                category: "clarification",
+                modelContext: modelContext
+            )
+            return
+        }
+
+        let goal = detail.goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !goal.isEmpty else {
+            appendLocalAssistantMessage(
+                "To build a workout I need the workout focus, like threshold, endurance, or recovery.",
+                category: "clarification",
+                modelContext: modelContext
+            )
+            return
+        }
+        guard let duration = detail.duration_minutes, duration > 0 else {
+            appendLocalAssistantMessage(
+                "To build a workout I need the workout duration in minutes.",
+                category: "clarification",
+                modelContext: modelContext
+            )
+            return
+        }
+
+        let inputs = WorkoutGenerationInputs(
+            goal: goal,
+            durationMinutes: duration,
+            experience: Self.nonEmptyTrimmed(detail.experience),
+            preferredIntensity: Self.nonEmptyTrimmed(detail.preferred_intensity),
+            environment: Self.nonEmptyTrimmed(detail.environment) ?? "indoor",
+            plannedDate: Self.nonEmptyTrimmed(detail.planned_date),
+            currentFTP: PowerZone.ftp,
+            planContext: Self.nonEmptyTrimmed(detail.plan_context)
+        )
+
+        do {
+            let generated = try await generateWorkout(
+                inputs: inputs,
+                isPro: isPro,
+                modelContext: modelContext
+            )
+            workoutConfirmationDraft = WorkoutGenerationDraft(inputs: inputs, workout: generated)
+        } catch {
+            logger.error("generate_workout endpoint failed: \(error.localizedDescription)")
+            appendLocalAssistantMessage(
+                "I couldn't generate that workout right now. Try again in a moment or tweak the duration and focus.",
+                category: "error",
+                modelContext: modelContext
+            )
+        }
+    }
+
     private func appendLocalAssistantMessage(
         _ text: String,
         category: String,
@@ -1804,6 +1639,30 @@ final class AIService: AIServiceProtocol, CoachRepository {
         )
         let lastRides = (try? modelContext.fetch(lastRideDescriptor)) ?? []
         let lastRide = lastRides.first
+        let recentRideDigest = lastRides
+            .filter(\.isValid)
+            .prefix(5)
+            .map { ride in
+                var parts: [String] = [
+                    "\(Int(ride.duration / 60))min",
+                    String(format: "%.1fkm", ride.distance / 1000),
+                ]
+                if ride.avgPower > 0 {
+                    parts.append("\(Int(ride.avgPower))W avg")
+                    parts.append("TSS \(Int(ride.tss.rounded()))")
+                }
+                if ride.avgHR > 0 {
+                    parts.append("\(Int(ride.avgHR)) bpm")
+                }
+                if !ride.notes.isEmpty {
+                    parts.append("notes: \(ride.notes.prefix(40))")
+                }
+                let formatter = DateFormatter()
+                formatter.dateStyle = .medium
+                formatter.timeStyle = .none
+                return "\(formatter.string(from: ride.startDate)): \(parts.joined(separator: " · "))"
+            }
+            .joined(separator: "\n")
 
         var lastRideContext: LastRideContext?
         if let ride = lastRide {
@@ -1875,6 +1734,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
             lastRide: lastRideContext,
             seasonGoalSummary: MangoxTrainingGoals.summaryLineForCoach,
             planKeyDaySemanticsHint: planSemanticsHint,
+            recentRideDigest: recentRideDigest.isEmpty ? nil : recentRideDigest,
             riderWeightKg: riderWeight,
             riderAge: riderPrefs.riderAge,
             whoopLinked: whoopLinked,
@@ -1945,7 +1805,10 @@ final class AIService: AIServiceProtocol, CoachRepository {
             try modelContext.save()
             currentSessionID = session.id
             messages.removeAll()
-            onDeviceNarrowSession = nil
+            planConfirmationDraft = nil
+            planSaveCelebration = nil
+            workoutConfirmationDraft = nil
+            workoutSaveCelebration = nil
             logger.debug("Created new session \(session.id)")
         } catch {
             logger.error("Failed to create new session: \(error)")
@@ -1955,7 +1818,10 @@ final class AIService: AIServiceProtocol, CoachRepository {
     /// Switches to an existing session by ID.
     func switchToSession(_ sessionID: UUID, modelContext: ModelContext) {
         currentSessionID = sessionID
-        onDeviceNarrowSession = nil
+        planConfirmationDraft = nil
+        planSaveCelebration = nil
+        workoutConfirmationDraft = nil
+        workoutSaveCelebration = nil
         loadSession(sessionID, modelContext: modelContext)
     }
 
@@ -1971,6 +1837,10 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 if currentSessionID == sessionID {
                     messages.removeAll()
                     currentSessionID = nil
+                    planConfirmationDraft = nil
+                    planSaveCelebration = nil
+                    workoutConfirmationDraft = nil
+                    workoutSaveCelebration = nil
                 }
                 logger.debug("Deleted session \(sessionID)")
             } catch {
@@ -2208,9 +2078,12 @@ final class AIService: AIServiceProtocol, CoachRepository {
     }
 
     func contextualQuickPrompts(modelContext: ModelContext) -> [QuickPrompt] {
+        let availability = starterPromptAvailability(modelContext: modelContext)
         var prompts: [QuickPrompt] = []
         let status = recoveryStatus(modelContext: modelContext)
-        if let whoop = whoopDataSource, whoop.isConnected, let pct = whoop.latestRecoveryScore, pct < 34 {
+        if let whoop = whoopDataSource, whoop.isConnected, let pct = whoop.latestRecoveryScore,
+            pct < 34
+        {
             prompts.append(
                 QuickPrompt(
                     text: "How should I train with my WHOOP recovery today?",
@@ -2218,22 +2091,27 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 )
             )
         }
-        if status != .fresh {
+        if availability.hasRecentRide, status != .fresh {
             prompts.append(QuickPrompt(text: "Analyze my last ride", icon: "chart.bar.fill"))
         }
-        let pd = FetchDescriptor<TrainingPlanProgress>(
-            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
-        )
-        if let p = try? modelContext.fetch(pd), !p.isEmpty {
+        if availability.hasActivePlan {
             prompts.append(QuickPrompt(text: "How's my training load?", icon: "heart.fill"))
             prompts.append(
                 QuickPrompt(text: "What's my workout today?", icon: "calendar.badge.clock"))
         }
-        prompts.append(QuickPrompt(text: "How's my FTP trend?", icon: "bolt.fill"))
+        if availability.hasFTPHistory {
+            prompts.append(QuickPrompt(text: "How's my FTP trend?", icon: "bolt.fill"))
+        } else if PowerZone.ftp > 0 {
+            prompts.append(QuickPrompt(text: "Explain my power zones", icon: "bolt.fill"))
+        }
+        if prompts.count < 4 {
+            prompts.append(
+                QuickPrompt(text: "Build me a workout today", icon: "figure.outdoor.cycle"))
+        }
         if prompts.isEmpty {
             prompts.append(
                 QuickPrompt(text: "What should I do today?", icon: "figure.outdoor.cycle"))
         }
-        return Array(prompts.prefix(4))
+        return groundedQuickPrompts(from: prompts, availability: availability, fallback: [])
     }
 }

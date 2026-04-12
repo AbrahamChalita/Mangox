@@ -27,6 +27,8 @@ final class Workout {
     var elevationGain: Double = 0           // meters of positive elevation gain (from GPX route)
     var statusRaw: String = "active"        // active, paused, completed
     var notes: String = ""                  // user-added post-ride notes
+    var originRaw: String = WorkoutOrigin.recorded.rawValue
+    var importFormatRaw: String?
 
     /// Outdoor route label at save time (GPX name or Apple Maps destination).
     var savedRouteName: String?
@@ -83,6 +85,16 @@ enum WorkoutStatus: String, Codable {
     case completed
 }
 
+enum WorkoutOrigin: String, Codable {
+    case recorded
+    case imported
+}
+
+enum WorkoutImportFormat: String, Codable {
+    case tcx
+    case fit
+}
+
 /// Persisted outdoor route source for saved workouts.
 enum SavedRouteKind: String, Codable {
     case free
@@ -91,6 +103,20 @@ enum SavedRouteKind: String, Codable {
 }
 
 extension Workout {
+    var origin: WorkoutOrigin {
+        get { WorkoutOrigin(rawValue: originRaw) ?? .recorded }
+        set { originRaw = newValue.rawValue }
+    }
+
+    var importFormat: WorkoutImportFormat? {
+        get { importFormatRaw.flatMap { WorkoutImportFormat(rawValue: $0) } }
+        set { importFormatRaw = newValue?.rawValue }
+    }
+
+    var isImported: Bool {
+        origin == .imported
+    }
+
     var savedRouteKind: SavedRouteKind? {
         get { savedRouteKindRaw.flatMap { SavedRouteKind(rawValue: $0) } }
         set { savedRouteKindRaw = newValue?.rawValue }

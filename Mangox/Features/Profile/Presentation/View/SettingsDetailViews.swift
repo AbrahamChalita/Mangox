@@ -3,45 +3,44 @@ import UIKit
 import UserNotifications
 
 struct AICoachSettingsView: View {
-    @AppStorage(ChatProviderDefaultsKey.providerKind) private var providerKindRaw = ChatProviderKind
-        .mangoxBackend.rawValue
     @AppStorage(ChatProviderDefaultsKey.baseURL) private var providerBaseURL = ""
-    @AppStorage(ChatProviderDefaultsKey.model) private var providerModel = ""
-    @AppStorage(ChatProviderDefaultsKey.apiKey) private var providerAPIKey = ""
 
-    /// Local drafts avoid writing `UserDefaults` on every keystroke (which was freezing the field, paste, and keyboard).
     @State private var baseURLDraft: String
-    @State private var modelDraft: String
-    @State private var apiKeyDraft: String
     @State private var connectionPersistTask: Task<Void, Never>?
 
     init() {
         let d = UserDefaults.standard
         _baseURLDraft = State(initialValue: d.string(forKey: ChatProviderDefaultsKey.baseURL) ?? "")
-        _modelDraft = State(initialValue: d.string(forKey: ChatProviderDefaultsKey.model) ?? "")
-        _apiKeyDraft = State(initialValue: d.string(forKey: ChatProviderDefaultsKey.apiKey) ?? "")
-    }
-
-    private var selectedKind: ChatProviderKind {
-        ChatProviderKind(rawValue: providerKindRaw) ?? .mangoxBackend
     }
 
     var body: some View {
         SettingsSubviewShell(title: "AI Coach") {
             MangoxSectionLabel(title: "Provider")
             settingsSubCard {
-                VStack(spacing: 0) {
-                    providerRow(.mangoxBackend)
-                    Divider()
-                        .background(Color.white.opacity(0.06))
-                    providerRow(.openAICompatible)
-                }
-            }
-
-            // Provider detail + capability badges
-            settingsSubCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(selectedKind.detail)
+                    HStack(spacing: 10) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(AppColor.mango.opacity(0.15))
+                                .frame(width: 34, height: 34)
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(AppColor.mango)
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(ChatProviderKind.mangoxBackend.displayName)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.95))
+                            Text("Always on")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.42))
+                        }
+
+                        Spacer()
+                    }
+
+                    Text(ChatProviderKind.mangoxBackend.detail)
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.45))
                         .fixedSize(horizontal: false, vertical: true)
@@ -49,7 +48,7 @@ struct AICoachSettingsView: View {
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
-                            ForEach(selectedKind.capabilities.badges, id: \.self) { badge in
+                            ForEach(ChatProviderKind.mangoxBackend.capabilities.badges, id: \.self) { badge in
                                 Text(badge)
                                     .font(.system(size: 10, weight: .semibold))
                                     .foregroundStyle(AppColor.mango.opacity(0.9))
@@ -67,46 +66,15 @@ struct AICoachSettingsView: View {
             MangoxSectionLabel(title: "Connection")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 0) {
-                    if selectedKind == .openAICompatible {
-                        settingsField(
-                            title: "API Endpoint URL",
-                            text: $baseURLDraft,
-                            placeholder: "https://api.openai.com",
-                            textContentType: .URL,
-                            keyboard: .URL
-                        )
-                        Divider()
-                            .background(Color.white.opacity(0.06))
-                            .padding(.vertical, 12)
-                        settingsField(
-                            title: "API Key",
-                            text: $apiKeyDraft,
-                            placeholder: "sk-...",
-                            textContentType: .password,
-                            secure: true
-                        )
-                        Divider()
-                            .background(Color.white.opacity(0.06))
-                            .padding(.vertical, 12)
-                        settingsField(
-                            title: "Model",
-                            text: $modelDraft,
-                            placeholder: "gpt-4o-mini",
-                            textContentType: nil
-                        )
-                    } else {
-                        settingsField(
-                            title: "Backend URL",
-                            text: $baseURLDraft,
-                            placeholder: "https://mangox-backend-production.up.railway.app",
-                            textContentType: .URL,
-                            keyboard: .URL
-                        )
-                    }
+                    settingsField(
+                        title: "Backend URL",
+                        text: $baseURLDraft,
+                        placeholder: "https://mangox-backend-production.up.railway.app",
+                        textContentType: .URL,
+                        keyboard: .URL
+                    )
                 }
                 .onChange(of: baseURLDraft) { _, _ in schedulePersistConnectionDrafts() }
-                .onChange(of: modelDraft) { _, _ in schedulePersistConnectionDrafts() }
-                .onChange(of: apiKeyDraft) { _, _ in schedulePersistConnectionDrafts() }
             }
 
             // Reset
@@ -114,10 +82,7 @@ struct AICoachSettingsView: View {
                 HStack(spacing: 12) {
                     Button {
                         connectionPersistTask?.cancel()
-                        providerKindRaw = ChatProviderKind.mangoxBackend.rawValue
                         providerBaseURL = ""
-                        providerModel = ""
-                        providerAPIKey = ""
                         syncDraftsFromAppStorage()
                     } label: {
                         Text("Reset to Defaults")
@@ -139,20 +104,15 @@ struct AICoachSettingsView: View {
         }
         .onAppear { syncDraftsFromAppStorage() }
         .onDisappear { flushConnectionDraftsToAppStorage() }
-        .onChange(of: providerKindRaw) { _, _ in syncDraftsFromAppStorage() }
     }
 
     private func syncDraftsFromAppStorage() {
         baseURLDraft = providerBaseURL
-        modelDraft = providerModel
-        apiKeyDraft = providerAPIKey
     }
 
     private func flushConnectionDraftsToAppStorage() {
         connectionPersistTask?.cancel()
         providerBaseURL = baseURLDraft
-        providerModel = modelDraft
-        providerAPIKey = apiKeyDraft
     }
 
     private func schedulePersistConnectionDrafts() {
@@ -161,51 +121,7 @@ struct AICoachSettingsView: View {
             try? await Task.sleep(for: .milliseconds(340))
             guard !Task.isCancelled else { return }
             providerBaseURL = baseURLDraft
-            providerModel = modelDraft
-            providerAPIKey = apiKeyDraft
         }
-    }
-
-    private func providerRow(_ kind: ChatProviderKind) -> some View {
-        let isSelected = selectedKind == kind
-        let icon = kind == .mangoxBackend ? "sparkles" : "network"
-        let iconColor: Color = kind == .mangoxBackend ? AppColor.mango : AppColor.blue
-
-        return Button {
-            providerKindRaw = kind.rawValue
-        } label: {
-            HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(iconColor.opacity(0.15))
-                        .frame(width: 34, height: 34)
-                    Image(systemName: icon)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(iconColor)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(kind.displayName)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(isSelected ? 0.95 : 0.65))
-                }
-
-                Spacer()
-
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(AppColor.mango)
-                } else {
-                    Circle()
-                        .strokeBorder(Color.white.opacity(0.2), lineWidth: 1.5)
-                        .frame(width: 20, height: 20)
-                }
-            }
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     private func settingsField(
@@ -2127,78 +2043,83 @@ struct RiderProfileSettingsView: View {
 
     var body: some View {
         SettingsSubviewShell(title: "Rider Profile") {
-            MangoxSectionLabel(title: "WEIGHT")
             settingsSubCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(weightDisplayString)
-                            .font(.system(size: 28, weight: .bold, design: .monospaced))
-                            .foregroundStyle(.white)
-                        Text(prefs.isImperial ? "lb" : "kg")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.white.opacity(0.4))
-                        Spacer()
-                        Stepper("", value: weightBinding, in: weightRange, step: weightStep)
-                            .labelsHidden()
-                    }
+                VStack(spacing: 12) {
+                    riderInputCard(
+                        icon: "scalemass.fill",
+                        title: "WEIGHT",
+                        value: "\(weightDisplayString) \(prefs.isImperial ? "lb" : "kg")",
+                        accent: AppColor.mango
+                    ) {
+                        Slider(value: weightBinding, in: weightRange, step: weightStep)
+                            .tint(AppColor.mango)
 
-                    if PowerZone.ftp > 0 {
-                        let wkg = Double(PowerZone.ftp) / prefs.riderWeightKg
-                        Text(String(format: "%.2f W/kg at %d W FTP", wkg, PowerZone.ftp))
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(AppColor.mango.opacity(0.85))
-                    }
-
-                    Text("Also used for indoor speed estimation when computing from power.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.3))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            MangoxSectionLabel(title: "AGE")
-            settingsSubCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .firstTextBaseline, spacing: 0) {
-                        if let age = prefs.riderAge {
-                            Text("\(age)")
-                                .font(.system(size: 28, weight: .bold, design: .monospaced))
-                                .foregroundStyle(.white)
-                            Text(" yrs")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.white.opacity(0.4))
-                        } else {
-                            Text("Not set")
-                                .font(.system(size: 22, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.3))
+                        HStack {
+                            Text("\(Int(weightRange.lowerBound)) \(prefs.isImperial ? "lb" : "kg")")
+                            Spacer()
+                            Text("\(Int(weightRange.upperBound)) \(prefs.isImperial ? "lb" : "kg")")
                         }
-                        Spacer()
-                        HStack(spacing: 8) {
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.35))
+
+                        if PowerZone.ftp > 0 {
+                            let wkg = Double(PowerZone.ftp) / prefs.riderWeightKg
+                            Text(String(format: "%.2f W/kg at %d W FTP", wkg, PowerZone.ftp))
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(AppColor.mango.opacity(0.85))
+                        }
+
+                        Text("Also used for indoor speed estimation when computing from power.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.3))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    riderInputCard(
+                        icon: "calendar",
+                        title: "BIRTH DATE",
+                        value: birthDateSummary,
+                        accent: AppColor.blue
+                    ) {
+                        DatePicker(
+                            "Birth date",
+                            selection: riderBirthDateBinding,
+                            in: riderBirthDateRange,
+                            displayedComponents: .date
+                        )
+                        .labelsHidden()
+                        .datePickerStyle(.wheel)
+                        .tint(AppColor.blue)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 150)
+                        .clipped()
+                        .background(Color.white.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                        HStack {
+                            Text("Helps the AI coach tailor recovery periods and intensity recommendations.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.3))
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Spacer(minLength: 10)
+
                             if prefs.riderBirthYear != nil {
                                 Button {
                                     prefs.riderBirthYear = nil
                                 } label: {
-                                    Image(systemName: "xmark.circle")
-                                        .font(.system(size: 18))
-                                        .foregroundStyle(.white.opacity(0.35))
+                                    Text("Clear")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(AppColor.blue.opacity(0.9))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(AppColor.blue.opacity(0.14))
+                                        .clipShape(Capsule())
                                 }
                                 .buttonStyle(.plain)
                             }
-                            Stepper("", value: riderAgeStepperBinding, in: riderAgeStepRange)
-                                .labelsHidden()
                         }
                     }
-
-                    if let year = prefs.riderBirthYear {
-                        Text("Born \(year)")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.3))
-                    }
-
-                    Text("Helps the AI coach tailor recovery periods and intensity recommendations.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.3))
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -2228,22 +2149,69 @@ struct RiderProfileSettingsView: View {
         )
     }
 
-    /// Stepper bound to **age** so + increases age (earlier birth year). Binding directly to birth year inverted +/− vs the age label.
-    private var riderAgeStepRange: ClosedRange<Int> {
-        let y = Calendar.current.component(.year, from: .now)
-        return (y - 2010)...(y - 1940)
+    private var birthDateSummary: String {
+        guard let year = prefs.riderBirthYear else { return "Not set" }
+        let age = max(0, Calendar.current.component(.year, from: .now) - year)
+        return "\(year)  ·  Age \(age)"
     }
 
-    private var riderAgeStepperBinding: Binding<Int> {
+    private var riderBirthDateRange: ClosedRange<Date> {
+        let calendar = Calendar.current
+        let currentYear = calendar.component(.year, from: .now)
+        let minimum = calendar.date(from: DateComponents(year: 1940, month: 1, day: 1)) ?? .distantPast
+        let maximum = calendar.date(from: DateComponents(year: currentYear - 16, month: 12, day: 31)) ?? .now
+        return minimum...maximum
+    }
+
+    private var riderBirthDateBinding: Binding<Date> {
         let currentYear = Calendar.current.component(.year, from: .now)
         return Binding(
             get: {
-                if let year = prefs.riderBirthYear {
-                    return currentYear - year
-                }
-                return 30
+                dateFromBirthYear(prefs.riderBirthYear ?? (currentYear - 30))
             },
-            set: { prefs.riderBirthYear = currentYear - $0 }
+            set: { prefs.riderBirthYear = Calendar.current.component(.year, from: $0) }
         )
+    }
+
+    private func dateFromBirthYear(_ year: Int) -> Date {
+        Calendar.current.date(from: DateComponents(year: year, month: 7, day: 1)) ?? .now
+    }
+
+    private func riderInputCard<Content: View>(
+        icon: String,
+        title: String,
+        value: String,
+        accent: Color,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .tracking(1.1)
+
+                    Text(value)
+                        .font(.system(size: 20, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                }
+            }
+
+            content()
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.05))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }

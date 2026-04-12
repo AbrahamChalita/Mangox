@@ -5,15 +5,16 @@ import SwiftData
 import SwiftUI
 
 struct ContentView: View {
-    @Environment(DIContainer.self) private var di
     @Environment(\.launchOverlayVisible) private var launchOverlayVisible
 
+    let di: DIContainer
     @State private var selectedTab = 0
     @State private var homePath = NavigationPath()
     @State private var calendarPath = NavigationPath()
     @State private var coachPath = NavigationPath()
     @State private var statsPath = NavigationPath()
     @State private var settingsPath = NavigationPath()
+    @State private var loadedSecondaryTabs: Set<Int> = []
     @State private var prewarmSecondaryTabRoots = false
 
     private var isInSubview: Bool {
@@ -27,7 +28,7 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             if prewarmSecondaryTabRoots {
-                SecondaryTabRootsPrewarm()
+                SecondaryTabRootsPrewarm(di: di)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .opacity(0.001)
                     .allowsHitTesting(false)
@@ -49,23 +50,22 @@ struct ContentView: View {
                     }
                 }
 
-                Tab("Calendar", systemImage: "calendar", value: 1) {
-                    LazyTabRootContent(
-                        tabIndex: 1, selectedTab: selectedTab, placeholderStyle: .calendar
-                    ) {
-                        NavigationStack(path: $calendarPath) {
-                            CalendarView(navigationPath: $calendarPath)
-                                .toolbar(Visibility.hidden, for: ToolbarPlacement.navigationBar)
-                                .navigationDestination(for: AppRoute.self) { route in
-                                    appRouteDestination(route, path: $calendarPath, di: di)
-                                }
-                        }
+                Tab("Workouts", systemImage: "figure.outdoor.cycle", value: 1) {
+                    NavigationStack(path: $calendarPath) {
+                        CalendarView(di: di, navigationPath: $calendarPath)
+                            .navigationDestination(for: AppRoute.self) { route in
+                                appRouteDestination(route, path: $calendarPath, di: di)
+                            }
                     }
+                    .toolbar(.hidden, for: .navigationBar)
                 }
 
                 Tab("Coach", systemImage: "sparkles", value: 2) {
                     LazyTabRootContent(
-                        tabIndex: 2, selectedTab: selectedTab, placeholderStyle: .coach
+                        tabIndex: 2,
+                        selectedTab: selectedTab,
+                        loadedTabs: $loadedSecondaryTabs,
+                        placeholderStyle: .coach
                     ) {
                         NavigationStack(path: $coachPath) {
                             CoachTabRootView(
@@ -81,7 +81,10 @@ struct ContentView: View {
 
                 Tab("Stats", systemImage: "chart.line.uptrend.xyaxis", value: 3) {
                     LazyTabRootContent(
-                        tabIndex: 3, selectedTab: selectedTab, placeholderStyle: .stats
+                        tabIndex: 3,
+                        selectedTab: selectedTab,
+                        loadedTabs: $loadedSecondaryTabs,
+                        placeholderStyle: .stats
                     ) {
                         NavigationStack(path: $statsPath) {
                             PMChartView(
@@ -97,7 +100,10 @@ struct ContentView: View {
 
                 Tab("Settings", systemImage: "gearshape.fill", value: 4) {
                     LazyTabRootContent(
-                        tabIndex: 4, selectedTab: selectedTab, placeholderStyle: .settings
+                        tabIndex: 4,
+                        selectedTab: selectedTab,
+                        loadedTabs: $loadedSecondaryTabs,
+                        placeholderStyle: .settings
                     ) {
                         NavigationStack(path: $settingsPath) {
                             SettingsView(
@@ -125,6 +131,7 @@ struct ContentView: View {
         }
         .task {
             di.locationService.warmUpLocationIfAuthorized()
+            di.locationService.restoreRecordingIfNeeded()
         }
         .task(id: launchOverlayVisible) {
             await MangoxDebugPerformance.runInterval("Content.tabPrewarm") {
@@ -134,6 +141,16 @@ struct ContentView: View {
         .onChange(of: di.locationService.authorizationStatus) { _, newStatus in
             if shouldWarmLocation(for: newStatus) {
                 di.locationService.warmUpLocationIfAuthorized()
+            }
+        }
+        .onOpenURL { url in
+            guard isRideLiveActivityURL(url) else { return }
+            selectedTab = 0
+            homePath = NavigationPath()
+            if isIndoorLiveActivityURL(url) {
+                homePath.append(AppRoute.dashboard)
+            } else {
+                homePath.append(AppRoute.outdoorDashboard)
             }
         }
     }
@@ -156,14 +173,31 @@ struct ContentView: View {
             prewarmSecondaryTabRoots = false
         }
     }
+
+    private func isRideLiveActivityURL(_ url: URL) -> Bool {
+        isOutdoorLiveActivityURL(url) || isIndoorLiveActivityURL(url)
+    }
+
+    private func isOutdoorLiveActivityURL(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "mangox" else { return false }
+        guard url.host?.lowercased() == "ride" else { return false }
+        let path = url.path.lowercased()
+        return path == "/outdoor/live" || path == "/outdoor"
+    }
+
+    private func isIndoorLiveActivityURL(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "mangox" else { return false }
+        guard url.host?.lowercased() == "ride" else { return false }
+        let path = url.path.lowercased()
+        return path == "/indoor/live" || path == "/indoor"
+    }
 }
 
 #Preview {
     let di = DIContainer()
     let ble = BLEManager()
     let wifi = WiFiTrainerService()
-    return ContentView()
-        .environment(di)
+    return ContentView(di: di)
         .environment(ble)
         .environment(wifi)
         .environment(DataSourceCoordinator(bleManager: ble, wifiService: wifi))

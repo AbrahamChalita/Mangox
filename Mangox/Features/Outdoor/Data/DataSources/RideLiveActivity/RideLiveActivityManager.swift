@@ -72,10 +72,10 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
         case .turnByTurn: modeLabel = "Navigate"
         }
 
-        if let activity {
+        if let activeActivity = resolveExistingActivityIfNeeded() {
             let elapsed = Date().timeIntervalSince(lastUpdate)
             if elapsed >= minUpdateInterval {
-                await activity.update(
+                await activeActivity.update(
                     ActivityContent(state: state, staleDate: Date().addingTimeInterval(15)))
                 lastUpdate = Date()
             }
@@ -138,10 +138,10 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
             useImperial: prefs.isImperial
         )
 
-        if let activity {
+        if let activeActivity = resolveExistingActivityIfNeeded() {
             let elapsed = Date().timeIntervalSince(lastUpdate)
             if elapsed >= minUpdateInterval {
-                await activity.update(
+                await activeActivity.update(
                     ActivityContent(state: state, staleDate: Date().addingTimeInterval(15)))
                 lastUpdate = Date()
             }
@@ -164,9 +164,42 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
         }
     }
 
+    private func resolveExistingActivityIfNeeded() -> Activity<MangoxRideAttributes>? {
+        if let activity {
+            return activity
+        }
+
+        if let existing = Activity<MangoxRideAttributes>.activities.first {
+            activity = existing
+            return existing
+        }
+
+        return nil
+    }
+
     private func endIfNeeded() async {
-        guard let activity else { return }
-        await activity.end(nil, dismissalPolicy: .immediate)
+        var activityIDs = Set<String>()
+        var activitiesToEnd: [Activity<MangoxRideAttributes>] = []
+
+        if let activity {
+            activityIDs.insert(activity.id)
+            activitiesToEnd.append(activity)
+        }
+
+        for existing in Activity<MangoxRideAttributes>.activities where activityIDs.insert(existing.id).inserted {
+            activitiesToEnd.append(existing)
+        }
+
+        guard !activitiesToEnd.isEmpty else {
+            self.activity = nil
+            lastUpdate = .distantPast
+            return
+        }
+
+        for existing in activitiesToEnd {
+            await existing.end(nil, dismissalPolicy: .immediate)
+        }
+
         self.activity = nil
         lastUpdate = .distantPast
     }

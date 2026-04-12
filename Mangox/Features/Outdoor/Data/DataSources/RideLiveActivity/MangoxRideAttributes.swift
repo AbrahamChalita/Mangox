@@ -23,4 +23,8 @@ struct MangoxRideAttributes: ActivityAttributes {
     }
 
     var rideModeLabel: String
+
+    /// Deep link used when the user taps the Live Activity.
+    /// Keep stable for compatibility with already-running activities.
+    static let outdoorDeepLinkURL = URL(string: "mangox://ride/outdoor/live")!
 }

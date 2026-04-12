@@ -23,6 +23,7 @@ struct DashboardView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Environment(\.accessibilityReduceTransparency) private var accessibilityReduceTransparency
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     // Delight state
     @State private var zonePulse = false
     private let prefs = RidePreferences.shared
@@ -288,7 +289,7 @@ struct DashboardView: View {
                         Text(guidedSession.dayTitle)
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(.white)
-                            .lineLimit(1)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                     }
                     .frame(minHeight: 28)
                 }
@@ -701,42 +702,29 @@ struct DashboardView: View {
     }
 
     private var phoneMetricsGrid: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                phoneMetricCell(
-                    label: "SPEED",
-                    value: workoutManager.formattedSpeed,
-                    unit: speedUnitLabel
-                )
-                Rectangle()
-                    .fill(Color.white.opacity(0.06))
-                    .frame(width: 1)
-                phoneMetricCell(
-                    label: "CADENCE",
-                    value: workoutManager.formattedCadence,
-                    unit: "rpm",
-                    color: AppColor.blue
-                )
-            }
-            Rectangle()
-                .fill(Color.white.opacity(0.06))
-                .frame(height: 1)
-            HStack(spacing: 0) {
-                phoneMetricCell(
-                    label: "DISTANCE",
-                    value: workoutManager.formattedDistanceKm,
-                    unit: "km"
-                )
-                Rectangle()
-                    .fill(Color.white.opacity(0.06))
-                    .frame(width: 1)
-                phoneMetricCell(
-                    label: "ENERGY",
-                    value: workoutManager.formattedEnergyKJ,
-                    unit: "kJ",
-                    color: AppColor.yellow
-                )
-            }
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 0), GridItem(.flexible(), spacing: 0)], spacing: 0) {
+            phoneMetricCell(
+                label: "SPEED",
+                value: workoutManager.formattedSpeed,
+                unit: speedUnitLabel
+            )
+            phoneMetricCell(
+                label: "CADENCE",
+                value: workoutManager.formattedCadence,
+                unit: "rpm",
+                color: AppColor.blue
+            )
+            phoneMetricCell(
+                label: "DISTANCE",
+                value: workoutManager.formattedDistanceKm,
+                unit: "km"
+            )
+            phoneMetricCell(
+                label: "ENERGY",
+                value: workoutManager.formattedEnergyKJ,
+                unit: "kJ",
+                color: AppColor.yellow
+            )
         }
         .cardStyle()
     }
@@ -746,18 +734,30 @@ struct DashboardView: View {
     {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 11, weight: .medium))
+                .font(.caption.weight(.medium))
                 .foregroundStyle(.white.opacity(0.35))
                 .tracking(1.0)
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value)
-                    .font(.system(size: 26, weight: .bold, design: .monospaced))
-                    .foregroundStyle(color)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                Text(unit)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.3))
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text(value)
+                        .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 22 : 26, weight: .bold, design: .monospaced))
+                        .foregroundStyle(color)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                    Text(unit)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.3))
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(value)
+                        .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 22 : 26, weight: .bold, design: .monospaced))
+                        .foregroundStyle(color)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                    Text(unit)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.3))
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

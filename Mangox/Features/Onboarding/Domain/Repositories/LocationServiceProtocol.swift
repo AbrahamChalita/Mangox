@@ -14,6 +14,8 @@ protocol LocationServiceProtocol: AnyObject {
     func setup()
     func requestPermission()
     func warmUpLocationIfAuthorized()
+    func restoreRecordingIfNeeded()
+    func persistRecordingCheckpointIfNeeded()
 
     // MARK: - Live GPS Metrics
 
@@ -62,4 +64,6 @@ protocol LocationServiceProtocol: AnyObject {
 extension LocationServiceProtocol {
     /// Default no-op implementation for conformers that do not support pre-warm.
     func warmUpLocationIfAuthorized() {}
+    func restoreRecordingIfNeeded() {}
+    func persistRecordingCheckpointIfNeeded() {}
 }

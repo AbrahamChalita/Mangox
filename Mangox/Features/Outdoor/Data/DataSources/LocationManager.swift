@@ -16,6 +16,62 @@ private struct RecordedTrackPoint {
     let timestamp: Date
 }
 
+private struct PersistedCoordinate: Codable {
+    let latitude: Double
+    let longitude: Double
+
+    init(_ coordinate: CLLocationCoordinate2D) {
+        self.latitude = coordinate.latitude
+        self.longitude = coordinate.longitude
+    }
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+}
+
+private struct PersistedBreadcrumbChunk: Codable {
+    let coordinates: [PersistedCoordinate]
+    let averageSpeed: Double
+}
+
+private struct PersistedOutdoorLapRecord: Codable {
+    let number: Int
+    let distanceMeters: Double
+    let duration: TimeInterval
+    let averageSpeedKmh: Double
+    let elevationGainMeters: Double
+    let startedAt: Date
+    let endedAt: Date
+}
+
+private struct OutdoorRideCheckpoint: Codable {
+    let persistedAt: Date
+    let rideStartDate: Date
+    let totalDistance: Double
+    let totalElevationGain: Double
+    let rideDuration: TimeInterval
+    let averageSpeed: Double
+    let maxSpeed: Double
+    let speed: Double
+    let speedEMA: Double
+    let isAutoPaused: Bool
+    let totalPausedDuration: TimeInterval
+    let lastPauseStart: Date?
+    let currentGrade: Double
+    let lapIntervalMeters: Double
+    let completedLaps: [PersistedOutdoorLapRecord]
+    let currentLapStartDistance: Double
+    let currentLapStartDuration: TimeInterval
+    let currentLapStartElevation: Double
+    let currentLapWallStart: Date?
+    let frozenBreadcrumbChunks: [PersistedBreadcrumbChunk]
+    let liveBreadcrumbTail: [PersistedCoordinate]
+    let pauseGapCoordinates: [PersistedCoordinate]
+    let recordedTrackPath: String?
+    let lastKnownCoordinate: PersistedCoordinate?
+}
+
 /// Bridges non-`Sendable` references into `@Sendable` closures (e.g. main-queue cleanup in `deinit`).
 private struct UncheckedOptional<T>: @unchecked Sendable {
     /// `nonisolated(unsafe)`: assigned from `nonisolated init` while default module isolation is `MainActor`.
@@ -442,9 +498,14 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
 
     private static let persistedSearchBiasLatKey = "LocationManager.persistedSearchBiasLat"
     private static let persistedSearchBiasLonKey = "LocationManager.persistedSearchBiasLon"
+    private static let outdoorRideCheckpointKey = "LocationManager.outdoorRideCheckpoint.v1"
+    private let checkpointFrozenChunkLimit = 8
+    private let checkpointLiveTailLimit = 240
+    private let checkpointPauseGapLimit = 30
 
     private var lastPersistedSearchBiasAt: Date = .distantPast
     private var lastPersistedSearchBiasCoord: CLLocationCoordinate2D?
+    private var lastPersistedCheckpointAt: Date = .distantPast
 
     /// Last time `didUpdateLocations` fired — tracks link liveness, not accuracy.
     private var lastDelegateLocationAt: Date?
@@ -746,6 +807,8 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
 
     /// Start recording an outdoor ride.
     func startRecording() {
+        clearRideCheckpoint()
+
         guard isAuthorized else {
             logger.warning("Cannot start recording — location not authorized.")
             return
@@ -815,6 +878,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
             guard let self else { return }
             Task { @MainActor in
                 self.updateDuration()
+                self.persistRideCheckpointIfNeeded(force: false)
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -863,6 +927,46 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         guard isAuthorized else { return }
         setup()
         clManager?.requestLocation()
+    }
+
+    func persistRecordingCheckpointIfNeeded() {
+        persistRideCheckpointIfNeeded(force: true)
+    }
+
+    /// Rehydrate in-memory outdoor ride state after relaunch when a recording checkpoint exists.
+    func restoreRecordingIfNeeded() {
+        guard !isRecording else { return }
+        guard let checkpoint = loadRideCheckpoint() else { return }
+        guard Date().timeIntervalSince(checkpoint.persistedAt) <= 24 * 60 * 60 else {
+            clearRideCheckpoint()
+            return
+        }
+
+        restore(from: checkpoint)
+
+        setup()
+        applyLocationSamplingPolicy()
+        if let clManager {
+            applyBackgroundLocationPolicy(to: clManager)
+        }
+        clManager?.startUpdatingLocation()
+        clManager?.startUpdatingHeading()
+        startGpsStaleMonitoringIfNeeded()
+        startHeadingFlushTimerIfNeeded()
+        startMotionMonitoringIfNeeded()
+
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.updateDuration()
+                self.persistRideCheckpointIfNeeded(force: false)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        concurrencyHandles.rideTimer = timer
+
+        centerMapOnUser()
+        logger.info("Restored outdoor ride recording from checkpoint.")
     }
 
     /// Stops preview updates when leaving the outdoor screen without an active recording.
@@ -914,6 +1018,8 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
 
     /// Stop recording and finalize the ride.
     func stopRecording() {
+        persistRideCheckpointIfNeeded(force: true)
+
         isRecording = false
         isAutoPaused = false
         concurrencyHandles.rideTimer?.invalidate()
@@ -941,6 +1047,8 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         logger.info(
             "Outdoor ride stopped. Distance: \(self.totalDistance)m, Duration: \(self.rideDuration)s"
         )
+
+        clearRideCheckpoint()
     }
 
     // MARK: - GPX Export
@@ -973,6 +1081,176 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
             """
 
         return gpx
+    }
+
+    private func persistRideCheckpointIfNeeded(force: Bool) {
+        guard isRecording else { return }
+
+        let now = Date()
+        if !force, now.timeIntervalSince(lastPersistedCheckpointAt) < 5 {
+            return
+        }
+
+        guard let rideStartDate else { return }
+
+        let frozenChunksToPersist = Array(frozenBreadcrumbChunks.suffix(checkpointFrozenChunkLimit))
+        let liveTailToPersist = Array(liveBreadcrumbTail.suffix(checkpointLiveTailLimit))
+        let pauseGapToPersist = Array(pauseGapCoordinates.suffix(checkpointPauseGapLimit))
+
+        let checkpoint = OutdoorRideCheckpoint(
+            persistedAt: now,
+            rideStartDate: rideStartDate,
+            totalDistance: totalDistance,
+            totalElevationGain: totalElevationGain,
+            rideDuration: rideDuration,
+            averageSpeed: averageSpeed,
+            maxSpeed: maxSpeed,
+            speed: speed,
+            speedEMA: speedEMA,
+            isAutoPaused: isAutoPaused,
+            totalPausedDuration: totalPausedDuration,
+            lastPauseStart: lastPauseStart,
+            currentGrade: currentGrade,
+            lapIntervalMeters: lapIntervalMeters,
+            completedLaps: completedLaps.map {
+                PersistedOutdoorLapRecord(
+                    number: $0.number,
+                    distanceMeters: $0.distanceMeters,
+                    duration: $0.duration,
+                    averageSpeedKmh: $0.avgSpeedKmh,
+                    elevationGainMeters: $0.elevationGainMeters,
+                    startedAt: $0.startedAt,
+                    endedAt: $0.endedAt
+                )
+            },
+            currentLapStartDistance: currentLapStartDistance,
+            currentLapStartDuration: currentLapStartDuration,
+            currentLapStartElevation: currentLapStartElevation,
+            currentLapWallStart: currentLapWallStart,
+            frozenBreadcrumbChunks: frozenChunksToPersist.map {
+                PersistedBreadcrumbChunk(
+                    coordinates: $0.coords.map(PersistedCoordinate.init),
+                    averageSpeed: $0.avgSpeed
+                )
+            },
+            liveBreadcrumbTail: liveTailToPersist.map(PersistedCoordinate.init),
+            pauseGapCoordinates: pauseGapToPersist.map(PersistedCoordinate.init),
+            recordedTrackPath: pendingRecordedTrackPointsURL?.path,
+            lastKnownCoordinate: currentLocation.map { PersistedCoordinate($0.coordinate) }
+        )
+
+        do {
+            let data = try JSONEncoder().encode(checkpoint)
+            UserDefaults.standard.set(data, forKey: Self.outdoorRideCheckpointKey)
+            lastPersistedCheckpointAt = now
+        } catch {
+            logger.error("Failed to persist outdoor ride checkpoint: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadRideCheckpoint() -> OutdoorRideCheckpoint? {
+        guard let data = UserDefaults.standard.data(forKey: Self.outdoorRideCheckpointKey) else {
+            return nil
+        }
+
+        do {
+            return try JSONDecoder().decode(OutdoorRideCheckpoint.self, from: data)
+        } catch {
+            logger.error("Failed to decode outdoor ride checkpoint: \(error.localizedDescription)")
+            clearRideCheckpoint()
+            return nil
+        }
+    }
+
+    private func clearRideCheckpoint() {
+        UserDefaults.standard.removeObject(forKey: Self.outdoorRideCheckpointKey)
+        lastPersistedCheckpointAt = .distantPast
+    }
+
+    private func restore(from checkpoint: OutdoorRideCheckpoint) {
+        rideStartDate = checkpoint.rideStartDate
+        totalDistance = checkpoint.totalDistance
+        totalElevationGain = checkpoint.totalElevationGain
+        rideDuration = checkpoint.rideDuration
+        averageSpeed = checkpoint.averageSpeed
+        maxSpeed = checkpoint.maxSpeed
+        speed = checkpoint.speed
+        speedEMA = checkpoint.speedEMA
+        isAutoPaused = checkpoint.isAutoPaused
+        totalPausedDuration = checkpoint.totalPausedDuration
+        lastPauseStart = checkpoint.lastPauseStart
+        currentGrade = checkpoint.currentGrade
+        lapIntervalMeters = checkpoint.lapIntervalMeters
+        completedLaps = checkpoint.completedLaps.map {
+            OutdoorLapRecord(
+                number: $0.number,
+                distanceMeters: $0.distanceMeters,
+                duration: $0.duration,
+                avgSpeedKmh: $0.averageSpeedKmh,
+                elevationGainMeters: $0.elevationGainMeters,
+                startedAt: $0.startedAt,
+                endedAt: $0.endedAt
+            )
+        }
+        currentLapStartDistance = checkpoint.currentLapStartDistance
+        currentLapStartDuration = checkpoint.currentLapStartDuration
+        currentLapStartElevation = checkpoint.currentLapStartElevation
+        currentLapWallStart = checkpoint.currentLapWallStart
+        climbStartDist = 0
+        climbSampleStreak = 0
+        activeClimb = nil
+        frozenBreadcrumbChunks = checkpoint.frozenBreadcrumbChunks.map {
+            BreadcrumbChunk(
+                coords: $0.coordinates.map(\.coordinate),
+                avgSpeed: $0.averageSpeed
+            )
+        }
+        liveTailSpeedAccum = 0
+        liveTailSpeedCount = 0
+        liveBreadcrumbTail = checkpoint.liveBreadcrumbTail.map(\.coordinate)
+        pauseGapCoordinates = checkpoint.pauseGapCoordinates.map(\.coordinate)
+        pauseDebounceCount = 0
+        resumeDebounceCount = 0
+        motionMovementEMA = 0
+        motionResumeDebounceCount = 0
+        lastStrongMotionAt = nil
+        isMotionFallbackActive = false
+        signalConfidence = .searching
+        hasSeededMapHeading = false
+        lastMapCameraUpdateTime = .distantPast
+        lastPublishedMapCamera = nil
+        previousRawMapHeadingDegrees = nil
+        altitudeSamples.reset()
+        if let path = checkpoint.recordedTrackPath {
+            let url = URL(fileURLWithPath: path)
+            if FileManager.default.fileExists(atPath: path) {
+                pendingRecordedTrackPointsURL = url
+                concurrencyHandles.pendingRecordedTrackFileHandle = try? FileHandle(forWritingTo: url)
+                concurrencyHandles.pendingRecordedTrackFileHandle?.seekToEndOfFile()
+            } else {
+                pendingRecordedTrackPointsURL = nil
+                concurrencyHandles.pendingRecordedTrackFileHandle = nil
+            }
+        } else {
+            pendingRecordedTrackPointsURL = nil
+            concurrencyHandles.pendingRecordedTrackFileHandle = nil
+        }
+
+        if let coord = checkpoint.lastKnownCoordinate?.coordinate {
+            currentLocation = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+            smoothedRiderCoordinate = coord
+            lastSearchBiasCoordinate = coord
+            persistSearchBiasIfNeeded(coord)
+        }
+
+        isRecording = true
+        outdoorLocationPreviewActive = false
+        newLapJustCompleted = false
+        lastRecordedLocation = nil
+        lastAltitude = nil
+        horizontalAccuracy = -1
+        heading = -1
+        course = -1
     }
 
     /// Region that encompasses all breadcrumbs with padding.

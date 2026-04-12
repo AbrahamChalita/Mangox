@@ -462,3 +462,157 @@ struct CoachPlanSuccessBanner: View {
         )
     }
 }
+
+struct CoachWorkoutConfirmBanner: View {
+    let draft: WorkoutGenerationDraft
+
+    @Environment(CoachViewModel.self) private var coachViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "bolt.heart.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(AppColor.mango)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Save this workout?")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.95))
+                    Text(draft.workout.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.58))
+                }
+                Spacer()
+            }
+
+            Text(draft.workout.purpose)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(0.76))
+
+            if let rationale = draft.workout.rationale, !rationale.isEmpty {
+                Text(rationale)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.48))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(draft.workout.day.durationMinutes) min · \(draft.inputs.goal)")
+                Text("\(draft.workout.day.intervals.count) intervals")
+            }
+            .font(.caption)
+            .foregroundStyle(.white.opacity(0.55))
+
+            HStack(spacing: 10) {
+                Button {
+                    coachViewModel.clearWorkoutConfirmationDraft()
+                } label: {
+                    Text("Cancel")
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(MangoxPressStyle())
+
+                Button {
+                    do {
+                        try coachViewModel.saveConfirmedWorkoutDraft(draft)
+                    } catch {
+                    }
+                } label: {
+                    Text("Save workout")
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(AppColor.mango)
+                        .foregroundStyle(.black.opacity(0.78))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(MangoxPressStyle())
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(AppColor.bg)
+                .shadow(color: Color.black.opacity(0.3), radius: 12, y: 5)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(AppColor.mango.opacity(0.35), lineWidth: 1)
+        )
+    }
+}
+
+struct CoachWorkoutSuccessBanner: View {
+    let celebration: WorkoutSaveCelebration
+    @Binding var navigationPath: NavigationPath
+    var dismissChat: (() -> Void)?
+
+    @Environment(CoachViewModel.self) private var coachViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(AppColor.success)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Workout saved")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.95))
+                    Text(celebration.workoutTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                Spacer(minLength: 0)
+            }
+
+            Text(celebration.purpose)
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.52))
+
+            HStack(spacing: 10) {
+                Button {
+                    coachViewModel.clearWorkoutSaveCelebration()
+                } label: {
+                    Text("Done")
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(MangoxPressStyle())
+
+                Button {
+                    navigationPath.append(AppRoute.customWorkoutRide(templateID: celebration.templateID))
+                    coachViewModel.clearWorkoutSaveCelebration()
+                    dismissChat?()
+                } label: {
+                    Text("Start workout")
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(AppColor.mango)
+                        .foregroundStyle(.black.opacity(0.78))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(MangoxPressStyle())
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(AppColor.bg)
+                .shadow(color: Color.black.opacity(0.3), radius: 12, y: 5)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(AppColor.success.opacity(0.4), lineWidth: 1)
+        )
+    }
+}

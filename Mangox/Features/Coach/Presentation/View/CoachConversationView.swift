@@ -28,7 +28,9 @@ struct CoachConversationView: View {
     /// Pushed (not `.sheet`) so it isn’t torn down by the paywall/plans `item` sheet or full-screen chat cover.
     @State private var showConversationsList = false
     @State private var chatColumnWidth: CGFloat = 400
-    @State private var scrollPosition = ScrollPosition(edge: .bottom)
+    @State private var transcriptViewportHeight: CGFloat = 0
+    @State private var scrollPosition = ScrollPosition()
+    @State private var shouldAutoScrollToBottom = true
     /// Recreates `ScrollView` when the thread first appears (empty → messages) so layout/scroll state does not stick blank until a manual scroll.
     @State private var transcriptScrollSession: Int = 0
 
@@ -53,6 +55,16 @@ struct CoachConversationView: View {
         // Geometry/preference can report 0 briefly; a near-zero max width makes LazyVStack relayout wildly.
         let w = max(containerWidth, 64)
         return min(580, max(120, w - horizontalPadding))
+    }
+
+    private var transcriptContentAlignment: Alignment {
+        coachViewModel.messages.isEmpty && !coachViewModel.isLoading ? .center : .bottom
+    }
+
+    private var startersLoading: Bool {
+        coachViewModel.messages.isEmpty
+            && !coachViewModel.isLoading
+            && coachViewModel.starterContent == nil
     }
 
     var body: some View {
@@ -253,116 +265,171 @@ struct CoachConversationView: View {
 
     private func messageScroll(maxW: CGFloat) -> some View {
         ScrollView {
-            if coachViewModel.messages.isEmpty && !coachViewModel.isLoading {
-                emptyState(maxW: maxW)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .scrollTargetLayout()
-            } else {
-                // `VStack` avoids LazyVStack deferring layout until scroll (blank transcript until user drags).
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(coachViewModel.messages.enumerated()), id: \.element.id) {
-                        index, message in
-                        CoachMessageRow(
-                            message: message,
-                            isLatestAssistant: message.role == .assistant
-                                && (latestAssistantIndex.map { $0 == index } ?? false),
-                            bubbleMaxWidth: maxW,
-                            suggestionsInteractive: !coachViewModel.isLoading,
-                            onRetry: { send("Try again") },
-                            onSuggestedAction: handleSuggestedAction,
-                            onFollowUpBatchComplete: { send($0) }
-                        )
-                    }
-
-                    if coachViewModel.generatingPlan && !coachViewModel.isLoading {
-                        CoachStreamStatusRow(
-                            text: coachViewModel.planProgress?.message ?? "Building your plan…"
-                        )
-                        .id("planGen")
-                    }
-
-                    CoachStreamingSection(
-                        lastStreamScrollDate: .constant(.distantPast),
-                        scheduleScrollToBottom: {
-                            withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
+            VStack(spacing: 0) {
+                if coachViewModel.messages.isEmpty && !coachViewModel.isLoading {
+                    emptyState(maxW: maxW)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .scrollTargetLayout()
+                } else {
+                    // `VStack` avoids LazyVStack deferring layout until scroll (blank transcript until user drags).
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(coachViewModel.messages.enumerated()), id: \.element.id) {
+                            index, message in
+                            CoachMessageRow(
+                                message: message,
+                                isLatestAssistant: message.role == .assistant
+                                    && (latestAssistantIndex.map { $0 == index } ?? false),
+                                bubbleMaxWidth: maxW,
+                                suggestionsInteractive: !coachViewModel.isLoading,
+                                onRetry: { send("Try again") },
+                                onSuggestedAction: handleSuggestedAction,
+                                onFollowUpBatchComplete: { send($0) }
+                            )
                         }
-                    )
 
-                    Color.clear
-                        .frame(height: coachTranscriptBottomSpacerHeight)
+                        if coachViewModel.generatingPlan && !coachViewModel.isLoading {
+                            CoachStreamStatusRow(
+                                text: coachViewModel.planProgress?.message ?? "Building your plan…",
+                                style: .cloud
+                            )
+                            .id("planGen")
+                        }
+
+                        CoachStreamingSection()
+
+                        Color.clear
+                            .frame(height: coachTranscriptBottomSpacerHeight)
+                    }
+                    // `LazyVStack` otherwise shrink-wraps to the widest bubble; user rows stay `.trailing` inside
+                    // that narrow width, leaving a dead band on the right (your screenshot).
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 16)
+                    .scrollTargetLayout()
                 }
-                // `LazyVStack` otherwise shrink-wraps to the widest bubble; user rows stay `.trailing` inside
-                // that narrow width, leaving a dead band on the right (your screenshot).
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 16)
-                .scrollTargetLayout()
+            }
+            .frame(
+                maxWidth: .infinity,
+                minHeight: max(transcriptViewportHeight, 0),
+                alignment: transcriptContentAlignment
+            )
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { transcriptViewportHeight = proxy.size.height }
+                    .onChange(of: proxy.size.height) { _, newValue in
+                        transcriptViewportHeight = newValue
+                    }
             }
         }
         .id(transcriptScrollSession)
-        .defaultScrollAnchor(coachViewModel.messages.isEmpty ? .top : .bottom)
         .scrollBounceBehavior(.basedOnSize, axes: .vertical)
         .scrollDismissesKeyboard(.interactively)
         .scrollIndicators(.hidden)
         .scrollPosition($scrollPosition)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { value in
+                    guard abs(value.translation.height) > abs(value.translation.width) else { return }
+                    shouldAutoScrollToBottom = false
+                }
+        )
+        .onAppear {
+            if !coachViewModel.messages.isEmpty || coachViewModel.isLoading {
+                scrollTranscriptToBottom(animated: false)
+            }
+        }
         .onChange(of: coachViewModel.messages.count) { oldCount, newCount in
             if oldCount == 0, newCount > 0 {
                 transcriptScrollSession += 1
             }
-            withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
+            scrollTranscriptToBottom()
         }
         .onChange(of: coachViewModel.isLoading) { _, _ in
-            withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
+            scrollTranscriptToBottom()
         }
         .onChange(of: coachViewModel.generatingPlan) { _, g in
             if g {
-                withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
+                scrollTranscriptToBottom()
             }
         }
 
         // Plan confirm / success banners live in the bottom safeAreaInset; when they appear the visible
         // transcript shifts up — nudge scroll so the last message + chips stay above the inset (same idea as keyboard).
         .onChange(of: coachViewModel.planConfirmationDraft?.id) { _, _ in
-            withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
+            scrollTranscriptToBottom()
         }
         .onChange(of: coachViewModel.planSaveCelebration?.planID) { _, _ in
-            withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
+            scrollTranscriptToBottom()
+        }
+        .onChange(of: coachViewModel.workoutConfirmationDraft?.id) { _, _ in
+            scrollTranscriptToBottom()
+        }
+        .onChange(of: coachViewModel.workoutSaveCelebration?.id) { _, _ in
+            scrollTranscriptToBottom()
         }
     }
 
+    @ViewBuilder
     private func emptyState(maxW: CGFloat) -> some View {
-        let content =
-            coachViewModel.starterContent
-            ?? CoachEmptyStartersContent(
-                prompts: coachViewModel.contextualQuickPrompts(),
-                topicTags: []
-            )
+        if startersLoading {
+            starterLoadingState(maxW: maxW)
+        } else {
+            let content =
+                coachViewModel.starterContent
+                ?? CoachEmptyStartersContent(
+                    prompts: coachViewModel.contextualQuickPrompts(),
+                    topicTags: []
+                )
 
-        return VStack(spacing: 0) {
-            CoachEmptyStartersPanel(
-                bubbleMaxWidth: maxW,
-                greetingTitle: greetingText,
-                headline: "What should we work on?",
-                subhead:
-                    "Training, recovery, your last ride, or a full event plan — type below or tap a starter.",
-                topicTags: content.topicTags,
-                prompts: content.prompts,
-                onPlanBuilder: { send(Self.planBuilderSeed) },
-                onPrompt: { send($0.text, delivery: .starter) }
-            )
-            .frame(maxWidth: maxW)
+            VStack(spacing: 0) {
+                CoachEmptyStartersPanel(
+                    bubbleMaxWidth: maxW,
+                    greetingTitle: greetingText,
+                    headline: "What should we work on?",
+                    subhead:
+                        "Ask about training, recovery, or build a plan. Starters only appear when Mangox has data to support them.",
+                    topicTags: content.topicTags,
+                    prompts: content.prompts,
+                    onPlanBuilder: { send(Self.planBuilderSeed) },
+                    onPrompt: { send($0.text) }
+                )
+                .frame(maxWidth: maxW)
 
-            if coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) {
-                dailyLimitCard
-                    .padding(.top, 22)
+                if coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) {
+                    dailyLimitCard
+                        .padding(.top, 22)
+                }
+
+                Color.clear.frame(height: 1)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 28)
+            .padding(.bottom, 16)
+        }
+    }
+
+    private func starterLoadingState(maxW: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                ProgressView()
+                    .tint(AppColor.mango)
+                Text("Preparing grounded starters…")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.5))
             }
 
-            Color.clear.frame(height: 1)
+            ForEach(0..<3, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+                    .frame(height: 52)
+            }
         }
+        .frame(maxWidth: maxW, alignment: .leading)
         .padding(.horizontal, 18)
-        .padding(.top, 28)
-        .padding(.bottom, 16)
+        .padding(.vertical, 16)
     }
 
     private var dailyLimitCard: some View {
@@ -403,7 +470,10 @@ struct CoachConversationView: View {
     }
 
     private var coachPlanSheetActive: Bool {
-        coachViewModel.planConfirmationDraft != nil || coachViewModel.planSaveCelebration != nil
+        coachViewModel.planConfirmationDraft != nil
+            || coachViewModel.planSaveCelebration != nil
+            || coachViewModel.workoutConfirmationDraft != nil
+            || coachViewModel.workoutSaveCelebration != nil
     }
 
     /// Extra lift so the last coach bubble clears the plan card; smaller spacer when the inset is tall.
@@ -420,7 +490,8 @@ struct CoachConversationView: View {
             sendAction: { send($0) },
             onFocusChanged: { focused in
                 if focused && !coachViewModel.messages.isEmpty {
-                    withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
+                    shouldAutoScrollToBottom = true
+                    scrollTranscriptToBottom()
                 }
             }
         )
@@ -430,13 +501,25 @@ struct CoachConversationView: View {
         )
     }
 
-    private func send(_ text: String, delivery: CoachChatDelivery = .automatic) {
+    private func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        shouldAutoScrollToBottom = true
         HapticManager.shared.coachMessageSent()
         Task { @MainActor in
-            await coachViewModel.sendMessage(
-                trimmed, isPro: coachViewModel.isPro, delivery: delivery)
+            await coachViewModel.sendMessage(trimmed, isPro: coachViewModel.isPro)
+        }
+    }
+
+    private func scrollTranscriptToBottom(animated: Bool = true) {
+        guard shouldAutoScrollToBottom else { return }
+        let action = {
+            scrollPosition.scrollTo(edge: .bottom)
+        }
+        if animated {
+            withAnimation(.snappy, action)
+        } else {
+            action()
         }
     }
 
@@ -444,14 +527,6 @@ struct CoachConversationView: View {
     private func handleSuggestedAction(_ action: SuggestedAction) {
         guard !coachViewModel.isLoading else { return }
         let kind = action.type.lowercased()
-        if kind == "escalate_cloud" {
-            HapticManager.shared.coachQuickReplyTapped()
-            Task { @MainActor in
-                await coachViewModel.escalateStarterOnDeviceToCloud(
-                    isPro: coachViewModel.isPro)
-            }
-            return
-        }
         guard !coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) else {
             auxiliarySheet = .paywall
             return
@@ -462,6 +537,11 @@ struct CoachConversationView: View {
             auxiliarySheet = .plans
         case "navigate_to_my_plans", "open_my_plans":
             auxiliarySheet = .plans
+        case "start_workout":
+            guard let celebration = coachViewModel.workoutSaveCelebration else { return }
+            navigationPath.append(AppRoute.customWorkoutRide(templateID: celebration.templateID))
+            coachViewModel.clearWorkoutSaveCelebration()
+            chatSheetPresented = false
         default:
             send(CoachChipPresentation.outgoingText(for: action))
         }
@@ -470,8 +550,6 @@ struct CoachConversationView: View {
 
 struct CoachStreamingSection: View {
     @Environment(CoachViewModel.self) private var coachViewModel
-    @Binding var lastStreamScrollDate: Date
-    let scheduleScrollToBottom: () -> Void
 
     var body: some View {
         if coachViewModel.isLoading {
@@ -479,32 +557,28 @@ struct CoachStreamingSection: View {
                 if !coachViewModel.streamDraftText.isEmpty {
                     CoachStreamingBubble(
                         text: coachViewModel.streamDraftText,
-                        style: coachViewModel.streamUsesOnDeviceAppearance ? .onDevice : .cloud
+                        style: .cloud
                     )
                     .id("streaming")
                 } else if coachViewModel.streamIsThinking {
                     CoachStreamStatusRow(
-                        text: coachViewModel.streamUsesOnDeviceAppearance
-                            ? "Structuring on-device answer…" : "Reasoning…"
+                        text: "Reasoning…",
+                        style: .cloud
                     )
                     .id("thinking")
                 } else if let status = coachViewModel.streamStatusText, !status.isEmpty {
-                    CoachStreamStatusRow(text: status)
+                    CoachStreamStatusRow(
+                        text: status,
+                        style: .cloud
+                    )
                         .id("status")
                 } else {
-                    CoachTypingRow()
+                    CoachTypingRow(style: .cloud)
                         .id("typing")
                 }
             }
             // Same contract as `CoachMessageRow`: occupy the row width, keep stream/typing rows leading-aligned.
             .frame(maxWidth: .infinity, alignment: .leading)
-            .onChange(of: coachViewModel.streamDraftText) { _, _ in
-                guard coachViewModel.isLoading, !coachViewModel.streamDraftText.isEmpty else { return }
-                let now = Date()
-                guard now.timeIntervalSince(lastStreamScrollDate) >= 0.22 else { return }
-                lastStreamScrollDate = now
-                scheduleScrollToBottom()
-            }
         }
     }
 }
@@ -598,8 +672,22 @@ struct InputBarView: View {
                     .padding(.horizontal, 14)
                     .padding(.top, 8)
                     .padding(.bottom, 6)
+            } else if let draft = coachViewModel.workoutConfirmationDraft {
+                CoachWorkoutConfirmBanner(draft: draft)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 8)
+                    .padding(.bottom, 6)
             } else if let celeb = coachViewModel.planSaveCelebration {
                 CoachPlanSuccessBanner(
+                    celebration: celeb,
+                    navigationPath: $navigationPath,
+                    dismissChat: { chatSheetPresented = false }
+                )
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
+            } else if let celeb = coachViewModel.workoutSaveCelebration {
+                CoachWorkoutSuccessBanner(
                     celebration: celeb,
                     navigationPath: $navigationPath,
                     dismissChat: { chatSheetPresented = false }

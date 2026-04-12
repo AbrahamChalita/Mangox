@@ -147,3 +147,60 @@ struct AIGeneratedPlanDraft: Sendable {
     let userPrompt: String
     let regenerationInputsJSON: Data?
 }
+
+struct WorkoutGenerationInputs: Codable, Equatable, Sendable {
+    let goal: String
+    let durationMinutes: Int
+    let experience: String?
+    let preferredIntensity: String?
+    let environment: String?
+    let plannedDate: String?
+    let currentFTP: Int?
+    let planContext: String?
+
+    enum CodingKeys: String, CodingKey {
+        case goal
+        case durationMinutes = "duration_minutes"
+        case experience
+        case preferredIntensity = "preferred_intensity"
+        case environment
+        case plannedDate = "planned_date"
+        case currentFTP = "current_ftp"
+        case planContext = "plan_context"
+    }
+
+    var summaryLine: String {
+        var parts = ["\(durationMinutes) min", goal]
+        if let environment, !environment.isEmpty {
+            parts.append(environment)
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+struct GeneratedWorkout: Codable, Equatable, Sendable {
+    let title: String
+    let purpose: String
+    let rationale: String?
+    let day: PlanDay
+}
+
+struct WorkoutGenerationDraft: Identifiable, Equatable {
+    let id: UUID
+    var inputs: WorkoutGenerationInputs
+    var workout: GeneratedWorkout
+
+    init(id: UUID = UUID(), inputs: WorkoutGenerationInputs, workout: GeneratedWorkout) {
+        self.id = id
+        self.inputs = inputs
+        self.workout = workout
+    }
+}
+
+struct WorkoutSaveCelebration: Identifiable, Equatable {
+    let templateID: UUID
+    let workoutTitle: String
+    let purpose: String
+
+    var id: UUID { templateID }
+}

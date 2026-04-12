@@ -304,7 +304,7 @@ final class WorkoutDashboardPerformanceTests: XCTestCase {
         app.launch()
 
         measure(metrics: [XCTClockMetric(), XCTMemoryMetric()]) {
-            app.buttons["Calendar"].tap()
+            app.buttons["Workouts"].tap()
             app.buttons["Coach"].tap()
             app.buttons["Stats"].tap()
             app.buttons["Home"].tap()

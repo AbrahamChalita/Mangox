@@ -43,8 +43,20 @@ struct CoachHubView: View {
                         CoachPlanConfirmBanner(draft: draft, navigationPath: $navigationPath)
                             .padding(.horizontal, 20)
                             .padding(.bottom, 28)
+                    } else if let draft = coachViewModel.workoutConfirmationDraft {
+                        CoachWorkoutConfirmBanner(draft: draft)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 28)
                     } else if let celeb = coachViewModel.planSaveCelebration {
                         CoachPlanSuccessBanner(
+                            celebration: celeb,
+                            navigationPath: $navigationPath,
+                            dismissChat: nil
+                        )
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 28)
+                    } else if let celeb = coachViewModel.workoutSaveCelebration {
+                        CoachWorkoutSuccessBanner(
                             celebration: celeb,
                             navigationPath: $navigationPath,
                             dismissChat: nil
@@ -56,6 +68,8 @@ struct CoachHubView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .animation(.smooth(duration: 0.28), value: coachViewModel.planConfirmationDraft?.id)
                 .animation(.smooth(duration: 0.28), value: coachViewModel.planSaveCelebration?.planID)
+                .animation(.smooth(duration: 0.28), value: coachViewModel.workoutConfirmationDraft?.id)
+                .animation(.smooth(duration: 0.28), value: coachViewModel.workoutSaveCelebration?.id)
             }
         }
         .toolbar(.hidden, for: .navigationBar)

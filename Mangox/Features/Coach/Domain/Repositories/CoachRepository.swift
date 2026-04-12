@@ -12,7 +12,6 @@ protocol CoachRepository: AnyObject {
     var generatingPlan: Bool { get }
     var streamDraftText: String { get }
     var streamIsThinking: Bool { get }
-    var streamUsesOnDeviceAppearance: Bool { get }
     var todayMessageCount: Int { get }
     var contextWindowSize: Int { get }
     var currentContextCount: Int { get }

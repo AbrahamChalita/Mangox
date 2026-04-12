@@ -5,7 +5,7 @@ import SwiftUI
 /// Calendar and Stats stay cold until first open so launch doesn't pay Charts +
 /// large workout queries twice.
 struct SecondaryTabRootsPrewarm: View {
-    @Environment(DIContainer.self) private var di
+    let di: DIContainer
     @State private var coachPath = NavigationPath()
     @State private var settingsPath = NavigationPath()
 

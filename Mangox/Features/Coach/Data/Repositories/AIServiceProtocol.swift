@@ -14,10 +14,11 @@ protocol AIServiceProtocol: AnyObject {
     var lastCreditsRemaining: Int? { get }
     var planConfirmationDraft: PlanGenerationDraft? { get set }
     var planSaveCelebration: PlanSaveCelebration? { get set }
+    var workoutConfirmationDraft: WorkoutGenerationDraft? { get set }
+    var workoutSaveCelebration: WorkoutSaveCelebration? { get set }
     var streamDraftText: String { get }
     var streamStatusText: String? { get }
     var streamIsThinking: Bool { get }
-    var streamUsesOnDeviceAppearance: Bool { get }
     var currentSessionID: UUID? { get }
     var todayMessageCount: Int { get }
 
@@ -28,8 +29,7 @@ protocol AIServiceProtocol: AnyObject {
 
     func sendMessage(
         _ text: String,
-        isPro: Bool,
-        delivery: CoachChatDelivery
+        isPro: Bool
     ) async
 
     @discardableResult
@@ -43,6 +43,7 @@ protocol AIServiceProtocol: AnyObject {
         draft: PlanGenerationDraft,
         isPro: Bool
     ) async throws
+    func saveConfirmedWorkoutDraft(_ draft: WorkoutGenerationDraft) throws
     func regenerateFallbackPlanWeek(
         weekNumber: Int,
         celebration: PlanSaveCelebration,
@@ -51,7 +52,6 @@ protocol AIServiceProtocol: AnyObject {
 
     func loadPersistedMessages() async
     func createNewSession()
-    func escalateStarterOnDeviceToCloud(isPro: Bool) async
     func switchToSession(_ sessionID: UUID)
     func deleteSession(_ sessionID: UUID)
     func fetchSessions() -> [ChatSession]

@@ -21,6 +21,7 @@ struct MangoxRideAttributes: ActivityAttributes {
     }
 
     var rideModeLabel: String
+
 }
 
 // MARK: - Palette (mirrors PowerZone / HeartRateZone ids 1…5)
@@ -109,6 +110,7 @@ struct MangoxRideLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: MangoxRideAttributes.self) { context in
             lockScreenView(context: context)
+                .widgetURL(deepLinkURL(for: context.attributes.rideModeLabel))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -146,8 +148,15 @@ struct MangoxRideLiveActivityWidget: Widget {
                         .font(.caption2)
                 }
             }
+            .widgetURL(deepLinkURL(for: context.attributes.rideModeLabel))
         }
     }
+}
+
+private func deepLinkURL(for rideModeLabel: String) -> URL {
+    rideModeLabel == "Indoor"
+        ? URL(string: "mangox://ride/indoor/live")!
+        : URL(string: "mangox://ride/outdoor/live")!
 }
 
 // MARK: - Lock screen

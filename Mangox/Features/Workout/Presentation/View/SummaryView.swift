@@ -2332,8 +2332,12 @@ private struct StravaSheetContentView: View {
 @MainActor
 private final class _SummaryPreviewPersistenceRepository: WorkoutPersistenceRepositoryProtocol {
     func saveWorkoutAsCustomTemplate(from workout: Workout) throws -> UUID? { nil }
+    func saveCustomWorkoutTemplate(name: String, intervals: [IntervalSegment]) throws -> UUID { UUID() }
     func deleteWorkout(_ workout: Workout) throws {}
     func saveOutdoorRide(workout: Workout, splits: [LapSplit]) throws {}
+    func saveImportedWorkout(_ payload: ImportedWorkoutPayload) throws -> Workout {
+        Workout(startDate: payload.startDate)
+    }
     func fetchCustomWorkoutTemplate(id: UUID) throws -> PlanDay? { nil }
     func fetchSortedSamples(forWorkoutID id: PersistentIdentifier) async -> [WorkoutSampleData] { [] }
 }

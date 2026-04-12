@@ -21,8 +21,7 @@ struct MangoxApp: App {
         WindowGroup {
             ZStack {
                 if hasCompletedOnboarding {
-                    ContentView()
-                        .environment(di)                        // DIContainer for ViewModel factories
+                    ContentView(di: di)
                         .environment(di.bleManager)
                         .environment(di.wifiTrainerService)
                         .environment(di.dataSourceCoordinator)
@@ -40,7 +39,7 @@ struct MangoxApp: App {
                         .environment(\.launchOverlayVisible, showLaunch)
                         .preferredColorScheme(.dark)
                         .overlay {
-                            NotificationLifecycleHook()
+                            NotificationLifecycleHook(di: di)
                                 .allowsHitTesting(false)
                         }
                 } else {
@@ -69,6 +68,7 @@ struct MangoxApp: App {
 
 private struct NotificationLifecycleHook: View {
     @Environment(\.scenePhase) private var scenePhase
+    let di: DIContainer
 
     var body: some View {
         Color.clear
@@ -83,6 +83,7 @@ private struct NotificationLifecycleHook: View {
                     TrainingNotificationsScheduler.rescheduleFTPReminder()
                     WorkoutRAGIndex.scheduleBackgroundSync()
                 case .background:
+                    di.locationService.persistRecordingCheckpointIfNeeded()
                     TrainingNotificationsScheduler.rescheduleEveningPreview()
                 default:
                     break

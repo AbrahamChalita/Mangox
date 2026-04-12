@@ -44,7 +44,7 @@ final class NavigationUITests: XCTestCase {
 
     @MainActor
     func testCalendarTabNavigation() {
-        let calendarTab = app.buttons["Calendar"]
+        let calendarTab = app.buttons["Workouts"]
         XCTAssertTrue(calendarTab.waitForExistence(timeout: 3))
         calendarTab.tap()
         // Calendar tab root should render without crash
@@ -77,7 +77,7 @@ final class NavigationUITests: XCTestCase {
 
     @MainActor
     func testAllFiveTabsReachable() {
-        let tabs = ["Home", "Calendar", "Coach", "Stats", "Settings"]
+        let tabs = ["Home", "Workouts", "Coach", "Stats", "Settings"]
         for tabName in tabs {
             let tabButton = app.buttons[tabName]
             XCTAssertTrue(tabButton.waitForExistence(timeout: 3),
@@ -162,11 +162,11 @@ final class NavigationUITests: XCTestCase {
         if closeButton.waitForExistence(timeout: 2) { closeButton.tap() }
     }
 
-    // MARK: - Calendar (AppRoute.calendar)
+    // MARK: - Workouts (AppRoute.calendar)
 
     @MainActor
     func testCalendarViewRendersWithoutCrash() {
-        app.buttons["Calendar"].tap()
+        app.buttons["Workouts"].tap()
         XCTAssertTrue(app.exists)
         // Scroll the calendar to verify it handles layout
         app.swipeUp()
@@ -197,7 +197,7 @@ final class NavigationUITests: XCTestCase {
 
     @MainActor
     func testRapidTabSwitchingDoesNotCrash() {
-        let tabs = ["Home", "Calendar", "Coach", "Stats", "Settings"]
+        let tabs = ["Home", "Workouts", "Coach", "Stats", "Settings"]
         for _ in 0..<3 {
             for tabName in tabs {
                 app.buttons[tabName].tap()
@@ -239,7 +239,7 @@ final class MangoxUITestsLaunchPerformanceTests: XCTestCase {
         app.launchArguments = ["UI_TESTING", "--disable-animations"]
         measure(metrics: [XCTClockMetric(), XCTMemoryMetric()]) {
             app.launch()
-            app.buttons["Calendar"].tap()
+            app.buttons["Workouts"].tap()
             app.buttons["Coach"].tap()
             app.buttons["Stats"].tap()
             app.buttons["Settings"].tap()
