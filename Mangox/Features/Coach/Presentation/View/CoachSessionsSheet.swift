@@ -4,6 +4,7 @@ import SwiftData
 struct CoachSessionsSheet: View {
     @Environment(CoachViewModel.self) private var coachViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     private static let sessionsDescriptor: FetchDescriptor<ChatSession> = {
         var d = FetchDescriptor<ChatSession>(
@@ -23,21 +24,16 @@ struct CoachSessionsSheet: View {
     }
     @State private var deleteConfirm: DeleteConfirmKind?
 
+    private var textPrimary: Color { .white.opacity(AppOpacity.textPrimary) }
+    private var textSecondary: Color { .white.opacity(AppOpacity.textSecondary) }
+    private var textTertiary: Color { .white.opacity(AppOpacity.textTertiary) }
+
     var body: some View {
         Group {
             if sessions.isEmpty {
                 emptyState
             } else {
-                List {
-                    ForEach(sessions) { session in
-                        rowView(session)
-                            .listRowBackground(Color.white.opacity(0.04))
-                    }
-                    .onDelete(perform: deleteSessionsAtOffsets)
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .deleteDisabled(isSelecting)
+                sessionsList
             }
         }
         .background(AppColor.bg.ignoresSafeArea())
@@ -47,58 +43,16 @@ struct CoachSessionsSheet: View {
             ToolbarItem(placement: .topBarLeading) {
                 if isSelecting {
                     Button("Cancel") {
-                        isSelecting = false
-                        selectedIDs.removeAll()
+                        withAnimation(accessibilityReduceMotion ? .none : MangoxMotion.standard) {
+                            isSelecting = false
+                            selectedIDs.removeAll()
+                        }
                     }
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(textSecondary)
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                if sessions.isEmpty {
-                    Button("Done") { dismiss() }
-                        .foregroundStyle(AppColor.mango)
-                        .fontWeight(.semibold)
-                } else if isSelecting {
-                    HStack(spacing: 16) {
-                        Button("Select All") {
-                            selectedIDs = Set(sessions.map(\.id))
-                        }
-                        .foregroundStyle(AppColor.mango)
-                        .fontWeight(.semibold)
-                        .disabled(selectedIDs.count == sessions.count)
-
-                        Button("Delete") {
-                            deleteConfirm = .selection
-                        }
-                        .foregroundStyle(selectedIDs.isEmpty ? .white.opacity(0.25) : AppColor.red)
-                        .fontWeight(.semibold)
-                        .disabled(selectedIDs.isEmpty)
-                    }
-                } else {
-                    HStack(spacing: 16) {
-                        Menu {
-                            Button {
-                                isSelecting = true
-                                selectedIDs.removeAll()
-                            } label: {
-                                Label("Select conversations", systemImage: "checkmark.circle")
-                            }
-                            Button(role: .destructive) {
-                                deleteConfirm = .all
-                            } label: {
-                                Label("Delete all conversations", systemImage: "trash")
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.system(size: 17, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.55))
-                        }
-
-                        Button("Done") { dismiss() }
-                            .foregroundStyle(AppColor.mango)
-                            .fontWeight(.semibold)
-                    }
-                }
+                toolbarTrailingContent
             }
         }
         .fullScreenCover(item: $deleteConfirm) { kind in
@@ -108,74 +62,178 @@ struct CoachSessionsSheet: View {
     }
 
     @ViewBuilder
-    private func rowView(_ session: ChatSession) -> some View {
-        HStack(spacing: 12) {
+    private var toolbarTrailingContent: some View {
+        if sessions.isEmpty {
+            Button("Done") { dismiss() }
+                .foregroundStyle(AppColor.mango)
+                .fontWeight(.semibold)
+        } else if isSelecting {
+            HStack(spacing: MangoxSpacing.lg.rawValue) {
+                Button("Select All") {
+                    withAnimation(accessibilityReduceMotion ? .none : MangoxMotion.micro) {
+                        selectedIDs = Set(sessions.map(\.id))
+                    }
+                }
+                .foregroundStyle(AppColor.mango)
+                .fontWeight(.semibold)
+                .disabled(selectedIDs.count == sessions.count)
+
+                Button("Delete") {
+                    deleteConfirm = .selection
+                }
+                .foregroundStyle(selectedIDs.isEmpty ? textTertiary : AppColor.red)
+                .fontWeight(.semibold)
+                .disabled(selectedIDs.isEmpty)
+            }
+        } else {
+            HStack(spacing: MangoxSpacing.lg.rawValue) {
+                Menu {
+                    Button {
+                        withAnimation(accessibilityReduceMotion ? .none : MangoxMotion.micro) {
+                            isSelecting = true
+                            selectedIDs.removeAll()
+                        }
+                    } label: {
+                        Label("Select conversations", systemImage: "checkmark.circle")
+                    }
+                    Button(role: .destructive) {
+                        deleteConfirm = .all
+                    } label: {
+                        Label("Delete all conversations", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(textSecondary)
+                }
+
+                Button("Done") { dismiss() }
+                    .foregroundStyle(AppColor.mango)
+                    .fontWeight(.semibold)
+            }
+        }
+    }
+
+    private var sessionsList: some View {
+        ScrollView {
+            LazyVStack(spacing: MangoxSpacing.sm.rawValue) {
+                ForEach(sessions) { session in
+                    sessionCard(session)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                removeSessions(ids: [session.id])
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .trailing)))
+                }
+            }
+            .padding(.horizontal, MangoxSpacing.md.rawValue)
+            .padding(.vertical, MangoxSpacing.md.rawValue)
+        }
+        .scrollIndicators(.hidden)
+        .animation(accessibilityReduceMotion ? .none : MangoxMotion.smooth, value: sessions.map(\.id))
+    }
+
+    @ViewBuilder
+    private func sessionCard(_ session: ChatSession) -> some View {
+        HStack(spacing: MangoxSpacing.md.rawValue) {
             if isSelecting {
-                Image(systemName: selectedIDs.contains(session.id) ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22))
-                    .foregroundStyle(
-                        selectedIDs.contains(session.id)
-                            ? AppColor.mango
-                            : .white.opacity(0.28)
-                    )
-                    .frame(width: 28)
+                selectionIndicator(for: session)
             }
 
             sessionRow(session)
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            if isSelecting {
+            handleSessionTap(session)
+        }
+    }
+
+    @ViewBuilder
+    private func selectionIndicator(for session: ChatSession) -> some View {
+        let isSelected = selectedIDs.contains(session.id)
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.system(size: 22))
+            .foregroundStyle(isSelected ? AppColor.mango : textTertiary)
+            .frame(width: 28)
+            .contentTransition(.interpolate)
+    }
+
+    private func sessionRow(_ session: ChatSession) -> some View {
+        let isCurrentSession = session.id == coachViewModel.currentSessionID
+
+        return HStack(spacing: MangoxSpacing.md.rawValue) {
+            sessionIcon(isCurrentSession: isCurrentSession)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.title)
+                    .font(MangoxFont.bodyBold.value)
+                    .foregroundStyle(textPrimary)
+                    .lineLimit(1)
+
+                Text(formatRelativeDate(session.updatedAt))
+                    .font(MangoxFont.caption.value)
+                    .foregroundStyle(textTertiary)
+            }
+
+            Spacer(minLength: 0)
+
+            if isCurrentSession && !isSelecting {
+                currentSessionBadge
+            }
+        }
+        .padding(MangoxSpacing.md.rawValue)
+        .background {
+            if isSelecting && selectedIDs.contains(session.id) {
+                RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous)
+                    .fill(AppColor.mango.opacity(0.08))
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous)
+                .strokeBorder(
+                    isCurrentSession ? AppColor.mango.opacity(0.3) : Color.white.opacity(AppOpacity.cardBorder),
+                    lineWidth: isCurrentSession ? 1.5 : 1
+                )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous))
+        .buttonStyle(MangoxPressStyle())
+    }
+
+    private func sessionIcon(isCurrentSession: Bool) -> some View {
+        ZStack {
+            Circle()
+                .fill(isCurrentSession ? AppColor.mango.opacity(0.22) : Color.white.opacity(AppOpacity.pillBg))
+                .frame(width: 44, height: 44)
+
+            Image(systemName: isCurrentSession ? "bubble.left.fill" : "bubble.left")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(isCurrentSession ? AppColor.mango : textTertiary)
+        }
+    }
+
+    private var currentSessionBadge: some View {
+        Image(systemName: "checkmark.circle.fill")
+            .font(.system(size: 16))
+            .foregroundStyle(AppColor.mango)
+            .contentTransition(.interpolate)
+    }
+
+    private func handleSessionTap(_ session: ChatSession) {
+        if isSelecting {
+            withAnimation(accessibilityReduceMotion ? .none : MangoxMotion.micro) {
                 if selectedIDs.contains(session.id) {
                     selectedIDs.remove(session.id)
                 } else {
                     selectedIDs.insert(session.id)
                 }
-            } else {
-                coachViewModel.switchToSession(session.id)
-                dismiss()
             }
+        } else {
+            coachViewModel.switchToSession(session.id)
+            dismiss()
         }
-    }
-
-    private func sessionRow(_ session: ChatSession) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(
-                        session.id == coachViewModel.currentSessionID
-                            ? AppColor.mango.opacity(0.22)
-                            : Color.white.opacity(0.06)
-                    )
-                    .frame(width: 40, height: 40)
-                Image(systemName: session.id == coachViewModel.currentSessionID ? "bubble.left.fill" : "bubble.left")
-                    .font(.system(size: 16))
-                    .foregroundStyle(
-                        session.id == coachViewModel.currentSessionID
-                            ? AppColor.mango
-                            : .white.opacity(0.4)
-                    )
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(session.title)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .lineLimit(1)
-                Text(formatRelativeDate(session.updatedAt))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.35))
-            }
-
-            Spacer()
-
-            if session.id == coachViewModel.currentSessionID, !isSelecting {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(AppColor.mango)
-            }
-        }
-        .padding(.vertical, 4)
     }
 
     private func removeSessions(ids: Set<UUID>) {
@@ -198,6 +256,33 @@ struct CoachSessionsSheet: View {
         if let hours = components.hour, hours < 24 { return "\(hours)h ago" }
         if let days = components.day, days < 7 { return "\(days)d ago" }
         return date.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: MangoxSpacing.lg.rawValue) {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(AppOpacity.pillBg))
+                    .frame(width: 88, height: 88)
+
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 36))
+                    .foregroundStyle(textTertiary)
+            }
+
+            VStack(spacing: MangoxSpacing.xs.rawValue) {
+                Text("No conversations yet")
+                    .font(MangoxFont.title.value)
+                    .foregroundStyle(textPrimary)
+
+                Text("Start a new chat with your coach")
+                    .font(MangoxFont.body.value)
+                    .foregroundStyle(textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.bottom, 80)
     }
 
     private func deleteConfirmCover(_ kind: DeleteConfirmKind) -> some View {
@@ -230,72 +315,64 @@ struct CoachSessionsSheet: View {
         }
 
         return ZStack {
-            Color.black.opacity(0.52)
+            Color.black.opacity(0.6)
                 .ignoresSafeArea()
                 .onTapGesture { deleteConfirm = nil }
+                .transition(.opacity)
 
-            VStack(alignment: .leading, spacing: 16) {
-                Text(title)
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
-                Text(message)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: MangoxSpacing.lg.rawValue) {
+                VStack(alignment: .leading, spacing: MangoxSpacing.xs.rawValue) {
+                    Text(title)
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(textPrimary)
 
-                HStack(spacing: 12) {
+                    Text(message)
+                        .font(MangoxFont.body.value)
+                        .foregroundStyle(textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(spacing: MangoxSpacing.md.rawValue) {
                     Button {
                         deleteConfirm = nil
                     } label: {
                         Text("Cancel")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .font(MangoxFont.bodyBold.value)
+                            .foregroundStyle(textPrimary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
                     }
                     .buttonStyle(.plain)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(Color.white.opacity(AppOpacity.cardBg))
+                    .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
 
                     Button {
                         deleteConfirm = nil
                         onConfirm()
                     } label: {
                         Text(confirmLabel)
-                            .font(.system(size: 16, weight: .bold))
+                            .font(MangoxFont.bodyBold.value)
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
                     }
                     .buttonStyle(.plain)
-                    .background(AppColor.red.opacity(0.95))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(AppColor.red)
+                    .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
                 }
             }
-            .padding(24)
-            .frame(maxWidth: .infinity)
+            .padding(MangoxSpacing.xl.rawValue)
+            .frame(maxWidth: 340)
             .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous)
                     .fill(AppColor.bg)
-                    .shadow(color: .black.opacity(0.45), radius: 30, y: 8)
+                    .shadow(color: .black.opacity(0.4), radius: 24, y: 8)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous)
+                    .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
             )
-            .padding(.horizontal, 24)
         }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 40))
-                .foregroundStyle(.white.opacity(0.18))
-            Text("No conversations yet")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.48))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(accessibilityReduceMotion ? .none : MangoxMotion.smooth, value: deleteConfirm)
     }
 }

@@ -31,8 +31,7 @@ struct CoachConversationView: View {
     @State private var transcriptViewportHeight: CGFloat = 0
     @State private var scrollPosition = ScrollPosition()
     @State private var shouldAutoScrollToBottom = true
-    /// Recreates `ScrollView` when the thread first appears (empty → messages) so layout/scroll state does not stick blank until a manual scroll.
-    @State private var transcriptScrollSession: Int = 0
+    @State private var scrollToMessageID: UUID?
 
     private static let planBuilderSeed =
         "I want to build a structured training plan for an event. Ask me about my goal, target date, weekly training hours, and experience, then outline next steps."
@@ -324,7 +323,6 @@ struct CoachConversationView: View {
                     }
             }
         }
-        .id(transcriptScrollSession)
         .scrollBounceBehavior(.basedOnSize, axes: .vertical)
         .scrollDismissesKeyboard(.interactively)
         .scrollIndicators(.hidden)
@@ -338,14 +336,27 @@ struct CoachConversationView: View {
         )
         .onAppear {
             if !coachViewModel.messages.isEmpty || coachViewModel.isLoading {
-                scrollTranscriptToBottom(animated: false)
+                if let lastMessage = coachViewModel.messages.last {
+                    scrollToMessageID = lastMessage.id
+                }
             }
         }
         .onChange(of: coachViewModel.messages.count) { oldCount, newCount in
             if oldCount == 0, newCount > 0 {
-                transcriptScrollSession += 1
+                if let firstMessage = coachViewModel.messages.first {
+                    scrollToMessageID = firstMessage.id
+                }
+            } else if newCount > oldCount {
+                if let lastMessage = coachViewModel.messages.last {
+                    scrollToMessageID = lastMessage.id
+                }
             }
-            scrollTranscriptToBottom()
+        }
+        .onChange(of: scrollToMessageID) { _, targetID in
+            guard let targetID, shouldAutoScrollToBottom else { return }
+            withAnimation(MangoxMotion.snappy) {
+                scrollPosition.scrollTo(id: targetID, anchor: .bottom)
+            }
         }
         .onChange(of: coachViewModel.isLoading) { _, _ in
             scrollTranscriptToBottom()
@@ -517,7 +528,7 @@ struct CoachConversationView: View {
             scrollPosition.scrollTo(edge: .bottom)
         }
         if animated {
-            withAnimation(.snappy, action)
+            withAnimation(MangoxMotion.snappy, action)
         } else {
             action()
         }
@@ -550,6 +561,7 @@ struct CoachConversationView: View {
 
 struct CoachStreamingSection: View {
     @Environment(CoachViewModel.self) private var coachViewModel
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     var body: some View {
         if coachViewModel.isLoading {
@@ -577,8 +589,8 @@ struct CoachStreamingSection: View {
                         .id("typing")
                 }
             }
-            // Same contract as `CoachMessageRow`: occupy the row width, keep stream/typing rows leading-aligned.
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentTransition(.interpolate)
+            .animation(accessibilityReduceMotion ? .none : MangoxMotion.entrance, value: coachViewModel.isLoading)
         }
     }
 }

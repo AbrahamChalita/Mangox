@@ -36,7 +36,7 @@ struct ContentView: View {
             }
 
             TabView(selection: $selectedTab) {
-                Tab("Home", systemImage: "house.fill", value: 0) {
+                    Tab("Home", systemImage: "house.fill", value: 0) {
                     NavigationStack(path: $homePath) {
                         HomeView(
                             navigationPath: $homePath,

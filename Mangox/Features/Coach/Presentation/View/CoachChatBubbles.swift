@@ -196,7 +196,7 @@ enum CoachReplyChipPalette {
 
 struct CoachMessageRow: View {
     let message: ChatMessage
-    /// Used only to show the model’s follow-up prompt under the newest assistant reply.
+    /// Used only to show the model's follow-up prompt under the newest assistant reply.
     let isLatestAssistant: Bool
     let bubbleMaxWidth: CGFloat
     /// When false, suggested-reply chips are visible but disabled (e.g. while a new reply is streaming).
@@ -205,6 +205,8 @@ struct CoachMessageRow: View {
     var onSuggestedAction: (SuggestedAction) -> Void = { _ in }
     /// When `followUpBlocks.count > 1`, the user answers all cards locally; this sends one combined user message.
     var onFollowUpBatchComplete: (String) -> Void = { _ in }
+
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     private var showReplyPanel: Bool {
         guard isLatestAssistant else { return false }
@@ -215,10 +217,8 @@ struct CoachMessageRow: View {
         if !message.suggestedActions.isEmpty,
             cat == "clarification" || cat.contains("clarif")
         {
-            // Plan-intake recovery: chips without repeating the main bubble as a second “Coach asks” block.
             return true
         }
-        // No "Coach asks" line: only show shortcuts (e.g. Open My plans), not orphan ask_followup chips.
         return message.suggestedActions.contains { $0.type.lowercased() != "ask_followup" }
     }
 
@@ -227,7 +227,7 @@ struct CoachMessageRow: View {
     }
 
     var body: some View {
-        VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
             if message.role == .user {
                 CoachUserBubble(text: message.content, bubbleMaxWidth: bubbleMaxWidth)
             } else {
@@ -270,8 +270,10 @@ struct CoachMessageRow: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 6)
+        .contentTransition(.opacity)
+        .animation(accessibilityReduceMotion ? .none : MangoxMotion.entrance, value: message.id)
     }
 }
 
