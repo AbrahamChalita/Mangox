@@ -45,7 +45,7 @@ private struct PersistedOutdoorLapRecord: Codable {
     let endedAt: Date
 }
 
-private struct OutdoorRideCheckpoint: Codable {
+    private struct OutdoorRideCheckpoint: Codable {
     let persistedAt: Date
     let rideStartDate: Date
     let totalDistance: Double
@@ -69,8 +69,13 @@ private struct OutdoorRideCheckpoint: Codable {
     let liveBreadcrumbTail: [PersistedCoordinate]
     let pauseGapCoordinates: [PersistedCoordinate]
     let recordedTrackPath: String?
-    let lastKnownCoordinate: PersistedCoordinate?
-}
+        let lastKnownCoordinate: PersistedCoordinate?
+    }
+
+    private struct PersistedRideCheckpointEnvelope: Codable {
+        let version: Int
+        let checkpoint: OutdoorRideCheckpoint
+    }
 
 /// Bridges non-`Sendable` references into `@Sendable` closures (e.g. main-queue cleanup in `deinit`).
 private struct UncheckedOptional<T>: @unchecked Sendable {
@@ -499,6 +504,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
     private static let persistedSearchBiasLatKey = "LocationManager.persistedSearchBiasLat"
     private static let persistedSearchBiasLonKey = "LocationManager.persistedSearchBiasLon"
     private static let outdoorRideCheckpointKey = "LocationManager.outdoorRideCheckpoint.v1"
+    private static let outdoorRideCheckpointFileName = "outdoor-ride-checkpoint-v2.json"
     private let checkpointFrozenChunkLimit = 8
     private let checkpointLiveTailLimit = 240
     private let checkpointPauseGapLimit = 30
@@ -1140,8 +1146,11 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         )
 
         do {
-            let data = try JSONEncoder().encode(checkpoint)
-            UserDefaults.standard.set(data, forKey: Self.outdoorRideCheckpointKey)
+            let envelope = PersistedRideCheckpointEnvelope(version: 2, checkpoint: checkpoint)
+            let data = try JSONEncoder().encode(envelope)
+            try data.write(to: rideCheckpointFileURL(), options: .atomic)
+            // Keep tiny compatibility marker and remove legacy payload.
+            UserDefaults.standard.set(true, forKey: Self.outdoorRideCheckpointKey)
             lastPersistedCheckpointAt = now
         } catch {
             logger.error("Failed to persist outdoor ride checkpoint: \(error.localizedDescription)")
@@ -1149,22 +1158,54 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
     }
 
     private func loadRideCheckpoint() -> OutdoorRideCheckpoint? {
-        guard let data = UserDefaults.standard.data(forKey: Self.outdoorRideCheckpointKey) else {
-            return nil
+        let fileURL = rideCheckpointFileURL()
+
+        if let data = try? Data(contentsOf: fileURL) {
+            if let envelope = try? JSONDecoder().decode(PersistedRideCheckpointEnvelope.self, from: data) {
+                return envelope.checkpoint
+            }
+            if let legacy = try? JSONDecoder().decode(OutdoorRideCheckpoint.self, from: data) {
+                return legacy
+            }
         }
 
-        do {
-            return try JSONDecoder().decode(OutdoorRideCheckpoint.self, from: data)
-        } catch {
-            logger.error("Failed to decode outdoor ride checkpoint: \(error.localizedDescription)")
-            clearRideCheckpoint()
-            return nil
+        // Legacy fallback (previous builds wrote the full payload to UserDefaults).
+        if let legacyData = UserDefaults.standard.data(forKey: Self.outdoorRideCheckpointKey) {
+            do {
+                return try JSONDecoder().decode(OutdoorRideCheckpoint.self, from: legacyData)
+            } catch {
+                logger.error("Failed to decode outdoor ride checkpoint: \(error.localizedDescription)")
+                clearRideCheckpoint()
+            }
         }
+
+        return nil
     }
 
     private func clearRideCheckpoint() {
         UserDefaults.standard.removeObject(forKey: Self.outdoorRideCheckpointKey)
+        try? FileManager.default.removeItem(at: rideCheckpointFileURL())
         lastPersistedCheckpointAt = .distantPast
+    }
+
+    private func rideCheckpointFileURL() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("Mangox", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir.appendingPathComponent(Self.outdoorRideCheckpointFileName)
+    }
+
+    /// Force a durable checkpoint write for scene/background transitions.
+    func persistRecordingCheckpointNow() {
+        persistRideCheckpointIfNeeded(force: true)
+        do {
+            try concurrencyHandles.pendingRecordedTrackFileHandle?.synchronize()
+        } catch {
+            logger.error("Failed to synchronize pending outdoor track file: \(error.localizedDescription)")
+        }
     }
 
     private func restore(from checkpoint: OutdoorRideCheckpoint) {

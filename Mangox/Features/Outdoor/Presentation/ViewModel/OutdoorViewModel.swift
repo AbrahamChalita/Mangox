@@ -126,6 +126,7 @@ final class OutdoorViewModel {
     var showMapInCompact = true
     var mapWaypoints: [CLLocationCoordinate2D] = []
     var activeConfirmation: OutdoorRideConfirmation?
+    var rideCompletionError: String?
 
     // MARK: - Init
 
@@ -501,6 +502,10 @@ final class OutdoorViewModel {
         routeService.clearRoute()
     }
 
+    func clearRideCompletionError() {
+        rideCompletionError = nil
+    }
+
     func buildCompletedRideDraft(
         endedAt: Date = .now,
         rideDuration: TimeInterval,
@@ -543,7 +548,7 @@ final class OutdoorViewModel {
         session: OutdoorRideSessionSnapshot,
         plannedRouteDistanceMeters: Double,
         mode: OutdoorRideModeDraft
-    ) -> UUID {
+    ) -> UUID? {
         let rideDraft = buildCompletedRideDraft(
             rideDuration: session.rideDuration,
             totalDistance: session.totalDistance,
@@ -582,7 +587,12 @@ final class OutdoorViewModel {
             splits.append(split)
         }
 
-        try? workoutPersistenceRepository.saveOutdoorRide(workout: workout, splits: splits)
+        do {
+            try workoutPersistenceRepository.saveOutdoorRide(workout: workout, splits: splits)
+        } catch {
+            rideCompletionError = "Could not save this ride. Please try ending again."
+            return nil
+        }
 
         Task {
             await healthKitService.saveCyclingWorkoutToHealthIfEnabled(workout)

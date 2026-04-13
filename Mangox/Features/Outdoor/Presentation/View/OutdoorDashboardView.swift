@@ -16,6 +16,7 @@ import UniformTypeIdentifiers
 struct OutdoorDashboardView: View {
     @State private var viewModel: OutdoorViewModel
     @Environment(\.horizontalSizeClass) private var hSizeClass
+    @Environment(\.scenePhase) private var scenePhase
 
     let di: DIContainer
     @Binding var navigationPath: NavigationPath
@@ -35,6 +36,8 @@ struct OutdoorDashboardView: View {
     @State private var outdoorLoadingBypassed = false
     /// Whether to show all discovered sensors or just the first 3.
     @State private var showAllSensors = false
+    /// Avoid disabling follow mode for tiny/implicit camera changes.
+    @State private var lastMapCameraForFollowGuard: MapCamera?
 
     @Bindable private var prefs = RidePreferences.shared
 
@@ -193,6 +196,10 @@ struct OutdoorDashboardView: View {
             ls.persistRecordingCheckpointIfNeeded()
             viewModel.handleDisappear(locationManager: ls)
         }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .background else { return }
+            ls.persistRecordingCheckpointNow()
+        }
         .task(id: ls.isAuthorized) {
             outdoorLoadingBypassed = false
             try? await Task.sleep(for: .seconds(12))
@@ -262,6 +269,22 @@ struct OutdoorDashboardView: View {
             }
         }
         .overlay {
+            if let error = viewModel.rideCompletionError {
+                MangoxConfirmOverlay(
+                    title: "Could not save ride",
+                    message: error,
+                    onDismiss: { viewModel.clearRideCompletionError() }
+                ) {
+                    Button {
+                        viewModel.clearRideCompletionError()
+                    } label: {
+                        Text("OK")
+                            .mangoxButtonChrome(.hero)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
             if let error = viewModel.routeImportError {
                 MangoxConfirmOverlay(
                     title: "Route Import Failed",
@@ -1888,14 +1911,17 @@ struct OutdoorDashboardView: View {
             position: Binding(
                 get: { mapCameraService.mapCameraPosition },
                 set: { newPos in
+                    let shouldDisableFollow = shouldDisableFollowMode(for: newPos)
                     mapCameraService.mapCameraPosition = newPos
-                    mapCameraService.isFollowingUser = false
+                    if shouldDisableFollow {
+                        mapCameraService.isFollowingUser = false
+                    }
                 }
             )
         ) {
             // Frozen breadcrumb chunks — colour-coded by average speed
             ForEach(ls.frozenBreadcrumbChunks) { chunk in
-                let crumbs = chunk.coords.sanitizedForMapPolyline()
+                let crumbs = chunk.coords.sanitizedForMapPolyline(maxPoints: 120)
                 if crumbs.count > 1 {
                     MapPolyline(coordinates: crumbs)
                         .stroke(speedColor(chunk.avgSpeed), lineWidth: 4)
@@ -1903,7 +1929,7 @@ struct OutdoorDashboardView: View {
             }
 
             // Live tail — always mango coloured
-            let tail = ls.liveBreadcrumbTail.sanitizedForMapPolyline()
+            let tail = ls.liveBreadcrumbTail.sanitizedForMapPolyline(maxPoints: 240)
             if tail.count > 1 {
                 MapPolyline(coordinates: tail)
                     .stroke(AppColor.mango, lineWidth: 4)
@@ -1911,14 +1937,14 @@ struct OutdoorDashboardView: View {
 
             // Route overlay — traversed (grey) vs remaining (yellow)
             ForEach(ns.completedRoutePolylines.indices, id: \.self) { i in
-                let done = ns.completedRoutePolylines[i].sanitizedForMapPolyline()
+                let done = ns.completedRoutePolylines[i].sanitizedForMapPolyline(maxPoints: 180)
                 if done.count > 1 {
                     MapPolyline(coordinates: done)
                         .stroke(Color.white.opacity(0.35), lineWidth: 5)
                 }
             }
             ForEach(ns.remainingRoutePolylines.indices, id: \.self) { i in
-                let left = ns.remainingRoutePolylines[i].sanitizedForMapPolyline()
+                let left = ns.remainingRoutePolylines[i].sanitizedForMapPolyline(maxPoints: 180)
                 if left.count > 1 {
                     MapPolyline(coordinates: left)
                         .stroke(AppColor.yellow, lineWidth: 5)
@@ -1927,7 +1953,7 @@ struct OutdoorDashboardView: View {
 
             // Lookahead ghost — dashed white, 300m ahead on remaining route
             ForEach(ns.lookaheadPolylines.indices, id: \.self) { i in
-                let lookahead = ns.lookaheadPolylines[i].sanitizedForMapPolyline()
+                let lookahead = ns.lookaheadPolylines[i].sanitizedForMapPolyline(maxPoints: 120)
                 if lookahead.count > 1 {
                     MapPolyline(coordinates: lookahead)
                         .stroke(
@@ -2024,6 +2050,36 @@ struct OutdoorDashboardView: View {
         }
         .frame(minWidth: 1, minHeight: 1)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func shouldDisableFollowMode(for newPosition: MapCameraPosition) -> Bool {
+        guard mapCameraService.isFollowingUser else {
+            if let camera = newPosition.camera {
+                lastMapCameraForFollowGuard = camera
+            }
+            return false
+        }
+
+        guard let next = newPosition.camera else {
+            return false
+        }
+        defer { lastMapCameraForFollowGuard = next }
+
+        guard let previous = lastMapCameraForFollowGuard else {
+            return false
+        }
+
+        let prevCoord = CLLocation(latitude: previous.centerCoordinate.latitude, longitude: previous.centerCoordinate.longitude)
+        let nextCoord = CLLocation(latitude: next.centerCoordinate.latitude, longitude: next.centerCoordinate.longitude)
+        let distanceDeltaMeters = prevCoord.distance(from: nextCoord)
+        let headingDelta = abs(next.heading - previous.heading)
+        let zoomRatio = previous.distance > 0 ? abs((next.distance - previous.distance) / previous.distance) : 0
+
+        let significantPan = distanceDeltaMeters > 18
+        let significantHeading = headingDelta > 12
+        let significantZoom = zoomRatio > 0.11
+
+        return significantPan || significantHeading || significantZoom
     }
 
     // MARK: - End / discard confirmations (custom — works over drawer; compact vs full)
@@ -2802,7 +2858,7 @@ struct OutdoorDashboardView: View {
             Image(systemName: "antenna.radiowaves.left.and.right.slash")
                 .font(.system(size: 14))
                 .foregroundStyle(AppColor.orange)
-            Text("Weak GPS — live speed may be unavailable")
+            Text(offlineGpsBannerText)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(chromeNavPrimary(surface))
                 .multilineTextAlignment(.leading)
@@ -2832,7 +2888,14 @@ struct OutdoorDashboardView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Weak GPS signal. Live speed may be unavailable.")
+        .accessibilityLabel(offlineGpsBannerText)
+    }
+
+    private var offlineGpsBannerText: String {
+        if ls.isRecording {
+            return "Weak GPS — recording continues locally even offline"
+        }
+        return "Weak GPS — live speed may be unavailable"
     }
 
     private func offCourseBanner(
@@ -3221,7 +3284,7 @@ struct OutdoorDashboardView: View {
             )
         }
 
-        let finishedWorkoutID = viewModel.completeRide(
+        guard let finishedWorkoutID = viewModel.completeRide(
             session: OutdoorRideSessionSnapshot(
                 rideDuration: ls.rideDuration,
                 totalDistance: ls.totalDistance,
@@ -3232,6 +3295,9 @@ struct OutdoorDashboardView: View {
             plannedRouteDistanceMeters: plannedRouteDistanceMeters,
             mode: rideModeDraft
         )
+        else {
+            return
+        }
         navigationPath.removeLast()
         navigationPath.append(AppRoute.summary(workoutID: finishedWorkoutID))
     }
