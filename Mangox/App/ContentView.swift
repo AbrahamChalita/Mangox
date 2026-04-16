@@ -124,10 +124,12 @@ struct ContentView: View {
             }
         }
         .background {
-            Map()
-                .frame(width: 1, height: 1)
-                .opacity(0.01)
-                .allowsHitTesting(false)
+            if MangoxFeatureFlags.allowsAppShellMapPrewarm {
+                Map()
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+                    .allowsHitTesting(false)
+            }
         }
         .task {
             di.locationService.warmUpLocationIfAuthorized()
@@ -146,10 +148,13 @@ struct ContentView: View {
         .onOpenURL { url in
             guard isRideLiveActivityURL(url) else { return }
             selectedTab = 0
-            homePath = NavigationPath()
+            // Never clear `homePath` here: that pops the in-memory indoor stack and builds a new
+            // `DashboardView`, which used to vend a fresh `IndoorViewModel` and restart the ride.
             if isIndoorLiveActivityURL(url) {
-                homePath.append(AppRoute.dashboard)
-            } else {
+                if homePath.isEmpty {
+                    homePath.append(AppRoute.dashboard)
+                }
+            } else if homePath.isEmpty {
                 homePath.append(AppRoute.outdoorDashboard)
             }
         }

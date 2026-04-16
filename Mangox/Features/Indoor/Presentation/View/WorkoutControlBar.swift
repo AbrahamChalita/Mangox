@@ -111,6 +111,7 @@ struct WorkoutControlBar: View {
                     .tracking(0.5)
             }
             .mangoxButtonChrome(.primary, tint: color)
+            .contentShape(Rectangle())
         }
         .buttonStyle(MangoxPressStyle())
     }

@@ -10,6 +10,10 @@ protocol DataSourceServiceProtocol: AnyObject {
     var speed: Double { get }
     var heartRate: Int { get }
     var totalDistance: Double { get }
+    /// HR attribution from the active transport (mirrors the latest unified `CyclingMetrics` snapshot).
+    var hrSource: HRSource { get }
+    /// Whether the active link’s last payload included a total-distance field (so `totalDistance` is telemetry, not stale).
+    var activeTotalDistanceFieldPresent: Bool { get }
     var smoothedPower: Int { get }
 
     // MARK: - Active Source
@@ -37,6 +41,10 @@ protocol DataSourceServiceProtocol: AnyObject {
     var connectedWiFiTrainer: DiscoveredWiFiTrainer? { get }
 
     // MARK: - Methods
+
+    /// Latest unified metrics (BLE + Wi‑Fi), always current even when high-frequency fields are not mirrored to `@Observable` for SwiftUI.
+    func snapshotUnifiedMetrics() -> CyclingMetrics
+
     func updateActiveSource()
     func disconnectAll()
     func disconnectWiFi()

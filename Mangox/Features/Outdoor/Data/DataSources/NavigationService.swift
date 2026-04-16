@@ -137,8 +137,10 @@ final class NavigationService {
     private var routeCumulativeDistances: [Double] = []
     private var lastRenderedSplitSegmentIndex: Int?
     private var offCourseStartedAt: Date?
+    private var onCourseRecoveredAt: Date?
     private var lastAutoRerouteAt: Date?
     private let autoRerouteDelay: TimeInterval = 30
+    private let rerouteCooldownAfterRecovery: TimeInterval = 10
     private var routeSegmentBreakIndices: Set<Int> = []
 
     // MARK: - Route Calculation
@@ -300,6 +302,7 @@ final class NavigationService {
         routeCumulativeDistances = Self.makeCumulativeDistances(for: routePolyline, segmentBreakIndices: routeSegmentBreakIndices)
         lastRenderedSplitSegmentIndex = nil
         offCourseStartedAt = nil
+        onCourseRecoveredAt = nil
         lastAutoRerouteAt = nil
     }
 
@@ -551,13 +554,25 @@ final class NavigationService {
     private func handleAutoRerouteIfNeeded(from coordinate: CLLocationCoordinate2D) {
         guard mode == .turnByTurn, destination != nil else {
             offCourseStartedAt = nil
+            onCourseRecoveredAt = nil
             return
         }
 
         guard isOffCourse else {
+            if onCourseRecoveredAt == nil {
+                onCourseRecoveredAt = Date()
+            }
             offCourseStartedAt = nil
             return
         }
+
+        if let onCourseRecoveredAt,
+            Date().timeIntervalSince(onCourseRecoveredAt) < rerouteCooldownAfterRecovery
+        {
+            return
+        }
+
+        onCourseRecoveredAt = nil
 
         if offCourseStartedAt == nil {
             offCourseStartedAt = Date()

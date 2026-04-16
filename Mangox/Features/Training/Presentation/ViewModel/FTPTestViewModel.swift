@@ -49,7 +49,8 @@ final class FTPTestViewModel {
         m.speed = dataSourceService.speed
         m.heartRate = dataSourceService.heartRate
         m.totalDistance = dataSourceService.totalDistance
-        m.hrSource = bleService.metrics.hrSource
+        m.includesTotalDistanceInPacket = dataSourceService.activeTotalDistanceFieldPresent
+        m.hrSource = dataSourceService.hrSource
         return m
     }
 }

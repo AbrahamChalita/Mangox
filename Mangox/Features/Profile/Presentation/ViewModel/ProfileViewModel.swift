@@ -34,6 +34,10 @@ final class ProfileViewModel {
     var stravaConnected: Bool { stravaService.isConnected }
     var stravaDisplayName: String? { stravaService.athleteDisplayName }
     var stravaAvatarURL: URL? { stravaService.athleteProfileImageURL }
+    /// Local on-disk photo wins over Strava for the settings header.
+    var profileAvatarURL: URL? {
+        RiderIdentityDisplay.resolvedProfileImageURL(stravaProfileURL: stravaService.athleteProfileImageURL)
+    }
     var stravaIsConfigured: Bool { stravaService.isConfigured }
     var stravaIsBusy: Bool { stravaService.isBusy }
     var stravaLastError: String? { stravaService.lastError }
@@ -50,12 +54,7 @@ final class ProfileViewModel {
     }
 
     var identityTitle: String {
-        if stravaService.isConnected,
-           let name = stravaService.athleteDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !name.isEmpty {
-            return name
-        }
-        return "Mangox"
+        RiderIdentityDisplay.resolvedTitle(stravaDisplayName: stravaService.athleteDisplayName)
     }
 
     // MARK: - FTP state

@@ -9,6 +9,7 @@ struct HomeView: View {
     @Binding var navigationPath: NavigationPath
     @Binding var selectedTab: Int
 
+    @Environment(StravaService.self) private var stravaService
     @State private var viewModel: HomeViewModel
 
     private static let recentWorkoutsDescriptor: FetchDescriptor<Workout> = {
@@ -90,7 +91,7 @@ struct HomeView: View {
             }
         }
         .onAppear {
-            viewModel.prewarmBLEAndLocation()
+            viewModel.prewarmLocationServices()
         }
         .onChange(of: workouts, initial: true) { _, _ in
             viewModel.scheduleTrainingRefresh(workouts: workouts)
@@ -123,9 +124,13 @@ struct HomeView: View {
 
     // MARK: - Top Bar
 
+    private var homeHeaderTitle: String {
+        RiderIdentityDisplay.resolvedTitle(stravaDisplayName: stravaService.athleteDisplayName)
+    }
+
     private var minimalTopBar: some View {
         HStack(spacing: 8) {
-            Text("Mangox")
+            Text(homeHeaderTitle)
                 .font(.title2.weight(.bold))
                 .foregroundStyle(textPrimary)
                 .lineLimit(1)
@@ -538,4 +543,5 @@ extension Date {
         .modelContainer(for: [Workout.self, WorkoutRAGChunk.self, TrainingPlanProgress.self])
         .environment(HealthKitManager())
         .environment(WhoopService())
+        .environment(StravaService())
 }

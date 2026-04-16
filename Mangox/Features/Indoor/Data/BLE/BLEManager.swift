@@ -201,6 +201,7 @@ final class BLEManager: NSObject, BLEServiceProtocol {
     private let bleQueue = DispatchQueue(label: "com.abchalita.Mangox.ble", qos: .userInteractive)
 
     private var centralManager: CBCentralManager!
+    private static let centralRestoreIdentifier = "com.abchalita.Mangox.BLECentral"
     private var trainerPeripheral: CBPeripheral?
     private var hrPeripheral: CBPeripheral?
     private var cscPeripheral: CBPeripheral?
@@ -368,7 +369,11 @@ final class BLEManager: NSObject, BLEServiceProtocol {
         // Pass the dedicated BLE queue — CoreBluetooth callbacks arrive there
         // instead of the main thread, keeping the main runloop free for UI work.
         // Callbacks hop to main thread via DispatchQueue.main.async + MainActor.assumeIsolated.
-        centralManager = CBCentralManager(delegate: self, queue: bleQueue)
+        centralManager = CBCentralManager(
+            delegate: self,
+            queue: bleQueue,
+            options: [CBCentralManagerOptionRestoreIdentifierKey: Self.centralRestoreIdentifier]
+        )
     }
 
     // MARK: - Subscriber API
@@ -877,6 +882,72 @@ final class BLEManager: NSObject, BLEServiceProtocol {
 // MARK: - CBCentralManagerDelegate
 
 extension BLEManager: CBCentralManagerDelegate {
+    nonisolated func centralManager(
+        _ central: CBCentralManager,
+        willRestoreState dict: [String: Any]
+    ) {
+        let restoredPeripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral]
+            ?? []
+        let restoredScanningServices = dict[CBCentralManagerRestoredStateScanServicesKey] as? [CBUUID]
+
+        let boxedPeripherals = restoredPeripherals.map { SendablePeripheral(value: $0) }
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                for boxed in boxedPeripherals {
+                    let peripheral = boxed.value
+                    peripheral.delegate = self
+                    let id = peripheral.identifier
+                    let name = peripheral.name ?? "Unknown"
+
+                    let role: DeviceType
+                    if id == self.savedTrainerUUID {
+                        role = .trainer
+                    } else if id == self.savedHRUUID {
+                        role = .heartRateMonitor
+                    } else if id == self.savedCSCUUID {
+                        role = .cyclingSpeedCadence
+                    } else {
+                        role = .unknown
+                    }
+                    self.peripheralRoles[id] = role
+
+                    switch role {
+                    case .trainer:
+                        self.trainerPeripheral = peripheral
+                        self.trainerConnectionState =
+                            peripheral.state == .connected ? .connected(name) : .connecting(name)
+                        if peripheral.state == .connected {
+                            peripheral.discoverServices([
+                                BLEConstants.ftmsServiceUUID,
+                                BLEConstants.cyclingPowerServiceUUID,
+                                BLEConstants.heartRateServiceUUID,
+                            ])
+                        }
+                    case .heartRateMonitor:
+                        self.hrPeripheral = peripheral
+                        self.hrConnectionState =
+                            peripheral.state == .connected ? .connected(name) : .connecting(name)
+                        if peripheral.state == .connected {
+                            peripheral.discoverServices([BLEConstants.heartRateServiceUUID])
+                        }
+                    case .cyclingSpeedCadence:
+                        self.cscPeripheral = peripheral
+                        self.cscConnectionState =
+                            peripheral.state == .connected ? .connected(name) : .connecting(name)
+                        if peripheral.state == .connected {
+                            peripheral.discoverServices([BLEConstants.cyclingSpeedCadenceServiceUUID])
+                        }
+                    case .unknown:
+                        break
+                    }
+                }
+
+                self.isScanning = restoredScanningServices != nil
+            }
+        }
+    }
+
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         let state = central.state
         DispatchQueue.main.async { [weak self] in
@@ -884,10 +955,18 @@ extension BLEManager: CBCentralManagerDelegate {
                 guard let self else { return }
                 self.bluetoothState = state
                 if state == .poweredOn {
-                    if !self.trainerConnectionState.isConnected
-                        || !self.hrConnectionState.isConnected
-                        || !self.cscConnectionState.isConnected {
-                        self.reconnectOrScan()
+                    // Second async hop: lets `sensorLiveRouteScope()` run so we only auto-reconnect on ride surfaces.
+                    DispatchQueue.main.async { [weak self] in
+                        MainActor.assumeIsolated {
+                            guard let self else { return }
+                            guard TrainerSensorLiveObservationGate.isLiveRouteActive else { return }
+                            if !self.trainerConnectionState.isConnected
+                                || !self.hrConnectionState.isConnected
+                                || !self.cscConnectionState.isConnected
+                            {
+                                self.reconnectOrScan()
+                            }
+                        }
                     }
                 } else {
                     self.stopScan()
@@ -1058,6 +1137,7 @@ extension BLEManager: CBCentralManagerDelegate {
                     self.metrics.cadence = 0
                     self.metrics.speed = 0
                     self.metrics.totalDistance = 0
+                    self.metrics.includesTotalDistanceInPacket = false
                     self.metrics.lastUpdate = nil
 
                     if self.metrics.hrSource != .dedicated {
@@ -1350,6 +1430,7 @@ extension BLEManager: CBPeripheralDelegate {
                         if packet.hasTotalDistance {
                             self.metrics.totalDistance = parsed.totalDistance
                         }
+                        self.metrics.includesTotalDistanceInPacket = packet.hasTotalDistance
                         self.metrics.lastUpdate = parsed.lastUpdate
 
                         if packet.hasHeartRate, parsed.heartRate > 0, !self.hrConnectionState.isConnected {
@@ -1367,6 +1448,7 @@ extension BLEManager: CBPeripheralDelegate {
 
                 case BLEConstants.cyclingPowerMeasurementUUID:
                     if let parsed = FTMSParser.parseCyclingPowerMeasurement(data, crankState: &self.crankState) {
+                        self.metrics.includesTotalDistanceInPacket = false
                         self.metrics.power = parsed.power
                         // Match FTMS indoor bike: trainer-linked CPS wins over a separate CSC pod.
                         let trainerLinked = self.trainerPeripheral != nil
@@ -1382,6 +1464,7 @@ extension BLEManager: CBPeripheralDelegate {
 
                 case BLEConstants.heartRateMeasurementUUID:
                     if let hr = FTMSParser.parseHeartRate(data) {
+                        self.metrics.includesTotalDistanceInPacket = false
                         self.metrics.heartRate = hr
                         self.metrics.hrSource = .dedicated
                         self.metrics.lastUpdate = .now
@@ -1406,6 +1489,7 @@ extension BLEManager: CBPeripheralDelegate {
                     if wheelKmh > 0, self.trainerPeripheral == nil {
                         self.metrics.speed = wheelKmh
                     }
+                    self.metrics.includesTotalDistanceInPacket = false
                     self.metrics.lastUpdate = .now
                     self.notifySubscribers()
 

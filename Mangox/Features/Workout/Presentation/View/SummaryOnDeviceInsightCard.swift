@@ -103,7 +103,8 @@ struct SummaryOnDeviceInsightCard: View {
     @Binding var onDeviceInsightFailed: Bool
 
     @State private var insight: WorkoutSummaryOnDeviceInsight?
-    @State private var loadFailed = false
+    /// True when ``insight`` was built from ``OnDeviceModelFallbackCopy`` (no on-device language model or model returned nothing).
+    @State private var insightIsStatsFallback = false
 
     var body: some View {
         Group {
@@ -156,6 +157,15 @@ struct SummaryOnDeviceInsightCard: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
+                    if insightIsStatsFallback {
+                        Text(
+                            "Stats-based summary. Apple Intelligence is not available on this device."
+                        )
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.38))
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+
                     Text("Private on this device — not sent to the cloud coach.")
                         .font(.system(size: 10))
                         .foregroundStyle(.white.opacity(0.32))
@@ -164,8 +174,6 @@ struct SummaryOnDeviceInsightCard: View {
                 }
                 .padding(14)
                 .cardStyle(cornerRadius: 16)
-            } else if loadFailed {
-                EmptyView()
             } else {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 10) {
@@ -185,7 +193,7 @@ struct SummaryOnDeviceInsightCard: View {
         }
         .task(id: workout.id) { @MainActor in
             onDeviceInsightFailed = false
-            loadFailed = false
+            insightIsStatsFallback = false
 
             if let hit = WorkoutSummaryOnDeviceInsight.loadCached(
                 workout: workout,
@@ -195,6 +203,23 @@ struct SummaryOnDeviceInsightCard: View {
                 riderCallName: riderCallName
             ) {
                 insight = hit
+                await WorkoutSummaryOnDeviceInsight.generateSmartTitleIfNeeded(
+                    workout: workout,
+                    powerZoneLine: powerZoneLine,
+                    ftpWatts: ftpWatts
+                )
+                return
+            }
+
+            if !OnDeviceCoachEngine.isOnDeviceWritingModelAvailable {
+                insight = OnDeviceModelFallbackCopy.rideSummaryInsight(
+                    workout: workout,
+                    powerZoneLine: powerZoneLine,
+                    planLine: planLine,
+                    ftpWatts: ftpWatts,
+                    riderCallName: riderCallName
+                )
+                insightIsStatsFallback = true
                 await WorkoutSummaryOnDeviceInsight.generateSmartTitleIfNeeded(
                     workout: workout,
                     powerZoneLine: powerZoneLine,
@@ -218,9 +243,16 @@ struct SummaryOnDeviceInsightCard: View {
             )
             if let result {
                 insight = result
+                insightIsStatsFallback = false
             } else {
-                loadFailed = true
-                onDeviceInsightFailed = true
+                insight = OnDeviceModelFallbackCopy.rideSummaryInsight(
+                    workout: workout,
+                    powerZoneLine: powerZoneLine,
+                    planLine: planLine,
+                    ftpWatts: ftpWatts,
+                    riderCallName: riderCallName
+                )
+                insightIsStatsFallback = true
             }
         }
     }

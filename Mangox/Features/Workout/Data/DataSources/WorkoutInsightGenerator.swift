@@ -128,7 +128,10 @@ private struct WorkoutSmartTitleGenerated: Equatable {
     @Guide(description: "Internal plan — not shown in UI.")
     var reasoning: String
 
-    @Guide(description: "3-6 word descriptive ride label. Reflect dominant zone and duration. No quotes, no articles.")
+    @Guide(
+        description:
+            "3-6 word ride label for a training app list. Clever or lightly funny is OK if it still matches the real stats (zone, duration, effort). Kind and inclusive — no profanity, slurs, politics, or insults. No quotes. Avoid leading articles (a/the). Reflect dominant zone and duration; skip bland filler like 'workout' or 'session'."
+    )
     var title: String
 }
 
@@ -314,17 +317,25 @@ extension WorkoutSummaryOnDeviceInsight {
     ) async {
         guard workout.status == .completed, workout.isValid else { return }
         guard workout.smartTitle == nil else { return }
-        guard case .available = SystemLanguageModel.default.availability else { return }
-        guard SystemLanguageModel.default.supportsLocale(Locale.current) else { return }
+        guard OnDeviceCoachEngine.isOnDeviceWritingModelAvailable else {
+            workout.smartTitle = OnDeviceModelFallbackCopy.smartWorkoutTitle(
+                workout: workout,
+                powerZoneLine: powerZoneLine,
+                ftpWatts: ftpWatts
+            )
+            try? modelContext.save()
+            return
+        }
 
         let stats = buildStatsPrompt(
             workout: workout, powerZoneLine: powerZoneLine, planLine: nil, ftpWatts: ftpWatts)
 
         let instructions = """
-            Generate a 3-6 word descriptive label for a cycling workout based only on the stats.
-            Examples: "Solid Threshold Block", "Easy Endurance Spin", "Tough VO2max Efforts", "Long Sweet Spot", "Recovery Ride".
-            No quotes, no articles (a/the), no generic words like "workout" or "session".
-            Reflect the dominant intensity zone and duration.
+            Generate a 3-6 word label for a cycling workout based only on the stats.
+            You may be witty or playful if it still reflects the real ride — never invent numbers or zones.
+            Stay kind and inclusive; no profanity, slurs, politics, or put-downs.
+            No quotes, no leading articles (a/the), avoid generic words like "workout" or "session".
+            Examples: "Solid Threshold Block", "Legs Called A Meeting", "Easy Endurance Spin", "Tough VO2max Efforts", "Long Sweet Spot", "Recovery Ride".
             reasoning is internal only; title is shown in the UI.
             """
         let model = MangoxFoundationModelsSupport.coachSystemLanguageModel()
@@ -343,6 +354,14 @@ extension WorkoutSummaryOnDeviceInsight {
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "smart_title")
         } catch {
             MangoxFoundationModelsSupport.logGenerationFailure(error, label: "workout_smart_title")
+            if workout.smartTitle == nil {
+                workout.smartTitle = OnDeviceModelFallbackCopy.smartWorkoutTitle(
+                    workout: workout,
+                    powerZoneLine: powerZoneLine,
+                    ftpWatts: ftpWatts
+                )
+                try? modelContext.save()
+            }
         }
     }
 

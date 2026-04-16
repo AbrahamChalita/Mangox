@@ -40,6 +40,7 @@ struct PaywallView: View {
                                 restoreButton
                                 footerText
                             }
+                            legalDocumentLinks
                         }
                         .padding(.horizontal, 20)
                         .padding(.top, 20)
@@ -315,5 +316,33 @@ struct PaywallView: View {
             .foregroundStyle(.white.opacity(0.25))
             .multilineTextAlignment(.center)
             .padding(.horizontal, 12)
+    }
+
+    /// App Store Guideline 3.1.2: functional Privacy Policy and Terms of Use (URLs from `Info.plist`).
+    @ViewBuilder
+    private var legalDocumentLinks: some View {
+        let privacy = MangoxLegalURLs.privacyPolicy
+        let terms = MangoxLegalURLs.termsOfUse
+        if privacy != nil || terms != nil {
+            VStack(spacing: 10) {
+                HStack(spacing: 20) {
+                    if let privacy {
+                        Button("Privacy Policy") { openURL(privacy) }
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(mango.opacity(0.95))
+                    }
+                    if let terms {
+                        Button("Terms of Use") { openURL(terms) }
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(mango.opacity(0.95))
+                    }
+                }
+                Text("Subscriptions are billed through your Apple ID. Tap above for our policies.")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.28))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.top, 4)
+        }
     }
 }

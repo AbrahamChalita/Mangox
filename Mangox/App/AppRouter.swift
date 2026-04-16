@@ -10,15 +10,19 @@ func appRouteDestination(_ route: AppRoute, path: Binding<NavigationPath>, di: D
     switch route {
     case .connection:
         ConnectionView(navigationPath: path, bleService: di.bleManager, dataSourceService: di.dataSourceCoordinator, routeService: di.routeManager, locationService: di.locationManager)
+            .sensorLiveRouteScope()
             .toolbar(.hidden, for: .tabBar)
     case .indoorRideSetup:
         ConnectionView(navigationPath: path, indoorRideLocked: true, bleService: di.bleManager, dataSourceService: di.dataSourceCoordinator, routeService: di.routeManager, locationService: di.locationManager)
+            .sensorLiveRouteScope()
             .toolbar(.hidden, for: .tabBar)
     case .connectionForPlan(let planID, let dayID):
         ConnectionView(navigationPath: path, startMode: .ride, planID: planID, planDayID: dayID, bleService: di.bleManager, dataSourceService: di.dataSourceCoordinator, routeService: di.routeManager, locationService: di.locationManager)
+            .sensorLiveRouteScope()
             .toolbar(.hidden, for: .tabBar)
     case .ftpSetup:
         ConnectionView(navigationPath: path, startMode: .ftpTest, bleService: di.bleManager, dataSourceService: di.dataSourceCoordinator, routeService: di.routeManager, locationService: di.locationManager)
+            .sensorLiveRouteScope()
             .toolbar(.hidden, for: .tabBar)
     case .dashboard:
         DashboardView(
@@ -26,10 +30,12 @@ func appRouteDestination(_ route: AppRoute, path: Binding<NavigationPath>, di: D
             trainingPlanLookupService: di.trainingPlanLookupService,
             viewModel: di.makeIndoorViewModel()
         )
+            .sensorLiveRouteScope()
             .toolbar(.hidden, for: .navigationBar)
             .toolbar(.hidden, for: .tabBar)
     case .outdoorDashboard:
         OutdoorDashboardView(navigationPath: path, di: di, viewModel: di.makeOutdoorViewModel())
+            .sensorLiveRouteScope()
             .toolbar(.hidden, for: .navigationBar)
             .toolbar(.hidden, for: .tabBar)
     case .planDashboard(let planID, let dayID):
@@ -40,6 +46,7 @@ func appRouteDestination(_ route: AppRoute, path: Binding<NavigationPath>, di: D
             trainingPlanLookupService: di.trainingPlanLookupService,
             viewModel: di.makeIndoorViewModel()
         )
+            .sensorLiveRouteScope()
             .toolbar(.hidden, for: .navigationBar)
             .toolbar(.hidden, for: .tabBar)
     case .customWorkoutRide(let templateID):
@@ -49,10 +56,12 @@ func appRouteDestination(_ route: AppRoute, path: Binding<NavigationPath>, di: D
             trainingPlanLookupService: di.trainingPlanLookupService,
             viewModel: di.makeIndoorViewModel()
         )
+            .sensorLiveRouteScope()
             .toolbar(.hidden, for: .navigationBar)
             .toolbar(.hidden, for: .tabBar)
     case .ftpTest:
         FTPTestView(viewModel: di.makeFTPTestViewModel(), navigationPath: path)
+            .sensorLiveRouteScope()
             .toolbar(.hidden, for: .tabBar)
     case .summary(let workoutID):
         SummaryView(
@@ -69,6 +78,7 @@ func appRouteDestination(_ route: AppRoute, path: Binding<NavigationPath>, di: D
         SettingsView(navigationPath: path, viewModel: di.makeProfileViewModel())
     case .outdoorSensorsSetup:
         ConnectionView(navigationPath: path, outdoorSensorsOnly: true, bleService: di.bleManager, dataSourceService: di.dataSourceCoordinator, routeService: di.routeManager, locationService: di.locationManager)
+            .sensorLiveRouteScope()
             .toolbar(.hidden, for: .tabBar)
     case .calendar:
         CalendarView(di: di, navigationPath: path)
@@ -79,5 +89,7 @@ func appRouteDestination(_ route: AppRoute, path: Binding<NavigationPath>, di: D
     case .aiPlan(let planID):
         AITrainingPlanView(planID: planID, navigationPath: path, viewModel: di.makeTrainingViewModel())
             .toolbar(.hidden, for: .navigationBar)
+    case .storyCardDebug:
+        StoryCardDebugView()
     }
 }

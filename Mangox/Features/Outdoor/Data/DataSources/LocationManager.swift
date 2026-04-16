@@ -253,6 +253,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
 
     /// True when motion sensors are currently helping maintain ride continuity while GPS is weak.
     var isMotionFallbackActive: Bool = false
+    private var didRestoreRecordingFlag = false
 
     /// True when no `CLLocation` delegate callbacks arrived for a while while preview/recording is active.
     /// Use for live speed display; does not affect accumulated ride distance (which pauses when fixes stop).
@@ -292,6 +293,14 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
 
     /// True while the outdoor dashboard is showing and requesting fixes before/during a ride (not for other screens).
     private(set) var outdoorLocationPreviewActive: Bool = false
+
+    /// True when Outdoor map follow UI is visible and wants live heading + smoothing updates.
+    var mapFollowActive: Bool = false {
+        didSet {
+            guard mapFollowActive != oldValue else { return }
+            applyHighFrequencySensorsPolicy()
+        }
+    }
 
     /// Last valid coordinate from Core Location, updated even before accuracy passes the ride filter.
     /// Used for `MKLocalSearchCompleter` region bias when `currentLocation` is still nil.
@@ -475,6 +484,8 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
     private let mapHeadingDeadbandDegrees: Double = 0.5
     /// Max time to coast the display state ahead of the last GPS fix (avoids large drift if fixes stall).
     private let mapExtrapolationMaxAdvanceSeconds: TimeInterval = 1.35
+    private let mapCameraDistanceMin: CLLocationDistance = 520
+    private let mapCameraDistanceMax: CLLocationDistance = 1_050
 
     /// Below this speed (km/h), reject “teleport” heading readings near the smoothed value (0°/360° flicker).
     private let slowHeadingHysteresisSpeedKmh: Double = 4.0
@@ -583,6 +594,12 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         manager.allowsBackgroundLocationUpdates = isRecording || outdoorLocationPreviewActive
     }
 
+    private func shouldRunMotionFallbackMonitoring() -> Bool {
+        guard isRecording, isAutoPaused else { return false }
+        return isGpsSignalStale || horizontalAccuracy < 0
+            || horizontalAccuracy > weakGpsHorizontalAccuracyThreshold
+    }
+
     private func loadPersistedSearchBiasFromStorage() {
         let d = UserDefaults.standard
         guard d.object(forKey: Self.persistedSearchBiasLatKey) != nil,
@@ -610,14 +627,28 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         UserDefaults.standard.set(coord.longitude, forKey: Self.persistedSearchBiasLonKey)
     }
 
-    /// Recording uses a tight `distanceFilter`; preview-only uses a looser filter to cut CPU/map work.
+    /// Applies an activity-aware sampling profile.
+    /// - Recording + moving: highest quality for navigation.
+    /// - Recording but paused/weak: slightly lower power while still tracking well.
+    /// - Preview only: lower-cost location updates.
     private func applyLocationSamplingPolicy() {
         guard let m = clManager else { return }
+
         if isRecording {
             m.distanceFilter = recordingDistanceFilter
+            let highQuality = !isAutoPaused && !isGpsSignalStale
+            m.desiredAccuracy = highQuality ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyNearestTenMeters
+            m.pausesLocationUpdatesAutomatically = false
         } else if outdoorLocationPreviewActive {
             m.distanceFilter = previewDistanceFilter
+            m.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+            m.pausesLocationUpdatesAutomatically = true
+        } else {
+            m.distanceFilter = kCLDistanceFilterNone
+            m.desiredAccuracy = kCLLocationAccuracyHundredMeters
+            m.pausesLocationUpdatesAutomatically = true
         }
+        m.activityType = .fitness
     }
 
     private func startGpsStaleMonitoringIfNeeded() {
@@ -642,6 +673,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
     }
 
     private func startHeadingFlushTimerIfNeeded() {
+        guard mapFollowActive, isRecording || outdoorLocationPreviewActive else { return }
         guard concurrencyHandles.headingFlushTimer == nil else { return }
         let timer = Timer(timeInterval: headingFlushInterval, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -654,9 +686,30 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
     }
 
     private func stopHeadingFlushTimerIfIdle() {
-        guard !(isRecording || outdoorLocationPreviewActive) else { return }
+        guard !(mapFollowActive && (isRecording || outdoorLocationPreviewActive)) else { return }
         concurrencyHandles.headingFlushTimer?.invalidate()
         concurrencyHandles.headingFlushTimer = nil
+    }
+
+    private func applyHighFrequencySensorsPolicy() {
+        guard let manager = clManager else { return }
+
+        let shouldRunHeading = mapFollowActive && (isRecording || outdoorLocationPreviewActive)
+        let shouldRunMotion = shouldRunMotionFallbackMonitoring()
+
+        if shouldRunHeading {
+            manager.startUpdatingHeading()
+            startHeadingFlushTimerIfNeeded()
+        } else {
+            manager.stopUpdatingHeading()
+            stopHeadingFlushTimerIfIdle()
+        }
+
+        if shouldRunMotion {
+            startMotionMonitoringIfNeeded()
+        } else {
+            stopMotionMonitoringIfIdle()
+        }
     }
 
     private func checkGpsSignalStale() {
@@ -665,9 +718,12 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         let stale = Date().timeIntervalSince(last) > gpsStaleThresholdSeconds
         if stale != isGpsSignalStale { isGpsSignalStale = stale }
         refreshSignalConfidence()
+        applyLocationSamplingPolicy()
+        applyHighFrequencySensorsPolicy()
     }
 
     private func startMotionMonitoringIfNeeded() {
+        guard shouldRunMotionFallbackMonitoring() else { return }
         guard motionManager.isDeviceMotionAvailable else { return }
         guard !motionManager.isDeviceMotionActive else { return }
         motionManager.deviceMotionUpdateInterval = motionUpdateIntervalSeconds
@@ -683,7 +739,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
     }
 
     private func stopMotionMonitoringIfIdle() {
-        guard !(isRecording || outdoorLocationPreviewActive) else { return }
+        guard !shouldRunMotionFallbackMonitoring() else { return }
         guard motionManager.isDeviceMotionActive else { return }
         motionManager.stopDeviceMotionUpdates()
         motionMovementEMA = 0
@@ -872,11 +928,9 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         applyLocationSamplingPolicy()
         applyBackgroundLocationPolicy(to: clManager!)
         clManager?.startUpdatingLocation()
-        clManager?.startUpdatingHeading()
 
         startGpsStaleMonitoringIfNeeded()
-        startHeadingFlushTimerIfNeeded()
-        startMotionMonitoringIfNeeded()
+        applyHighFrequencySensorsPolicy()
         centerMapOnUser()
 
         // Start a 1-second timer for duration tracking
@@ -920,10 +974,8 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
             applyBackgroundLocationPolicy(to: clManager)
         }
         clManager?.startUpdatingLocation()
-        clManager?.startUpdatingHeading()
         startGpsStaleMonitoringIfNeeded()
-        startHeadingFlushTimerIfNeeded()
-        startMotionMonitoringIfNeeded()
+        applyHighFrequencySensorsPolicy()
     }
 
     /// If the user already granted location access, request a one-shot fix as soon as the main shell appears.
@@ -956,10 +1008,8 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
             applyBackgroundLocationPolicy(to: clManager)
         }
         clManager?.startUpdatingLocation()
-        clManager?.startUpdatingHeading()
         startGpsStaleMonitoringIfNeeded()
-        startHeadingFlushTimerIfNeeded()
-        startMotionMonitoringIfNeeded()
+        applyHighFrequencySensorsPolicy()
 
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -972,7 +1022,14 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         concurrencyHandles.rideTimer = timer
 
         centerMapOnUser()
+        didRestoreRecordingFlag = true
         logger.info("Restored outdoor ride recording from checkpoint.")
+    }
+
+    func consumeDidRestoreRecordingFlag() -> Bool {
+        let value = didRestoreRecordingFlag
+        didRestoreRecordingFlag = false
+        return value
     }
 
     /// Stops preview updates when leaving the outdoor screen without an active recording.
@@ -981,12 +1038,10 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         guard !isRecording else { return }
         stopGpsStaleMonitoring()
         clManager?.stopUpdatingLocation()
-        clManager?.stopUpdatingHeading()
         if let clManager {
             applyBackgroundLocationPolicy(to: clManager)
         }
-        stopHeadingFlushTimerIfIdle()
-        stopMotionMonitoringIfIdle()
+        applyHighFrequencySensorsPolicy()
     }
 
     /// Pause the ride recording (manual or auto-pause).
@@ -1002,6 +1057,8 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         if let loc = currentLocation {
             pauseGapCoordinates.append(loc.coordinate)
         }
+        applyLocationSamplingPolicy()
+        applyHighFrequencySensorsPolicy()
         HapticManager.shared.autoPaused()
     }
 
@@ -1019,6 +1076,8 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         motionMovementEMA = 0
         isMotionFallbackActive = false
         refreshSignalConfidence()
+        applyLocationSamplingPolicy()
+        applyHighFrequencySensorsPolicy()
         HapticManager.shared.autoResumed()
     }
 
@@ -1032,7 +1091,6 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         concurrencyHandles.rideTimer = nil
         stopGpsStaleMonitoring()
         clManager?.stopUpdatingLocation()
-        clManager?.stopUpdatingHeading()
         concurrencyHandles.pendingRecordedTrackFileHandle?.closeFile()
         concurrencyHandles.pendingRecordedTrackFileHandle = nil
 
@@ -1040,8 +1098,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         if let clManager {
             applyBackgroundLocationPolicy(to: clManager)
         }
-        stopHeadingFlushTimerIfIdle()
-        stopMotionMonitoringIfIdle()
+        applyHighFrequencySensorsPolicy()
         signalConfidence = .searching
 
         // Final duration update
@@ -1381,7 +1438,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
             heading = latestHeading
         }
         // 8 Hz heartbeat: extrapolate map position between GPS fixes and pick up compass updates.
-        if isFollowingUser && (isRecording || outdoorLocationPreviewActive) {
+        if isFollowingUser && mapFollowActive && (isRecording || outdoorLocationPreviewActive) {
             refreshFollowModeMapPresentation(newGPSLocation: nil, forcePublish: false)
         }
     }
@@ -1422,6 +1479,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         altitude = location.altitude
         course = location.course >= 0 ? location.course : course
         refreshSignalConfidence()
+        applyHighFrequencySensorsPolicy()
 
         // Speed: gate against CLLocation's own noise floor before smoothing.
         // speedAccuracy is the 68th-pct uncertainty in m/s (-1 = unavailable).
@@ -1486,7 +1544,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         }
 
         // Keep the map centered on the rider when auto-follow is active.
-        if isFollowingUser && (isRecording || outdoorLocationPreviewActive) {
+        if isFollowingUser && mapFollowActive && (isRecording || outdoorLocationPreviewActive) {
             refreshFollowModeMapPresentation(newGPSLocation: location, forcePublish: false)
         }
 
@@ -1714,7 +1772,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         newGPSLocation: CLLocation? = nil,
         forcePublish: Bool = false
     ) {
-        guard isFollowingUser, isRecording || outdoorLocationPreviewActive else { return }
+        guard isFollowingUser, mapFollowActive, isRecording || outdoorLocationPreviewActive else { return }
         guard let loc = newGPSLocation ?? currentLocation else { return }
         let now = Date()
 
@@ -1726,14 +1784,20 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
 
         let center = mapDisplayCenterExtrapolated(at: now, fallbackCoordinate: loc.coordinate)
         smoothedRiderCoordinate = center
+        let speedMps = max(0, speed / 3.6)
+        let normalizedSpeed = min(max(speedMps / 12.0, 0), 1)
+        let dynamicCameraDistance = mapCameraDistanceMin + ((mapCameraDistanceMax - mapCameraDistanceMin) * normalizedSpeed)
+
+        let updateMinInterval = adaptiveMapCameraUpdateMinInterval()
 
         if !forcePublish {
-            if now.timeIntervalSince(lastMapCameraUpdateTime) < mapCameraUpdateMinInterval {
+            if now.timeIntervalSince(lastMapCameraUpdateTime) < updateMinInterval {
                 return
             }
+            let positionDeadband = adaptiveMapPositionDeadbandDegrees()
             if let last = lastPublishedMapCamera,
-                abs(last.lat - center.latitude) < mapPositionDeadbandDegrees,
-                abs(last.lon - center.longitude) < mapPositionDeadbandDegrees,
+                abs(last.lat - center.latitude) < positionDeadband,
+                abs(last.lon - center.longitude) < positionDeadband,
                 headingDifferenceDegrees(last.heading, smoothedMapHeadingDegrees) < mapHeadingDeadbandDegrees
             {
                 return
@@ -1745,18 +1809,46 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
 
         let camera = MapCamera(
             centerCoordinate: center,
-            distance: 800,
+            distance: dynamicCameraDistance,
             heading: smoothedMapHeadingDegrees,
             pitch: 45
         )
-        if forcePublish {
+        let shouldAnimate = forcePublish || (!isGpsSignalStale && speed > 2.0)
+
+        if !shouldAnimate {
+            mapCameraPosition = .camera(camera)
+        } else if forcePublish {
             withAnimation(.easeOut(duration: 0.2)) {
                 mapCameraPosition = .camera(camera)
             }
         } else {
-            withAnimation(.interpolatingSpring(stiffness: 72, damping: 14)) {
+            withAnimation(.easeOut(duration: 0.18)) {
                 mapCameraPosition = .camera(camera)
             }
+        }
+    }
+
+    private func adaptiveMapCameraUpdateMinInterval() -> TimeInterval {
+        if isGpsSignalStale { return 1.0 / 3.0 }
+        switch speed {
+        case ..<2:
+            return 1.0 / 3.0
+        case ..<8:
+            return 1.0 / 5.0
+        default:
+            return mapCameraUpdateMinInterval
+        }
+    }
+
+    private func adaptiveMapPositionDeadbandDegrees() -> Double {
+        if isGpsSignalStale { return mapPositionDeadbandDegrees * 2.4 }
+        switch speed {
+        case ..<2:
+            return mapPositionDeadbandDegrees * 2.0
+        case ..<8:
+            return mapPositionDeadbandDegrees * 1.4
+        default:
+            return mapPositionDeadbandDegrees
         }
     }
 
@@ -1836,6 +1928,7 @@ extension LocationManager: CLLocationManagerDelegate {
             if self.isRecording || self.outdoorLocationPreviewActive {
                 manager.startUpdatingLocation()
             }
+            self.applyHighFrequencySensorsPolicy()
             logger.info(
                 "Location authorization changed to: \(manager.authorizationStatus.rawValue)")
         }

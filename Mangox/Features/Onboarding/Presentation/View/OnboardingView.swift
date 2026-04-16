@@ -1,4 +1,6 @@
+import PhotosUI
 import SwiftUI
+import UIKit
 
 // MARK: - Hero graphic
 
@@ -10,10 +12,12 @@ private enum OnboardingHeroGraphic {
 /// First-launch onboarding with permission screens.
 /// Shown once — persisted via `@AppStorage("hasCompletedOnboarding")`.
 ///
-/// Flow: Welcome → Bluetooth → HealthKit → Notifications → Location → Strava → Get Started
+/// Flow: Welcome → Bluetooth → HealthKit → Notifications → Location → Strava → Rider profile → Get Started
 struct OnboardingView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewModel: OnboardingViewModel
+    @State private var onboardingProfilePhotoItem: PhotosPickerItem?
+    @State private var onboardingLocalAvatarToken = UUID()
 
     private let totalPages = 8
 
@@ -83,8 +87,24 @@ struct OnboardingView: View {
             if new == 0 {
                 syncWelcomeAppearance()
             }
+            if new == 6 {
+                viewModel.prepareRiderProfileStep()
+            }
             if new == 7 {
                 triggerFinishCelebrationIfNeeded()
+            }
+        }
+        .onChange(of: onboardingProfilePhotoItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                if let data = try? await newItem.loadTransferable(type: Data.self),
+                   let uiImage = UIImage(data: data) {
+                    try? RiderProfileAvatarStore.saveLocalAvatar(uiImage)
+                    await MainActor.run {
+                        onboardingLocalAvatarToken = UUID()
+                        onboardingProfilePhotoItem = nil
+                    }
+                }
             }
         }
         .onChange(of: viewModel.blePermissionGranted) { _, new in
@@ -294,14 +314,21 @@ struct OnboardingView: View {
         let weightRange: ClosedRange<Double> = isImperial ? 66.0...440.0 : RidePreferences.riderWeightRange
         let weightStep = isImperial ? 1.0 : 0.5
 
+        let nameLine = viewModel.onboardingRiderDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nameSummary = nameLine.isEmpty ? "Shown in the app & summaries" : nameLine
+
         return OnboardingPageView(
             hero: .sfSymbol("figure.outdoor.cycle"),
             title: "Your Rider Profile",
-            subtitle: "Enter your weight and birth date for accurate W/kg, calorie estimates, and personalized AI coaching.",
+            subtitle:
+                "Add your name and an optional photo, plus weight and birth date for W/kg, calorie estimates, and coaching.",
             color: AppColor.blue,
             reduceMotion: reduceMotion,
             extraContent: {
-                VStack(spacing: 12) {
+                VStack(spacing: MangoxSpacing.lg.rawValue) {
+                    onboardingRiderIdentityNameCard(nameSummary: nameSummary)
+                    onboardingRiderIdentityPhotoCard
+
                     riderInputCard(
                         icon: "scalemass.fill",
                         title: "WEIGHT",
@@ -327,8 +354,8 @@ struct OnboardingView: View {
                             Spacer()
                             Text("\(Int(weightRange.upperBound)) \(weightUnit)")
                         }
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .mangoxFont(.caption)
+                        .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
                     }
 
                     riderInputCard(
@@ -347,10 +374,14 @@ struct OnboardingView: View {
                         .datePickerStyle(.wheel)
                         .tint(AppColor.blue)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 150)
+                        .frame(height: 148)
                         .clipped()
-                        .background(Color.white.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .background(Color.white.opacity(AppOpacity.pillBg))
+                        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous)
+                                .strokeBorder(Color.white.opacity(AppOpacity.divider), lineWidth: 1)
+                        )
                     }
                 }
                 .padding(.horizontal, 32)
@@ -397,6 +428,140 @@ struct OnboardingView: View {
         }
     }
 
+    // MARK: - Rider profile (identity)
+
+    private func onboardingRiderIdentityNameCard(nameSummary: String) -> some View {
+        let nameLine = viewModel.onboardingRiderDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return VStack(alignment: .leading, spacing: MangoxSpacing.md.rawValue) {
+            HStack(alignment: .top, spacing: MangoxSpacing.md.rawValue) {
+                MangoxIconBadge(systemName: "person.text.rectangle", color: AppColor.mango, size: 34)
+                VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
+                    Text("DISPLAY NAME")
+                        .mangoxFont(.label)
+                        .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
+                        .tracking(1.1)
+                    if nameLine.isEmpty {
+                        Text(nameSummary)
+                            .mangoxFont(.caption)
+                            .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(nameLine)
+                            .font(MangoxFont.compactValue.value)
+                            .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
+                    }
+                    TextField("Your name", text: $viewModel.onboardingRiderDisplayName)
+                        .textContentType(.name)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                        .mangoxFont(.bodyBold)
+                        .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+                        .padding(.horizontal, MangoxSpacing.md.rawValue)
+                        .padding(.vertical, MangoxSpacing.sm.rawValue + 2)
+                        .background(Color.white.opacity(AppOpacity.pillBg))
+                        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous)
+                                .strokeBorder(Color.white.opacity(AppOpacity.divider), lineWidth: 1)
+                        )
+                        .onChange(of: viewModel.onboardingRiderDisplayName) { _, new in
+                            if new.count > 50 {
+                                viewModel.onboardingRiderDisplayName = String(new.prefix(50))
+                            }
+                        }
+                    Text("Used in Settings, ride summaries, and story cards — Strava is optional.")
+                        .mangoxFont(.caption)
+                        .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(MangoxSpacing.lg.rawValue)
+        .cardStyle(cornerRadius: MangoxRadius.card.rawValue)
+    }
+
+    private var onboardingRiderIdentityPhotoCard: some View {
+        VStack(alignment: .leading, spacing: MangoxSpacing.md.rawValue) {
+            HStack(alignment: .center, spacing: MangoxSpacing.lg.rawValue) {
+                Group {
+                    if let img = RiderProfileAvatarStore.loadLocalAvatar() {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        ZStack {
+                            Color.white.opacity(AppOpacity.pillBg)
+                            Image(systemName: "person.crop.rectangle")
+                                .font(.system(size: 26, weight: .medium))
+                                .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                        }
+                    }
+                }
+                .frame(width: 72, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous)
+                        .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
+                )
+                .id(onboardingLocalAvatarToken)
+
+                VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
+                    Text("PROFILE PHOTO")
+                        .mangoxFont(.label)
+                        .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
+                        .tracking(1.1)
+                    Text(
+                        RiderProfileAvatarStore.hasLocalAvatar
+                            ? "Saved on this device for Settings."
+                            : "Optional — add a face for your profile header."
+                    )
+                    .mangoxFont(.caption)
+                    .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: MangoxSpacing.sm.rawValue) {
+                        PhotosPicker(selection: $onboardingProfilePhotoItem, matching: .images) {
+                            Label("Choose photo", systemImage: "photo")
+                                .mangoxFont(.callout)
+                                .foregroundStyle(.black)
+                                .labelStyle(.titleAndIcon)
+                                .padding(.horizontal, MangoxSpacing.md.rawValue)
+                                .padding(.vertical, MangoxSpacing.sm.rawValue)
+                                .background(AppColor.mango)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(MangoxPressStyle())
+
+                        if RiderProfileAvatarStore.hasLocalAvatar {
+                            Button {
+                                RiderProfileAvatarStore.clearLocalAvatar()
+                                onboardingLocalAvatarToken = UUID()
+                            } label: {
+                                Text("Remove")
+                                    .mangoxFont(.callout)
+                                    .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
+                                    .padding(.horizontal, MangoxSpacing.md.rawValue)
+                                    .padding(.vertical, MangoxSpacing.sm.rawValue)
+                                    .background(Color.white.opacity(AppOpacity.pillBg))
+                                    .clipShape(Capsule())
+                                    .overlay(
+                                        Capsule()
+                                            .strokeBorder(Color.white.opacity(AppOpacity.divider), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(MangoxPressStyle())
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(MangoxSpacing.lg.rawValue)
+        .cardStyle(cornerRadius: MangoxRadius.card.rawValue)
+    }
+
     // MARK: - Helper Views
 
     private var onboardingAge: Int {
@@ -431,35 +596,30 @@ struct OnboardingView: View {
         accent: Color,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
+        VStack(alignment: .leading, spacing: MangoxSpacing.md.rawValue) {
+            HStack(alignment: .top, spacing: MangoxSpacing.md.rawValue) {
                 Image(systemName: icon)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(accent)
                     .frame(width: 18)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: MangoxSpacing.xs.rawValue) {
                     Text(title)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .mangoxFont(.label)
+                        .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
                         .tracking(1.1)
 
                     Text(value)
-                        .font(.system(size: 20, weight: .bold))
+                        .font(MangoxFont.compactValue.value)
                         .monospacedDigit()
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
                 }
             }
 
             content()
         }
-        .padding(14)
-        .background(Color.white.opacity(0.05))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(MangoxSpacing.lg.rawValue)
+        .cardStyle(cornerRadius: MangoxRadius.card.rawValue)
     }
 
     private func featureRow(icon: String, text: String) -> some View {

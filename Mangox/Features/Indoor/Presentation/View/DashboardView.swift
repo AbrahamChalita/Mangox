@@ -28,7 +28,6 @@ struct DashboardView: View {
     @State private var zonePulse = false
     @State private var zonePulseResetTask: Task<Void, Never>?
     @State private var rideBriefingTask: Task<Void, Never>?
-    @State private var liveActivitySyncTask: Task<Void, Never>?
     @State private var milestoneTasks: [UUID: Task<Void, Never>] = [:]
     @State private var tipDismissTask: Task<Void, Never>?
     @State private var milestoneHideTask: Task<Void, Never>?
@@ -70,9 +69,6 @@ struct DashboardView: View {
     private var workoutManager: WorkoutManager { viewModel.workoutManager }
     private var guidedSession: GuidedSessionManager { viewModel.guidedSession }
     private var hapticManager: HapticManager { .shared }
-
-    /// Unified BLE / WiFi metrics (WiFi takes priority when connected).
-    private var metrics: CyclingMetrics { viewModel.metrics }
 
     /// Mean power over the last full second (from all high-rate trainer samples). Zones and arc track effort without an extra 3s lag.
     private var smoothedWatts: Int { workoutManager.displayPower }
@@ -238,13 +234,6 @@ struct DashboardView: View {
                         ))
                     }
                 }
-                liveActivitySyncTask?.cancel()
-                liveActivitySyncTask = Task {
-                    await viewModel.syncLiveActivity(
-                        isRecording: newState == .recording,
-                        prefs: prefs
-                    )
-                }
                 viewModel.evaluateRideTipsOnboardingPrompt(
                     prefs: prefs,
                     isInPreRide: newState == .idle
@@ -271,18 +260,11 @@ struct DashboardView: View {
                     displayPower: newPower,
                     state: workoutManager.state
                 ) {
-                    viewModel.resumeWorkout()
+                    viewModel.resumeWorkout(fromUserControls: false)
                 }
             }
             .onChange(of: workoutManager.elapsedSeconds) { _, _ in
                 tickRideTipsIfNeeded()
-                liveActivitySyncTask?.cancel()
-                liveActivitySyncTask = Task {
-                    await viewModel.syncLiveActivity(
-                        isRecording: workoutManager.state == .recording,
-                        prefs: prefs
-                    )
-                }
             }
             .overlay(alignment: .top) {
                 if viewModel.isMilestoneVisible, let text = viewModel.milestoneText {
@@ -540,8 +522,8 @@ struct DashboardView: View {
 
             phoneMetricsGrid
 
-            if metrics.heartRate > 0 {
-                HeartRateBarView(heartRate: metrics.heartRate, compact: true)
+            if viewModel.liveHeartRateBpm > 0 {
+                HeartRateBarView(heartRate: viewModel.liveHeartRateBpm, compact: true)
             }
 
             if workoutManager.showLowCadenceWarning {
@@ -671,8 +653,8 @@ struct DashboardView: View {
                     )
                 }
 
-                if metrics.heartRate > 0 {
-                    HeartRateBarView(heartRate: metrics.heartRate, compact: true)
+                if viewModel.liveHeartRateBpm > 0 {
+                    HeartRateBarView(heartRate: viewModel.liveHeartRateBpm, compact: true)
                 }
 
                 if workoutManager.showLowCadenceWarning {
@@ -752,7 +734,7 @@ struct DashboardView: View {
                 formattedAvgPower: workoutManager.formattedAvgPower,
                 formattedEfficiency: workoutManager.formattedEfficiency,
                 formattedKJ: workoutManager.formattedKJ,
-                showEfficiency: metrics.heartRate > 0,
+                showEfficiency: viewModel.liveHeartRateBpm > 0,
                 ftpIsSet: PowerZone.hasSetFTP,
                 compact: compact
             )
@@ -765,7 +747,7 @@ struct DashboardView: View {
                 formattedAvgPower: workoutManager.formattedAvgPower,
                 formattedEfficiency: workoutManager.formattedEfficiency,
                 formattedKJ: workoutManager.formattedKJ,
-                showEfficiency: metrics.heartRate > 0,
+                showEfficiency: viewModel.liveHeartRateBpm > 0,
                 ftpIsSet: PowerZone.hasSetFTP,
                 compact: compact,
                 layoutMode: layoutMode
@@ -929,9 +911,9 @@ struct DashboardView: View {
 
                     goalProgressSection(fit: false)
 
-                    if metrics.heartRate > 0 {
+                    if viewModel.liveHeartRateBpm > 0 {
                         HeartRateBarView(
-                            heartRate: metrics.heartRate
+                            heartRate: viewModel.liveHeartRateBpm
                         )
                     }
 
@@ -1269,8 +1251,6 @@ struct DashboardView: View {
         zonePulseResetTask = nil
         rideBriefingTask?.cancel()
         rideBriefingTask = nil
-        liveActivitySyncTask?.cancel()
-        liveActivitySyncTask = nil
         tipDismissTask?.cancel()
         tipDismissTask = nil
         milestoneHideTask?.cancel()

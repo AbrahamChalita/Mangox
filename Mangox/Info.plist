@@ -48,9 +48,13 @@
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
 	</dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>MangoxPrivacyPolicyURL</key>
+	<string>https://mangox.app/privacy</string>
+	<key>MangoxTermsOfUseURL</key>
+	<string>https://mangox.app/terms</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UISupportedInterfaceOrientations~iphone</key>

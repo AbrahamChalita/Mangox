@@ -58,6 +58,10 @@ final class DIContainer {
 
     // MARK: - ViewModels (lazily vended; each VM owns its own lifecycle)
 
+    /// Reused while an indoor workout is recording or paused so Live Activity / Dynamic Island deep links
+    /// that recreate `DashboardView` do not start a new `WorkoutManager` session.
+    private var retainedIndoorViewModel: IndoorViewModel?
+
     func makeCoachViewModel() -> CoachViewModel {
         CoachViewModel(coach: aiService, purchasesService: purchasesServiceProtocol)
     }
@@ -96,7 +100,10 @@ final class DIContainer {
     }
 
     func makeIndoorViewModel() -> IndoorViewModel {
-        IndoorViewModel(
+        if let vm = retainedIndoorViewModel, vm.workoutManager.state.isLiveSessionActive {
+            return vm
+        }
+        let vm = IndoorViewModel(
             bleService: bleManager,
             dataSourceService: dataSourceCoordinator,
             routeService: routeManager,
@@ -105,6 +112,8 @@ final class DIContainer {
             workoutPersistenceRepository: workoutPersistenceRepository,
             trainingPlanPersistenceRepository: trainingPlanPersistenceRepository
         )
+        retainedIndoorViewModel = vm
+        return vm
     }
     func makeOutdoorViewModel() -> OutdoorViewModel {
         OutdoorViewModel(
@@ -116,7 +125,9 @@ final class DIContainer {
             workoutPersistenceRepository: workoutPersistenceRepository
         )
     }
-    func makeSocialViewModel() -> SocialViewModel { SocialViewModel() }
+    func makeSocialViewModel() -> SocialViewModel {
+        SocialViewModel(whoopService: whoopServiceProtocol)
+    }
     func makeTrainingViewModel() -> TrainingViewModel {
         TrainingViewModel(
             whoopService: whoopServiceProtocol,

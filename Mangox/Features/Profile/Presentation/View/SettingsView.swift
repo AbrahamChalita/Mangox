@@ -14,7 +14,6 @@ private enum SettingsRoute: Hashable {
     case audioHaptics
     case aiCoach
     case mangoxPro
-    case goalEvent
     case gear
     case dataPrivacyHub
 }
@@ -24,6 +23,7 @@ private enum SettingsRoute: Hashable {
 struct SettingsView: View {
     @State private var viewModel: ProfileViewModel
     @Binding var navigationPath: NavigationPath
+    @State private var riderAvatarRefreshToken = UUID()
 
     init(navigationPath: Binding<NavigationPath>, viewModel: ProfileViewModel) {
         _navigationPath = navigationPath
@@ -44,9 +44,7 @@ struct SettingsView: View {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
                         Color.clear.frame(height: 8)
 
-                        identityHeader(
-                            ftp: ftp, stravaConnected: stravaConnected, whoopConnected: whoopConnected,
-                            isPro: isPro)
+                        identityHeader(ftp: ftp, isPro: isPro)
                             .padding(.bottom, 24)
 
                         // MARK: Training
@@ -55,6 +53,8 @@ struct SettingsView: View {
                             let prefs = RidePreferences.shared
                             let riderProfileValue: String = {
                                 var parts: [String] = []
+                                let name = prefs.riderDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !name.isEmpty { parts.append(name) }
                                 parts.append(prefs.isImperial
                                     ? String(format: "%.0f lb", prefs.riderWeightKg * 2.20462)
                                     : String(format: "%.0f kg", prefs.riderWeightKg))
@@ -80,15 +80,6 @@ struct SettingsView: View {
                                 title: "Heart Rate",
                                 value: "Max \(maxHR) bpm",
                                 route: .heartRate
-                            )
-                            rowDivider
-                            navRow(
-                                icon: "flag.checkered",
-                                iconColor: AppColor.yellow,
-                                title: "Goal & Season",
-                                value: MangoxTrainingGoals.eventName.isEmpty
-                                    ? "Optional" : MangoxTrainingGoals.eventName,
-                                route: .goalEvent
                             )
                         }
 
@@ -230,6 +221,30 @@ struct SettingsView: View {
                             .padding(.horizontal, 16)
                         }
 
+                        // TEMPORARY debug entry — remove after story QA
+                        sectionLabel("Debug")
+                            .padding(.top, 24)
+                        settingsGroup {
+                            Button {
+                                navigationPath.append(AppRoute.storyCardDebug)
+                            } label: {
+                                HStack(spacing: 14) {
+                                    settingsIconBadge("photo.artframe", color: .orange)
+                                    Text("Story Card Debug")
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.85))
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.22))
+                                }
+                                .contentShape(Rectangle())
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
                         Spacer().frame(height: 48)
                     }
                 }
@@ -250,11 +265,13 @@ struct SettingsView: View {
                     case .audioHaptics: AudioHapticsSettingsView()
                     case .aiCoach: AICoachSettingsView()
                     case .mangoxPro: MangoxProSettingsView(viewModel: viewModel)
-                    case .goalEvent: GoalEventSettingsView()
                     case .gear: GearSettingsView()
                     case .dataPrivacyHub: DataPrivacyNotificationsHubView(viewModel: viewModel)
                     }
                 }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mangoxRiderProfileAvatarDidChange)) { _ in
+            riderAvatarRefreshToken = UUID()
         }
         .sheet(isPresented: $viewModel.showPaywall) {
             PaywallView(viewModel: viewModel.makePaywallViewModel())
@@ -332,9 +349,7 @@ struct SettingsView: View {
 
     // MARK: - Identity header
 
-    private func identityHeader(
-        ftp: Int, stravaConnected: Bool, whoopConnected: Bool, isPro: Bool
-    ) -> some View {
+    private func identityHeader(ftp: Int, isPro: Bool) -> some View {
             (HStack(alignment: .center, spacing: 14) {
                 avatarView
                 VStack(alignment: .leading, spacing: 5) {
@@ -342,16 +357,6 @@ struct SettingsView: View {
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.95))
                     HStack(spacing: 10) {
-                        if stravaConnected {
-                            Label("Strava", systemImage: "checkmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(AppColor.success)
-                        }
-                        if whoopConnected {
-                            Label("WHOOP", systemImage: "checkmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(AppColor.whoop)
-                        }
                         if isPro {
                             Label("Pro", systemImage: "crown.fill")
                                 .font(.system(size: 12))
@@ -369,7 +374,21 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var avatarView: some View {
-        if let url = viewModel.stravaAvatarURL {
+        if RiderProfileAvatarStore.hasLocalAvatar {
+            Group {
+                if let uiImage = RiderProfileAvatarStore.loadLocalAvatar() {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    avatarPlaceholder
+                }
+            }
+            .id(riderAvatarRefreshToken)
+            .frame(width: 56, height: 56)
+            .clipShape(Circle())
+            .overlay(Circle().strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+        } else if let url = viewModel.stravaAvatarURL {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):

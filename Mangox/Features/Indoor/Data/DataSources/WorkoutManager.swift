@@ -50,6 +50,14 @@ enum RecordingState: Equatable {
     case paused
     case autoPaused
     case finished
+
+    /// True while a ride is in progress (including manual or auto-pause).
+    var isLiveSessionActive: Bool {
+        switch self {
+        case .recording, .paused, .autoPaused: true
+        case .idle, .finished: false
+        }
+    }
 }
 
 @Observable
@@ -57,7 +65,12 @@ enum RecordingState: Equatable {
 final class WorkoutManager {
     // MARK: - Public State
 
-    var state: RecordingState = .idle
+    var state: RecordingState = .idle {
+        didSet {
+            guard state != oldValue else { return }
+            onStateChange?(oldValue, state)
+        }
+    }
     var elapsedSeconds: Int = 0  // active time only
     var currentLapNumber: Int = 1
     var powerHistory: [PowerSample] = []  // last 60 points for chart
@@ -133,6 +146,9 @@ final class WorkoutManager {
     /// Standard cycling intervals: 5s, 15s, 30s, 1m, 5m, 20m.
     static let peakWindows = [5, 15, 30, 60, 300, 1200]
 
+    /// Caps speed–distance integration when the main run loop stalls (pause/end still clear `lastSampleDate`).
+    private static let distanceIntegrationMaxDt: TimeInterval = 2.0
+
     /// Best effort recorded for each peak window.
     /// Updated live during the ride; can be shown in a post-ride summary or a live "best efforts" card.
     var peakPowers: [PeakPowerEntry] = []
@@ -166,6 +182,8 @@ final class WorkoutManager {
     /// Called every second with (elapsedSeconds, displayPower).
     /// Used by `GuidedSessionManager` to drive interval tracking.
     var onTick: ((Int, Int) -> Void)?
+    /// Called when ride state changes (recording/pause/finish), useful for side-effects such as Live Activity sync.
+    var onStateChange: ((RecordingState, RecordingState) -> Void)?
 
     /// The plan day ID for a guided session. Set before calling `startWorkout()`.
     /// Stored on the `Workout` model so deletion can un-mark plan completion.
@@ -212,6 +230,10 @@ final class WorkoutManager {
 
     private var zeroPowerSeconds = 0
     private let autoPauseThreshold = 3
+    /// After the rider hits **Resume** (not BLE-driven auto-resume), ignore auto-pause until this
+    /// `elapsedSeconds` so coasting / clipping in does not instantly snap back to AUTO-PAUSED.
+    private var autoPauseSuppressedUntilElapsed: Int?
+    private static let autoPauseGraceSecondsAfterUserResume = 8
 
     // Lap accumulation
     private var lapPowerSum: Double = 0
@@ -268,6 +290,12 @@ final class WorkoutManager {
     /// Active ERG target (if set externally, e.g. by a training plan or manual control).
     private var ergTarget: Int?
 
+    /// Wall-clock anchor used to keep `elapsedSeconds` accurate even if timer callbacks are delayed
+    /// while the app is backgrounded.
+    private var recordingStartWallClock: Date?
+    private var pausedWallClockDuration: TimeInterval = 0
+    private var pauseStartedAtWallClock: Date?
+
     // nonisolated so deinit can access it without crossing actor boundaries.
     private nonisolated static let subscriberID = "WorkoutManager"
 
@@ -276,6 +304,8 @@ final class WorkoutManager {
     /// actor isolation guarantees across Swift toolchain versions.
     func tearDown() {
         stopTimer()
+        onTick = nil
+        onStateChange = nil
         bleService?.unsubscribe(id: Self.subscriberID)
         dataSource?.unsubscribeCyclingMetrics(id: Self.subscriberID)
     }
@@ -433,7 +463,17 @@ final class WorkoutManager {
         modelContext.insert(lap)
 
         resetAccumulators()
-        let initialDistance = dataSource?.totalDistance ?? bleService?.metrics.totalDistance ?? 0
+        recordingStartWallClock = w.startDate
+        pausedWallClockDuration = 0
+        pauseStartedAtWallClock = nil
+        let initialDistance: Double
+        if let ds = dataSource {
+            initialDistance = ds.activeTotalDistanceFieldPresent ? ds.totalDistance : 0
+        } else if bleService?.metrics.includesTotalDistanceInPacket == true {
+            initialDistance = bleService?.metrics.totalDistance ?? 0
+        } else {
+            initialDistance = 0
+        }
         workoutStartDistance = initialDistance
         lapStartDistance = 0
         lastRecordedDistance = initialDistance
@@ -456,19 +496,43 @@ final class WorkoutManager {
     }
 
     func pause() {
-        guard state == .recording else { return }
-        flushPendingSamples()
-        do { try modelContext.save() } catch { workoutLogger.error("pause save failed: \(error)") }
-        state = .paused
-        stopTimer()
-        workout?.status = .paused
+        switch state {
+        case .recording:
+            flushPendingSamples()
+            state = .paused
+            stopTimer()
+            workout?.status = .paused
+            markPauseStartedIfNeeded()
+            autoPauseSuppressedUntilElapsed = nil
+            do { try modelContext.save() } catch { workoutLogger.error("pause save failed: \(error)") }
+        case .autoPaused:
+            // Commit to a full manual pause (also covers a race where auto-pause wins just before the
+            // rider taps PAUSE while the UI still shows the recording layout).
+            flushPendingSamples()
+            state = .paused
+            workout?.status = .paused
+            markPauseStartedIfNeeded()
+            autoPauseSuppressedUntilElapsed = nil
+            do { try modelContext.save() } catch { workoutLogger.error("pause save failed: \(error)") }
+        default:
+            return
+        }
     }
 
-    func resume() {
+    /// - Parameter fromUserControls: `true` when the rider used Pause/Resume in the UI — applies a
+    ///   short grace window before auto-pause can fire again. `false` for BLE-driven auto-resume.
+    func resume(fromUserControls: Bool = false) {
         guard state == .paused || state == .autoPaused else { return }
+        consumePausedWallClockDurationIfNeeded()
         state = .recording
         workout?.status = .active
         zeroPowerSeconds = 0
+        if fromUserControls {
+            autoPauseSuppressedUntilElapsed =
+                elapsedSeconds + Self.autoPauseGraceSecondsAfterUserResume
+        } else {
+            autoPauseSuppressedUntilElapsed = nil
+        }
         startTimer()
     }
 
@@ -491,6 +555,7 @@ final class WorkoutManager {
 
     func endWorkout() {
         stopTimer()
+        autoPauseSuppressedUntilElapsed = nil
         flushPendingSamples()
         do { try modelContext.save() } catch {
             workoutLogger.error("endWorkout pre-summary save failed: \(error)")
@@ -579,14 +644,14 @@ final class WorkoutManager {
         if metrics.heartRate > 0 {
             hrAccumulator.append(metrics.heartRate)
         }
-        if metrics.totalDistance > 0 {
+        if metrics.includesTotalDistanceInPacket {
             latestDistanceInWindow = metrics.totalDistance
         }
 
         // Auto-resume from auto-pause when power returns
         // (this is checked here instead of in SwiftUI onChange to avoid unnecessary view diffs)
         if state == .autoPaused, shouldResume(from: metrics) {
-            resume()
+            resume(fromUserControls: false)
         }
     }
 
@@ -610,6 +675,8 @@ final class WorkoutManager {
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
+        // Avoid integrating speed across idle time (pause / auto-pause / end).
+        lastSampleDate = nil
     }
 
     private func tick() {
@@ -621,11 +688,12 @@ final class WorkoutManager {
     /// feeds ring buffers, records to SwiftData, and updates UI-facing state.
     private var lastSampleDate: Date?
 
-    private func processSecondSample() {
-        elapsedSeconds += 1
-
-        let now = Date()
-        let dt = lastSampleDate.map { now.timeIntervalSince($0) } ?? 1.0
+    private func processSecondSample(now: Date = Date()) {
+        let previousElapsed = elapsedSeconds
+        let elapsedDelta = refreshElapsedFromWallClock(now: now)
+        guard elapsedDelta > 0 else { return }
+        let rawDt = lastSampleDate.map { max(0, now.timeIntervalSince($0)) } ?? 1.0
+        let dt = min(rawDt, Self.distanceIntegrationMaxDt)
         lastSampleDate = now
 
         // Detect BLE dropout: if no packets arrived for > 5 seconds, it's a dropout.
@@ -724,10 +792,35 @@ final class WorkoutManager {
             updateRouteGrade()
         }
 
-        // Feed ring buffers with the averaged 1-second power
-        ring3s.append(avgPower)
-        ring5s.append(avgPower)
-        ring30s.append(avgPower)
+        // Feed ring buffers for every elapsed second that passed while timer delivery was delayed.
+        for secondOffset in 1...elapsedDelta {
+            ring3s.append(avgPower)
+            ring5s.append(avgPower)
+            ring30s.append(avgPower)
+            if ring30s.isFull {
+                let a = ring30s.average
+                let a2 = a * a
+                rollingPower4thSum += a2 * a2
+                rollingPower4thCount += 1
+            }
+
+            // Peak power curve: use peak sample within each second so short spikes count toward best 5s/15s/…
+            // Skip BLE dropout zeros — they would artificially deflate best-effort averages.
+            if !isDropout || maxPowerThisSecond > 0 {
+                for (window, var buffer) in peakBuffers {
+                    buffer.append(maxPowerThisSecond)
+                    peakBuffers[window] = buffer
+                    if buffer.isFull {
+                        let avg = Int(buffer.average.rounded())
+                        let current = peakBests[window]
+                        if current == nil || avg > current!.watts {
+                            let sampleElapsed = previousElapsed + secondOffset
+                            peakBests[window] = (watts: avg, atElapsed: sampleElapsed)
+                        }
+                    }
+                }
+            }
+        }
         avg3s = ring3s.average
         avg5s = ring5s.average
         avg30s = ring30s.average
@@ -748,21 +841,6 @@ final class WorkoutManager {
             }
         }
 
-        // Peak power curve: use peak sample within each second so short spikes count toward best 5s/15s/…
-        // Skip BLE dropout zeros — they would artificially deflate best-effort averages.
-        if !isDropout || maxPowerThisSecond > 0 {
-            for (window, var buffer) in peakBuffers {
-                buffer.append(maxPowerThisSecond)
-                peakBuffers[window] = buffer
-                if buffer.isFull {
-                    let avg = Int(buffer.average.rounded())
-                    let current = peakBests[window]
-                    if current == nil || avg > current!.watts {
-                        peakBests[window] = (watts: avg, atElapsed: elapsedSeconds)
-                    }
-                }
-            }
-        }
         // Rebuild peakPowers array from current bests
         peakPowers = Self.peakWindows.compactMap { window in
             guard let best = peakBests[window] else { return nil }
@@ -770,18 +848,10 @@ final class WorkoutManager {
                 windowSeconds: window, watts: best.watts, atElapsed: best.atElapsed)
         }
 
-        // NP: 30s rolling average → 4th power (direct multiplication avoids libm overhead)
-        if ring30s.isFull {
-            let a = ring30s.average
-            let a2 = a * a
-            rollingPower4thSum += a2 * a2
-            rollingPower4thCount += 1
-        }
-
         // --- Live performance metrics ---
-        totalPowerSum += Double(avgPower)
-        totalPowerSampleCount += 1
-        totalEnergyJoules += Double(avgPower)  // 1 watt × 1 second = 1 joule
+        totalPowerSum += Double(avgPower) * Double(elapsedDelta)
+        totalPowerSampleCount += elapsedDelta
+        totalEnergyJoules += Double(avgPower) * Double(elapsedDelta)  // 1 watt × 1 second = 1 joule
 
         // Average power
         averagePower = totalPowerSum / Double(totalPowerSampleCount)
@@ -810,30 +880,37 @@ final class WorkoutManager {
             efficiencyFactor = averagePower / Double(avgHR)
         }
 
-        // Queue sample — batched insert to SwiftData (see flushPendingSamples).
-        pendingSamples.append(
-            PendingWorkoutSample(
-                elapsedSeconds: elapsedSeconds,
-                power: avgPower,
-                cadence: avgCadence,
-                speed: avgSpeed,
-                heartRate: avgHR
+        // Queue one sample per elapsed second — maintains timeline continuity after background stalls.
+        for secondOffset in 1...elapsedDelta {
+            let sampleElapsed = previousElapsed + secondOffset
+            pendingSamples.append(
+                PendingWorkoutSample(
+                    elapsedSeconds: sampleElapsed,
+                    power: avgPower,
+                    cadence: avgCadence,
+                    speed: effectiveSpeed,
+                    heartRate: avgHR
+                )
             )
-        )
-        if pendingSamples.count >= sampleBatchSize {
-            flushPendingSamples()
-        }
-        if elapsedSeconds % 30 == 0 {
-            flushPendingSamples()
-            do { try modelContext.save() } catch {
-                workoutLogger.error("periodic save failed: \(error)")
+            if pendingSamples.count >= sampleBatchSize {
+                flushPendingSamples()
+            }
+            if sampleElapsed % 30 == 0 {
+                flushPendingSamples()
+                do { try modelContext.save() } catch {
+                    workoutLogger.error("periodic save failed: \(error)")
+                }
             }
         }
 
         // Power history for chart (keep last 60) — use circular buffer approach for O(1) amortized
         // Instead of removing elements one-by-one (O(n)), we rebuild the array when it grows
         // past 2x capacity to maintain O(1) amortized time.
-        powerHistory.append(PowerSample(elapsed: elapsedSeconds, power: avgPower))
+        for secondOffset in 1...elapsedDelta {
+            powerHistory.append(
+                PowerSample(elapsed: previousElapsed + secondOffset, power: avgPower)
+            )
+        }
         if powerHistory.count > 120 {
             // Batch compaction: O(n) but only every 60 insertions → amortized O(1)
             powerHistory.removeFirst(powerHistory.count - 60)
@@ -849,19 +926,20 @@ final class WorkoutManager {
         }
 
         // Lap accumulation
-        lapPowerSum += Double(avgPower)
-        lapSampleCount += 1
+        lapPowerSum += Double(avgPower) * Double(elapsedDelta)
+        lapSampleCount += elapsedDelta
         lapMaxPower = max(lapMaxPower, maxPowerThisSecond)
-        lapCadenceSum += avgCadence
-        lapSpeedSum += effectiveSpeed
-        lapHRSum += Double(avgHR)
-        lapElapsedSeconds += 1
+        lapCadenceSum += avgCadence * Double(elapsedDelta)
+        lapSpeedSum += effectiveSpeed * Double(elapsedDelta)
+        lapHRSum += Double(avgHR) * Double(elapsedDelta)
+        lapElapsedSeconds += elapsedDelta
         currentLapDuration = TimeInterval(lapElapsedSeconds)
         currentLapAvgPower = lapSampleCount > 0 ? lapPowerSum / Double(lapSampleCount) : 0
 
         // Auto-pause: trigger after N consecutive seconds of zero averaged power AND zero speed
-        if avgPower == 0 && effectiveSpeed < 1.0 {
-            zeroPowerSeconds += 1
+        let autoPauseAllowed = autoPauseSuppressedUntilElapsed.map { elapsedSeconds >= $0 } ?? true
+        if autoPauseAllowed, avgPower == 0 && effectiveSpeed < 1.0 {
+            zeroPowerSeconds += elapsedDelta
             if zeroPowerSeconds >= autoPauseThreshold {
                 flushPendingSamples()
                 do { try modelContext.save() } catch {
@@ -870,6 +948,7 @@ final class WorkoutManager {
                 state = .autoPaused
                 stopTimer()
                 workout?.status = .paused
+                markPauseStartedIfNeeded()
                 return
             }
         } else {
@@ -1046,6 +1125,7 @@ final class WorkoutManager {
         showLowCadenceWarning = false
         lowCadenceStreakSeconds = 0
         pendingStepCueLabel = nil
+        autoPauseSuppressedUntilElapsed = nil
 
         ring3s.reset()
         ring5s.reset()
@@ -1109,6 +1189,10 @@ final class WorkoutManager {
         latestDistanceInWindow = nil
         lastIngestedMetrics = nil
         pendingSamples.removeAll(keepingCapacity: false)
+        lastSampleDate = nil
+        recordingStartWallClock = nil
+        pausedWallClockDuration = 0
+        pauseStartedAtWallClock = nil
 
         // Peak power curve buffers
         peakBuffers = [:]
@@ -1121,7 +1205,60 @@ final class WorkoutManager {
         resetLapAccumulators()
     }
 
+    private func markPauseStartedIfNeeded(now: Date = Date()) {
+        guard pauseStartedAtWallClock == nil else { return }
+        pauseStartedAtWallClock = now
+    }
+
+    private func consumePausedWallClockDurationIfNeeded(now: Date = Date()) {
+        guard let pauseStartedAtWallClock else { return }
+        pausedWallClockDuration += max(0, now.timeIntervalSince(pauseStartedAtWallClock))
+        self.pauseStartedAtWallClock = nil
+    }
+
+    /// Derives active elapsed seconds from wall clock. Timer cadence is only a sampling trigger.
+    private func refreshElapsedFromWallClock(now: Date = Date()) -> Int {
+        let previous = elapsedSeconds
+        guard let recordingStartWallClock else { return 0 }
+        let inFlightPause = pauseStartedAtWallClock.map { max(0, now.timeIntervalSince($0)) } ?? 0
+        let activeSeconds = max(
+            0,
+            Int(
+                (now.timeIntervalSince(recordingStartWallClock)
+                    - pausedWallClockDuration
+                    - inFlightPause
+                ).rounded(.down)
+            )
+        )
+        elapsedSeconds = max(previous, activeSeconds)
+        return elapsedSeconds - previous
+    }
+
+    #if DEBUG
+    /// Test helper: overrides wall-clock anchors used by elapsed reconciliation.
+    func debugConfigureWallClock(
+        recordingStart: Date,
+        pausedDuration: TimeInterval = 0,
+        pauseStart: Date? = nil
+    ) {
+        recordingStartWallClock = recordingStart
+        pausedWallClockDuration = pausedDuration
+        pauseStartedAtWallClock = pauseStart
+    }
+
+    /// Test helper: runs one sample-processing cycle at a controlled timestamp.
+    func debugProcessSecondSample(at now: Date) {
+        processSecondSample(now: now)
+    }
+    #endif
+
     // MARK: - Summary Calculations
+
+    /// Odometer meters from a metrics snapshot only when the link marked total distance as present.
+    private func resolvedTrainerOdometerMeters(from metrics: CyclingMetrics?) -> Double? {
+        guard let metrics, metrics.includesTotalDistanceInPacket else { return nil }
+        return metrics.totalDistance
+    }
 
     private func calculateSummary() {
         guard let workout else { return }
@@ -1130,13 +1267,13 @@ final class WorkoutManager {
 
         let count = Double(samples.count)
         let ftp = Double(PowerZone.ftp)
-        let latestDistance = max(
-            lastRecordedDistance,
-            lastIngestedMetrics?.totalDistance ?? bleService?.metrics.totalDistance
-                ?? lastRecordedDistance
-        )
+        let telemetrySnap =
+            resolvedTrainerOdometerMeters(from: lastIngestedMetrics)
+            ?? resolvedTrainerOdometerMeters(from: bleService?.metrics)
+        let latestDistance = max(lastRecordedDistance, telemetrySnap ?? lastRecordedDistance)
         let sensorDistance = max(0, latestDistance - workoutStartDistance)
-        let workoutDistance = max(sensorDistance, integratedDistance)
+        let integratedTotal = integratedDistanceAnchor + integratedDistance
+        let workoutDistance = max(sensorDistance, integratedTotal)
 
         workout.duration = Double(elapsedSeconds)
         workout.distance = workoutDistance

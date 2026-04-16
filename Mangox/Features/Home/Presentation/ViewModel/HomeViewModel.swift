@@ -76,15 +76,10 @@ final class HomeViewModel {
 
     // MARK: - Lifecycle methods
 
-    /// Calls location setup and pre-warms BLE reconnect logic.
-    func prewarmBLEAndLocation() {
+    /// Prepares location services for Home. Trainer/Wi‑Fi reconnect is **not** started here — only after opening
+    /// Indoor Ride, Outdoor Ride, or related connection screens (see `ConnectionView` / `OutdoorViewModel`).
+    func prewarmLocationServices() {
         locationService.setup()
-        if bleService.bluetoothState == .poweredOn,
-            !bleService.trainerConnectionState.isConnected,
-            !dataSourceService.wifiConnectionState.isConnected
-        {
-            bleService.reconnectOrScan()
-        }
     }
 
     /// Refreshes WHOOP data if stale (4-hour threshold matching the concrete default).

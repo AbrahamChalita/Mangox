@@ -29,8 +29,20 @@ struct PMChartView: View {
     @Query(Self.recentPlanProgressDescriptor) private var recentPlanProgress: [TrainingPlanProgress]
 
     @MainActor
-    private var workoutSnapshots: [WorkoutMetricsSnapshot] {
-        allWorkouts.map { WorkoutMetricsSnapshot(from: $0) }
+    private var pmcWorkoutSnapshots: [WorkoutMetricsSnapshot] {
+        allWorkouts.map { WorkoutMetricsSnapshot(pmcFieldsFrom: $0) }
+    }
+
+    @MainActor
+    private func schedulePMCAndPowerCurveRebuild() {
+        let powerSnapshots = WorkoutMetricsSnapshot.powerCurveCandidates(
+            from: allWorkouts,
+            rangeDays: viewModel.rangeDays
+        )
+        viewModel.schedulePMCRebuild(
+            pmcWorkouts: pmcWorkoutSnapshots,
+            powerCurveWorkouts: powerSnapshots
+        )
     }
 
     init(navigationPath: Binding<NavigationPath>, viewModel: FitnessViewModel) {
@@ -55,7 +67,7 @@ struct PMChartView: View {
                             .padding(.bottom, 16)
                     }
 
-                    // Training load hero card — overlaps chart
+                    // Form summary (TSB + coaching copy); trend lives in the PMC chart below.
                     if let latest = viewModel.pmcData.last {
                         trainingLoadHero(latest)
                             .padding(.horizontal, 20)
@@ -70,7 +82,7 @@ struct PMChartView: View {
                             Button(action: {
                                 withAnimation {
                                     viewModel.setRange(days)
-                                    viewModel.schedulePMCRebuild(with: workoutSnapshots)
+                                    schedulePMCAndPowerCurveRebuild()
                                 }
                             }) {
                                 Text(dayLabel)
@@ -139,14 +151,14 @@ struct PMChartView: View {
         }
         .navigationBarBackButtonHidden()
         .onChange(of: allWorkouts, initial: true) { _, _ in
-            viewModel.schedulePMCRebuild(with: workoutSnapshots)
+            schedulePMCAndPowerCurveRebuild()
         }
         .onReceive(NotificationCenter.default.publisher(for: .mangoxWorkoutAggregatesMayHaveChanged)) {
             _ in
-            viewModel.schedulePMCRebuild(with: workoutSnapshots)
+            schedulePMCAndPowerCurveRebuild()
         }
         .onChange(of: recentPlanProgress, initial: true) { _, _ in
-            viewModel.updatePlanCompliance(progress: recentPlanProgress, workouts: workoutSnapshots)
+            viewModel.updatePlanCompliance(progress: recentPlanProgress, workouts: pmcWorkoutSnapshots)
         }
     }
 
@@ -293,6 +305,28 @@ struct PMChartView: View {
 
     // MARK: - Training Load Hero Card
 
+    /// One-line form trend vs 7 calendar days ago (no mini-chart); uses the same PMC series as the main graph.
+    private func formTSBWeekOverWeekLine(for latest: PMCPoint) -> String? {
+        let cal = Calendar.current
+        let latestDay = cal.startOfDay(for: latest.date)
+        guard let weekAgoDay = cal.date(byAdding: .day, value: -7, to: latestDay) else { return nil }
+        let target = cal.startOfDay(for: weekAgoDay)
+        let points = viewModel.pmcData
+        guard let prior = points.first(where: { cal.startOfDay(for: $0.date) == target }) else {
+            return nil
+        }
+
+        let delta = latest.tsb - prior.tsb
+        let rounded = Int(delta.rounded())
+        if abs(delta) < 1 {
+            return "About the same as last week"
+        }
+        if rounded > 0 {
+            return "Up \(rounded) vs last week"
+        }
+        return "Down \(abs(rounded)) vs last week"
+    }
+
     private func trainingLoadHero(_ latest: PMCPoint) -> some View {
         let tsb = latest.tsb
         let status: String
@@ -327,116 +361,59 @@ struct PMChartView: View {
             advice = "Recovery needed to avoid overtraining."
         }
 
-        return VStack(spacing: 0) {
-            // Top section: big TSB number + status
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 6) {
-                        Image(systemName: statusIcon)
-                            .font(.system(size: 15))
-                            .foregroundStyle(statusColor)
-                        Text(status.uppercased())
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(statusColor)
-                            .tracking(1.2)
-                    }
+        let cardRadius = MangoxRadius.card.rawValue
 
-                    Text(advice)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .lineLimit(2)
-                }
-
-                Spacer()
-
-                // Big TSB number
-                VStack(alignment: .trailing, spacing: 2) {
+        return VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
+            HStack(alignment: .center, spacing: MangoxSpacing.md.rawValue) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("FORM")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .mangoxFont(.label)
+                        .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
                         .tracking(1.0)
                     Text(String(format: "%.0f", tsb))
-                        .font(.system(size: 52, weight: .bold, design: .monospaced))
+                        .font(.system(size: 26, weight: .bold, design: .monospaced))
                         .foregroundStyle(statusColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 16)
 
-            // Mini sparkline showing recent TSB trend
-            if viewModel.pmcData.count > 7 {
-                let recentTSB = Array(viewModel.pmcData.suffix(min(30, viewModel.pmcData.count)).map(\.tsb))
-                miniSparkline(values: recentTSB, color: statusColor)
-                    .frame(height: 40)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
+                Spacer(minLength: MangoxSpacing.sm.rawValue)
+
+                HStack(spacing: 5) {
+                    Image(systemName: statusIcon)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(statusColor)
+                    Text(status)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(statusColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(AppColor.wash(for: statusColor))
+                .clipShape(Capsule())
             }
+
+            if let wow = formTSBWeekOverWeekLine(for: latest) {
+                Text(wow)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text(advice)
+                .mangoxFont(.callout)
+                .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(MangoxSpacing.md.rawValue)
+        .mangoxSurface(.flat, shape: .rounded(cardRadius))
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(statusColor.opacity(0.3), lineWidth: 1)
+            RoundedRectangle(cornerRadius: cardRadius, style: .continuous)
+                .strokeBorder(statusColor.opacity(0.22), lineWidth: 1)
         )
-    }
-
-    // MARK: - Mini Sparkline
-
-    private func miniSparkline(values: [Double], color: Color) -> some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            let minV = values.min() ?? 0
-            let maxV = values.max() ?? 1
-            let range = max(maxV - minV, 1)
-
-            // Zero line
-            let zeroY = h * (1 - CGFloat((0 - minV) / range))
-
-            Path { p in
-                p.move(to: CGPoint(x: 0, y: zeroY))
-                p.addLine(to: CGPoint(x: w, y: zeroY))
-            }
-            .stroke(Color.white.opacity(0.06), lineWidth: 1)
-
-            // Sparkline
-            Path { p in
-                for (i, val) in values.enumerated() {
-                    let x = w * CGFloat(i) / CGFloat(max(values.count - 1, 1))
-                    let y = h * (1 - CGFloat((val - minV) / range))
-                    if i == 0 {
-                        p.move(to: CGPoint(x: x, y: y))
-                    } else {
-                        p.addLine(to: CGPoint(x: x, y: y))
-                    }
-                }
-            }
-            .stroke(color.opacity(0.6), lineWidth: 1.5)
-
-            // Gradient fill under sparkline
-            Path { p in
-                for (i, val) in values.enumerated() {
-                    let x = w * CGFloat(i) / CGFloat(max(values.count - 1, 1))
-                    let y = h * (1 - CGFloat((val - minV) / range))
-                    if i == 0 {
-                        p.move(to: CGPoint(x: x, y: y))
-                    } else {
-                        p.addLine(to: CGPoint(x: x, y: y))
-                    }
-                }
-                p.addLine(to: CGPoint(x: w, y: h))
-                p.addLine(to: CGPoint(x: 0, y: h))
-                p.closeSubpath()
-            }
-            .fill(
-                LinearGradient(
-                    colors: [color.opacity(0.15), color.opacity(0.0)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-        }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Metric Strip

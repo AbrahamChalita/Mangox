@@ -545,9 +545,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Mangox/Info.plist;
 				INFOPLIST_KEY_CFBundleURLTypes = "({CFBundleTypeRole=Editor;CFBundleURLName=$(PRODUCT_BUNDLE_IDENTIFIER).strava;CFBundleURLSchemes=(mangox);})";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Mangox connects to your cycling trainer to display real-time power, cadence, and speed data.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "Mangox reads your resting heart rate and max heart rate to calculate accurate heart rate training zones.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "To setup correct measurements for training";
 				INFOPLIST_KEY_STRAVA_CLIENT_ID = "$(STRAVA_CLIENT_ID)";
 				INFOPLIST_KEY_STRAVA_CLIENT_SECRET = "$(STRAVA_CLIENT_SECRET)";
 				INFOPLIST_KEY_STRAVA_REDIRECT_URI = "$(STRAVA_REDIRECT_URI)";
@@ -560,8 +557,6 @@
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_WHOOP_CLIENT_ID = "$(WHOOP_CLIENT_ID)";
 				INFOPLIST_KEY_WHOOP_CLIENT_SECRET = "$(WHOOP_CLIENT_SECRET)";
 				INFOPLIST_KEY_WHOOP_REDIRECT_URI = "$(WHOOP_REDIRECT_URI)";
@@ -613,9 +608,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Mangox/Info.plist;
 				INFOPLIST_KEY_CFBundleURLTypes = "({CFBundleTypeRole=Editor;CFBundleURLName=$(PRODUCT_BUNDLE_IDENTIFIER).strava;CFBundleURLSchemes=(mangox);})";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Mangox connects to your cycling trainer to display real-time power, cadence, and speed data.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "Mangox reads your resting heart rate and max heart rate to calculate accurate heart rate training zones.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "To setup correct measurements for training";
 				INFOPLIST_KEY_STRAVA_CLIENT_ID = "$(STRAVA_CLIENT_ID)";
 				INFOPLIST_KEY_STRAVA_CLIENT_SECRET = "$(STRAVA_CLIENT_SECRET)";
 				INFOPLIST_KEY_STRAVA_REDIRECT_URI = "$(STRAVA_REDIRECT_URI)";
@@ -628,8 +620,6 @@
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_WHOOP_CLIENT_ID = "$(WHOOP_CLIENT_ID)";
 				INFOPLIST_KEY_WHOOP_CLIENT_SECRET = "$(WHOOP_CLIENT_SECRET)";
 				INFOPLIST_KEY_WHOOP_REDIRECT_URI = "$(WHOOP_REDIRECT_URI)";

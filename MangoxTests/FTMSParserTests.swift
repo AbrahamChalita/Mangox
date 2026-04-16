@@ -15,6 +15,7 @@ struct FTMSParserTests {
         #expect(metrics.speed == 32.0)
         #expect(metrics.cadence == 0)
         #expect(metrics.power == 0)
+        #expect(metrics.includesTotalDistanceInPacket == false)
     }
 
     @Test func parseSpeedNotPresent() throws {
@@ -62,6 +63,17 @@ struct FTMSParserTests {
         #expect(metrics.cadence == 80.0)
         #expect(metrics.totalDistance == 12500.0)
         #expect(metrics.power == 200)
+        #expect(metrics.includesTotalDistanceInPacket == true)
+    }
+
+    @Test func parseTotalDistanceZeroMetersStillMarksFieldPresent() throws {
+        // Flags: 0x0010 — speed present (bit 0 = 0), total distance present (bit 4).
+        // Speed 1000 → 10.00 km/h; distance uint24 = 0.
+        let data = Data([0x10, 0x00, 0xE8, 0x03, 0x00, 0x00, 0x00])
+        let metrics = try #require(FTMSParser.parseIndoorBikeData(data))
+        #expect(metrics.speed == 10.0)
+        #expect(metrics.totalDistance == 0)
+        #expect(metrics.includesTotalDistanceInPacket == true)
     }
 
     @Test func parseWithHeartRate() throws {
@@ -131,6 +143,7 @@ struct FTMSParserTests {
         #expect(packet.hasPower == true)
         #expect(packet.hasTotalDistance == false)
         #expect(packet.hasHeartRate == false)
+        #expect(packet.metrics.includesTotalDistanceInPacket == false)
     }
 
     @Test func parseTooShortReturnsNil() throws {
@@ -254,10 +267,10 @@ struct FTMSParserTests {
     }
 
     @Test func parseHeartRate16Bit() throws {
-        // Flags: 0x01 (16-bit HR value), HR: 300 (0x012C)
-        let data = Data([0x01, 0x2C, 0x01])
+        // Flags: 0x01 (16-bit HR value), HR: 180 (0x00B4 LE) — parser rejects > 250 bpm.
+        let data = Data([0x01, 0xB4, 0x00])
         let hr = try #require(FTMSParser.parseHeartRate(data))
-        #expect(hr == 300)
+        #expect(hr == 180)
     }
 
     @Test func parseHeartRateTooShortReturnsNil() throws {

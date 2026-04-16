@@ -1,5 +1,4 @@
 import Foundation
-import Combine
 
 enum DataSourceType: String, Sendable {
     case bluetooth
@@ -36,13 +35,21 @@ final class DataSourceCoordinator: DataSourceServiceProtocol {
     private(set) var speed: Double = 0
     private(set) var heartRate: Int = 0
     private(set) var totalDistance: Double = 0
+    private(set) var hrSource: HRSource = .none
+    private(set) var activeTotalDistanceFieldPresent: Bool = false
 
     /// EMA-smoothed watts from the active transport (BLE or Wi‑Fi). **Not** used for workout recording;
     /// `WorkoutManager` ingests raw per-packet power from `CyclingMetrics` instead. Handy for secondary UI or debugging.
     private(set) var smoothedPower: Int = 0
 
+    /// Updated from `publishActiveMetrics` only while a live route is active so views do not observe `lastPacketReceived` every BLE tick.
+    private(set) var isTrainerLinkDataStale: Bool = false
+
     private var metricsSubscribers: [String: (Int, Double, Double, Int, Double) -> Void] = [:]
     private var cyclingMetricsSubscribers: [String: (CyclingMetrics) -> Void] = [:]
+
+    /// Always reflects the latest unified metrics for `subscribeCyclingMetrics` / recording, independent of SwiftUI observation gating.
+    private var lastPublishedCyclingMetrics = CyclingMetrics()
 
     private var bleSubscriberID = "DataSourceCoordinatorBLE"
     private var wifiSubscriberID = "DataSourceCoordinatorWiFi"
@@ -88,6 +95,7 @@ final class DataSourceCoordinator: DataSourceServiceProtocol {
         metrics.speed = s
         metrics.heartRate = hr
         metrics.totalDistance = dist
+        metrics.includesTotalDistanceInPacket = wifiService.lastPacketIncludedDistance
         metrics.hrSource = bleManager.metrics.hrSource
         lastWiFiMetrics = metrics
 
@@ -171,36 +179,63 @@ final class DataSourceCoordinator: DataSourceServiceProtocol {
 
     private func publishActiveMetrics() {
         let selectedMetrics: CyclingMetrics?
+        let smoothed: Int
         switch activeDataSource {
         case .wifi:
             selectedMetrics = lastWiFiMetrics ?? lastBLEMetrics
-            smoothedPower = wifiService.connectionState.isConnected ? wifiService.smoothedPower : bleManager.smoothedPower
+            smoothed = wifiService.connectionState.isConnected ? wifiService.smoothedPower : bleManager.smoothedPower
         case .bluetooth:
             selectedMetrics = lastBLEMetrics ?? lastWiFiMetrics
-            smoothedPower = bleManager.smoothedPower
+            smoothed = bleManager.smoothedPower
         case .none:
             selectedMetrics = nil
-            smoothedPower = 0
+            smoothed = 0
         }
 
         guard let metrics = selectedMetrics else {
+            lastPublishedCyclingMetrics = CyclingMetrics()
             power = 0
             cadence = 0
             speed = 0
             heartRate = 0
             totalDistance = 0
-            notifySubscribers()
+            hrSource = .none
+            activeTotalDistanceFieldPresent = false
+            smoothedPower = 0
+            isTrainerLinkDataStale = false
+            notifySubscribersDisconnected()
             notifyCyclingMetricsSubscribersWiFi()
             return
         }
 
-        power = metrics.power
-        cadence = metrics.cadence
-        speed = metrics.speed
-        heartRate = metrics.heartRate
-        totalDistance = metrics.totalDistance
-        notifySubscribers()
+        lastPublishedCyclingMetrics = metrics
         notifyCyclingMetricsSubscribers(metrics: metrics)
+
+        let liveUI = TrainerSensorLiveObservationGate.isLiveRouteActive
+        if liveUI {
+            power = metrics.power
+            cadence = metrics.cadence
+            speed = metrics.speed
+            heartRate = metrics.heartRate
+            totalDistance = metrics.totalDistance
+            activeTotalDistanceFieldPresent = metrics.includesTotalDistanceInPacket
+            smoothedPower = smoothed
+            isTrainerLinkDataStale = computeTrainerLinkDataStale()
+        }
+        if hrSource != metrics.hrSource {
+            hrSource = metrics.hrSource
+        }
+    }
+
+    private func computeTrainerLinkDataStale() -> Bool {
+        if wifiService.connectionState.isConnected {
+            guard let last = wifiService.lastPacketReceived else { return true }
+            return Date().timeIntervalSince(last) > 2
+        }
+        guard bleManager.trainerConnectionState.isConnected, let last = bleManager.lastPacketReceived else {
+            return false
+        }
+        return Date().timeIntervalSince(last) > 2
     }
 
     // MARK: - Public API
@@ -216,24 +251,17 @@ final class DataSourceCoordinator: DataSourceServiceProtocol {
     /// Unified `CyclingMetrics` for workout recording (BLE + WiFi). Prefer over raw `bleManager` when both exist.
     func subscribeCyclingMetrics(id: String, handler: @escaping (CyclingMetrics) -> Void) {
         cyclingMetricsSubscribers[id] = handler
-        var m = CyclingMetrics(lastUpdate: Date())
-        m.power = power
-        m.cadence = cadence
-        m.speed = speed
-        m.heartRate = heartRate
-        m.totalDistance = totalDistance
-        m.hrSource = bleManager.metrics.hrSource
-        handler(m)
+        handler(lastPublishedCyclingMetrics)
     }
 
     func unsubscribeCyclingMetrics(id: String) {
         cyclingMetricsSubscribers.removeValue(forKey: id)
     }
 
-    private func notifySubscribers() {
+    private func notifySubscribersDisconnected() {
         guard !metricsSubscribers.isEmpty else { return }
         for handler in metricsSubscribers.values {
-            handler(power, cadence, speed, heartRate, totalDistance)
+            handler(0, 0, 0, 0, 0)
         }
     }
 
@@ -246,15 +274,8 @@ final class DataSourceCoordinator: DataSourceServiceProtocol {
 
     private func notifyCyclingMetricsSubscribersWiFi() {
         guard !cyclingMetricsSubscribers.isEmpty else { return }
-        var m = CyclingMetrics(lastUpdate: Date())
-        m.power = power
-        m.cadence = cadence
-        m.speed = speed
-        m.heartRate = heartRate
-        m.totalDistance = totalDistance
-        m.hrSource = bleManager.metrics.hrSource
         for handler in cyclingMetricsSubscribers.values {
-            handler(m)
+            handler(lastPublishedCyclingMetrics)
         }
     }
 
@@ -274,6 +295,10 @@ final class DataSourceCoordinator: DataSourceServiceProtocol {
 
     func disconnectWiFi() {
         wifiService.disconnect()
+    }
+
+    func snapshotUnifiedMetrics() -> CyclingMetrics {
+        lastPublishedCyclingMetrics
     }
 
     // MARK: - Auto-selection
@@ -343,15 +368,6 @@ final class DataSourceCoordinator: DataSourceServiceProtocol {
             break
         }
         return bleManager.trainerConnectionState
-    }
-
-    /// True when the active trainer link shows connected but power/data has gone quiet (>2s).
-    var isTrainerLinkDataStale: Bool {
-        if wifiService.connectionState.isConnected {
-            guard let last = wifiService.lastPacketReceived else { return true }
-            return Date().timeIntervalSince(last) > 2
-        }
-        return bleManager.isDataStale
     }
 
     var bleConnectionState: BLEConnectionState {

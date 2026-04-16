@@ -220,7 +220,7 @@ private struct StoryCardTitleGenerated: Equatable {
 
     @Guide(
         description:
-            "2-4 word punchy, poster-style headline for a cycling ride summary card. Title-case. No punctuation, no hashtags, no numbers. Reflect the ride's essence through zone, effort, or terrain. Examples: 'Threshold Destroyer', 'Alpine Grind', 'Zone Five Ignition', 'Endurance Foundation'. Max 28 characters."
+            "2-4 word punchy poster headline for a cycling ride summary card (Instagram-style). Clever or lightly funny is welcome if it still fits the real stats (zone, climb, endurance, sprint, recovery). Wordplay and attitude OK; stay kind, inclusive, and family-friendly — no profanity, slurs, politics, or insults. Title-case or natural caps. No hashtags, no digits, no punctuation marks. Max 28 characters. Examples: 'Threshold Destroyer', 'Legs Asked Questions', 'Alpine Grind', 'Coffee Ride Deluxe', 'Zone Five Ignition'."
     )
     var title: String
 }
@@ -262,6 +262,12 @@ enum OnDeviceCoachEngine {
         case .available: return true
         default: return false
         }
+    }
+
+    /// True when the default on-device writing model can run for ``Locale/current`` (Apple Intelligence + supported locale).
+    static var isOnDeviceWritingModelAvailable: Bool {
+        guard case .available = SystemLanguageModel.default.availability else { return false }
+        return SystemLanguageModel.default.supportsLocale(Locale.current)
     }
 
     /// Logs `LanguageModelSession.transcript` when verbose logging is enabled (Instruments + Console).
@@ -691,6 +697,12 @@ enum OnDeviceCoachEngine {
 
     // MARK: - Story card headline
 
+    private static func clampInstagramStoryHeadline(_ raw: String, maxLen: Int = 28) -> String {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count > maxLen else { return t }
+        return String(t.prefix(maxLen)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Generates a 2-4 word punchy poster headline for the Instagram story card bitmap.
     /// Returns nil when Apple Intelligence is unavailable or the result is empty.
     static func generateStoryCardTitle(
@@ -719,11 +731,11 @@ enum OnDeviceCoachEngine {
         }
 
         let instructions = """
-            Write a 2-4 word punchy, poster-style headline for a cycling ride summary card.
-            Title-case. No punctuation, no hashtags, no numbers.
-            Reflect the ride's essence through zone, effort level, or terrain.
-            Examples: 'Threshold Destroyer', 'Alpine Grind', 'Zone Five Ignition', 'Endurance Foundation'.
-            Max 28 characters. reasoning is internal only.
+            Write a 2-4 word punchy headline for a cycling ride summary card (social share).
+            You may be witty, playful, or surprising as long as the vibe still matches the real stats — never invent routes, zones, or numbers.
+            Stay kind and inclusive; no profanity, slurs, politics, or put-downs.
+            Title-case or natural caps. No punctuation characters, no hashtags, no digits in the headline.
+            Hard limit 28 characters for the title string. reasoning is internal only.
             """
         let model = MangoxFoundationModelsSupport.coachSystemLanguageModel()
         let session = LanguageModelSession(model: model, instructions: Instructions(instructions))
@@ -734,7 +746,9 @@ enum OnDeviceCoachEngine {
                 options: GenerationOptions(sampling: .greedy)
             )
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "ig_card_title")
-            let title = response.content.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = Self.clampInstagramStoryHeadline(
+                response.content.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
             return title.isEmpty ? nil : title
         } catch {
             MangoxFoundationModelsSupport.logGenerationFailure(error, label: "ig_card_title")

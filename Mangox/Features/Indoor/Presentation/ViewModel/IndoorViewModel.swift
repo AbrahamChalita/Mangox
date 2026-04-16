@@ -51,7 +51,7 @@ final class IndoorViewModel {
 
     // MARK: - Computed Display Properties (for DashboardView)
 
-    /// Unified metrics from DataSourceService + HR source from BLEService.
+    /// Unified metrics from DataSourceService (HR attribution included — avoids reading `BLEManager.metrics` for SwiftUI).
     var metrics: CyclingMetrics {
         var m = CyclingMetrics(lastUpdate: Date())
         m.power = dataSourceService.power
@@ -59,9 +59,13 @@ final class IndoorViewModel {
         m.speed = dataSourceService.speed
         m.heartRate = dataSourceService.heartRate
         m.totalDistance = dataSourceService.totalDistance
-        m.hrSource = bleService.metrics.hrSource
+        m.includesTotalDistanceInPacket = dataSourceService.activeTotalDistanceFieldPresent
+        m.hrSource = dataSourceService.hrSource
         return m
     }
+
+    /// Live strap HR for the indoor dashboard (same transport as `metrics`, without aggregating `CyclingMetrics` in parents).
+    var liveHeartRateBpm: Int { dataSourceService.heartRate }
 
     // DataSource metrics
     var power: Int { dataSourceService.power }
@@ -75,7 +79,7 @@ final class IndoorViewModel {
     var isTrainerLinkDataStale: Bool { dataSourceService.isTrainerLinkDataStale }
 
     // BLE
-    var hrSource: HRSource { bleService.metrics.hrSource }
+    var hrSource: HRSource { dataSourceService.hrSource }
     var hrConnectionState: BLEConnectionState { bleService.hrConnectionState }
     var ftmsControlIsAvailable: Bool { bleService.ftmsControlIsAvailable }
     var ftmsControlSupportsERG: Bool { bleService.ftmsControlSupportsERG }
@@ -112,6 +116,7 @@ final class IndoorViewModel {
     private var lastDelightOverlayAt: Date?
     private var rideNudgeSession = RideNudgeSessionState()
     private var lastPersistenceError: String?
+    private var liveActivitySyncTask: Task<Void, Never>?
 
     // MARK: - Trainer metrics helpers
     func meanPower(samples: [Int]) -> Int {
@@ -305,6 +310,8 @@ final class IndoorViewModel {
         allProgress: [TrainingPlanProgress],
         plan: TrainingPlan?
     ) {
+        configureWorkoutCallbacks()
+
         let day: PlanDay?
         if let loadedCustomPlanDay {
             day = loadedCustomPlanDay
@@ -313,7 +320,11 @@ final class IndoorViewModel {
         } else {
             day = nil
         }
-        guard let day else { return }
+        guard let day else {
+            guidedSession.tearDown()
+            guidedSession.onTrainerModeChange = nil
+            return
+        }
 
         let adaptiveScale: Double
         if customWorkoutTemplateID != nil {
@@ -343,8 +354,8 @@ final class IndoorViewModel {
             self.pendingRideBriefing = text
         }
 
-        let workoutManager = self.workoutManager
         let guidedSession = self.guidedSession
+        let workoutManager = self.workoutManager
 
         guidedSession.onTrainerModeChange = { [weak workoutManager] mode, ergWatts, grade in
             guard let workoutManager else { return }
@@ -366,10 +377,6 @@ final class IndoorViewModel {
                     workoutManager.releaseTrainerControl()
                 }
             }
-        }
-
-        workoutManager.onTick = { [weak guidedSession] elapsed, power in
-            guidedSession?.tick(elapsed: elapsed, currentPower: power)
         }
     }
 
@@ -418,6 +425,14 @@ final class IndoorViewModel {
             dataSource: dataSourceService
         )
         workoutManager.configureRoute(routeService)
+        configureWorkoutCallbacks()
+
+        // Returning from Live Activity / Dynamic Island can push a fresh `DashboardView` (often without
+        // plan/template IDs). Re-running session prep would clear plan metadata and disturb guided mode.
+        if workoutManager.state.isLiveSessionActive {
+            scheduleIndoorLiveActivitySync(isRecording: workoutManager.state == .recording)
+            return
+        }
 
         let loadedCustomPlanDay = prepareWorkoutSession(
             customWorkoutTemplateID: customWorkoutTemplateID,
@@ -437,6 +452,7 @@ final class IndoorViewModel {
         if workoutManager.state == .idle {
             workoutManager.startWorkout()
         }
+        scheduleIndoorLiveActivitySync(isRecording: workoutManager.state == .recording)
     }
 
     func handleWorkoutStateChange(oldState: RecordingState, newState: RecordingState) -> String? {
@@ -464,6 +480,8 @@ final class IndoorViewModel {
     }
 
     func tearDownWorkoutSession() {
+        liveActivitySyncTask?.cancel()
+        liveActivitySyncTask = nil
         workoutManager.tearDown()
     }
 
@@ -475,8 +493,10 @@ final class IndoorViewModel {
         workoutManager.pause()
     }
 
-    func resumeWorkout() {
-        workoutManager.resume()
+    /// - Parameter fromUserControls: Pass `false` for power-driven auto-resume paths so auto-pause
+    ///   timing matches physical pedalling; use `true` (default) for Pause/Resume buttons.
+    func resumeWorkout(fromUserControls: Bool = true) {
+        workoutManager.resume(fromUserControls: fromUserControls)
     }
 
     func lapWorkout() {
@@ -488,12 +508,42 @@ final class IndoorViewModel {
     }
 
     func discardRide() -> IndoorNavigationAction {
+        liveActivitySyncTask?.cancel()
+        liveActivitySyncTask = nil
         workoutManager.discardWorkout()
         guidedSession.tearDown()
         bleService.disconnectAll(clearSaved: false)
         dismissEndConfirmation()
         resetRideFeedbackState()
         return .resetRoot
+    }
+
+    private func configureWorkoutCallbacks() {
+        let guidedSession = self.guidedSession
+        let workoutManager = self.workoutManager
+
+        workoutManager.onTick = { [weak self, weak guidedSession] elapsed, power in
+            guidedSession?.tick(elapsed: elapsed, currentPower: power)
+            guard elapsed > 0,
+                elapsed.isMultiple(of: Int(RideLiveActivityConfiguration.publishIntervalSeconds))
+            else { return }
+            self?.scheduleIndoorLiveActivitySync(isRecording: true)
+        }
+
+        workoutManager.onStateChange = { [weak self] _, newState in
+            self?.scheduleIndoorLiveActivitySync(isRecording: newState == .recording)
+        }
+    }
+
+    private func scheduleIndoorLiveActivitySync(isRecording: Bool) {
+        liveActivitySyncTask?.cancel()
+        liveActivitySyncTask = Task { [weak self] in
+            guard let self else { return }
+            await self.syncLiveActivity(
+                isRecording: isRecording,
+                prefs: RidePreferences.shared
+            )
+        }
     }
 
     func completionPlan(

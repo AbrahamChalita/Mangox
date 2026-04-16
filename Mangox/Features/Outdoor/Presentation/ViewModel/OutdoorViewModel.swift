@@ -4,6 +4,31 @@ import Foundation
 import MapKit
 import SwiftData
 
+private struct PendingOutdoorRideSave: Codable {
+    struct Lap: Codable {
+        let lapNumber: Int
+        let startTime: Date
+        let endTime: Date
+        let duration: TimeInterval
+        let distance: Double
+        let averageSpeedKmh: Double
+    }
+
+    let createdAt: Date
+    let startDate: Date
+    let duration: TimeInterval
+    let distance: Double
+    let elevationGain: Double
+    let averageSpeed: Double
+    let endDate: Date
+    let plannedRouteDistanceMeters: Double
+    let savedRouteKindRaw: String
+    let savedRouteName: String?
+    let routeDestinationSummary: String?
+    let notes: String
+    let laps: [Lap]
+}
+
 struct OutdoorRideDraft {
     let startDate: Date
     let duration: TimeInterval
@@ -61,6 +86,7 @@ enum OutdoorRideConfirmation: Hashable {
 @MainActor
 @Observable
 final class OutdoorViewModel {
+    private static let pendingOutdoorRideSaveKey = "OutdoorViewModel.pendingOutdoorRideSave.v1"
 
     // MARK: - Dependencies
     let locationService: LocationServiceProtocol
@@ -70,6 +96,7 @@ final class OutdoorViewModel {
     private let liveActivityService: LiveActivityServiceProtocol
     let workoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol
     let navigationService = NavigationService()
+    private var liveActivityLoopTask: Task<Void, Never>?
 
     // MARK: - Location computed properties (from locationService)
     var isLocationAuthorized: Bool { locationService.isAuthorized }
@@ -118,6 +145,7 @@ final class OutdoorViewModel {
     var showRouteImporter = false
     var routeImportError: String?
     var routeBuildError: String?
+    var routeOfflineFallbackNotice: String?
     var showSetupPhase = true
     var setupMode: OutdoorSetupMode = .freeRide
     var selectedDestination: MKMapItem?
@@ -321,36 +349,13 @@ final class OutdoorViewModel {
         prefs: RidePreferences,
         locationManager: LocationServiceProtocol
     ) async {
-        guard isRecording else {
-            await liveActivityService.syncRecording(
-                isRecording: false,
-                prefs: prefs,
-                navigationService: navigationService,
-                locationManager: locationManager,
-                bleService: bleService
-            )
-            return
-        }
-
         await liveActivityService.syncRecording(
-            isRecording: true,
+            isRecording: isRecording,
             prefs: prefs,
             navigationService: navigationService,
             locationManager: locationManager,
             bleService: bleService
         )
-
-        while !Task.isCancelled, locationManager.isRecording {
-            try? await Task.sleep(for: .seconds(5))
-            guard locationManager.isRecording else { break }
-            await liveActivityService.syncRecording(
-                isRecording: true,
-                prefs: prefs,
-                navigationService: navigationService,
-                locationManager: locationManager,
-                bleService: bleService
-            )
-        }
     }
 
     func endLiveActivity() async {
@@ -370,10 +375,12 @@ final class OutdoorViewModel {
 
     func handleAppear(
         locationManager: LocationServiceProtocol,
-        autoLapIntervalMeters: Double
+        autoLapIntervalMeters: Double,
+        prefs: RidePreferences
     ) {
         locationService.setup()
         locationManager.lapIntervalMeters = autoLapIntervalMeters
+        startLiveActivitySyncLoop(locationManager: locationManager, prefs: prefs)
 
         if locationManager.isRecording {
             showSetupPhase = false
@@ -393,6 +400,8 @@ final class OutdoorViewModel {
         if bleService.bluetoothState == .poweredOn {
             bleService.reconnectOrScan()
         }
+
+        retryPendingRideSaveIfNeeded()
     }
 
     func handleSetupModeChange(
@@ -426,6 +435,33 @@ final class OutdoorViewModel {
         if !locationManager.isRecording {
             locationManager.stopOutdoorLocationPreviewIfIdle()
             bleService.disconnectCSC()
+        }
+    }
+
+    private func startLiveActivitySyncLoop(
+        locationManager: LocationServiceProtocol,
+        prefs: RidePreferences
+    ) {
+        liveActivityLoopTask?.cancel()
+        liveActivityLoopTask = Task { [weak self] in
+            var lastIsRecording: Bool?
+            while !Task.isCancelled {
+                guard let self else { return }
+                let isRecording = locationManager.isRecording
+                if lastIsRecording != isRecording || isRecording {
+                    await self.syncLiveActivity(
+                        isRecording: isRecording,
+                        prefs: prefs,
+                        locationManager: locationManager
+                    )
+                }
+                lastIsRecording = isRecording
+                try? await Task.sleep(
+                    for: isRecording
+                        ? .seconds(RideLiveActivityConfiguration.publishIntervalSeconds)
+                        : .seconds(RideLiveActivityConfiguration.idlePollInterval)
+                )
+            }
         }
     }
 
@@ -467,7 +503,7 @@ final class OutdoorViewModel {
             return true
         }
         if let error = navigationService.lastError {
-            presentRouteBuildError(error)
+            presentRouteBuildErrorWithFallback(error)
         } else {
             presentRouteBuildError("No cycling route found.")
         }
@@ -490,7 +526,7 @@ final class OutdoorViewModel {
             return true
         }
         if let error = navigationService.lastError {
-            presentRouteBuildError(error)
+            presentRouteBuildErrorWithFallback(error)
         } else {
             presentRouteBuildError("No cycling route found.")
         }
@@ -504,6 +540,38 @@ final class OutdoorViewModel {
 
     func clearRideCompletionError() {
         rideCompletionError = nil
+    }
+
+    func clearRouteOfflineFallbackNotice() {
+        routeOfflineFallbackNotice = nil
+    }
+
+    private func presentRouteBuildErrorWithFallback(_ message: String) {
+        let lower = message.lowercased()
+        let looksOffline = lower.contains("offline")
+            || lower.contains("network")
+            || lower.contains("internet")
+            || lower.contains("connect")
+            || lower.contains("timed out")
+
+        if looksOffline {
+            routeOfflineFallbackNotice =
+                "Offline: route guidance is unavailable right now. Recording continues locally."
+            if routeService.hasRoute {
+                navigationService.followGPXRoute(
+                    points: routeService.points,
+                    name: routeService.routeName,
+                    segmentBreakIndices: routeService.segmentBreakIndices
+                )
+                presentRouteBuildError("Offline right now. Following your loaded GPX route instead.")
+            } else {
+                navigationService.clearNavigation()
+                presentRouteBuildError("Offline right now. Started in free ride mode; recording still continues.")
+            }
+            return
+        }
+
+        presentRouteBuildError(message)
     }
 
     func buildCompletedRideDraft(
@@ -589,8 +657,10 @@ final class OutdoorViewModel {
 
         do {
             try workoutPersistenceRepository.saveOutdoorRide(workout: workout, splits: splits)
+            clearPendingRideSave()
         } catch {
             rideCompletionError = "Could not save this ride. Please try ending again."
+            persistPendingRideSave(rideDraft)
             return nil
         }
 
@@ -601,6 +671,80 @@ final class OutdoorViewModel {
         dismissConfirmation()
         resetMapPresentationStateAfterRide()
         return workout.id
+    }
+
+    private func persistPendingRideSave(_ draft: OutdoorRideDraft) {
+        let payload = PendingOutdoorRideSave(
+            createdAt: .now,
+            startDate: draft.startDate,
+            duration: draft.duration,
+            distance: draft.distance,
+            elevationGain: draft.elevationGain,
+            averageSpeed: draft.averageSpeed,
+            endDate: draft.endDate,
+            plannedRouteDistanceMeters: draft.plannedRouteDistanceMeters,
+            savedRouteKindRaw: draft.savedRouteKindRaw,
+            savedRouteName: draft.savedRouteName,
+            routeDestinationSummary: draft.routeDestinationSummary,
+            notes: draft.notes,
+            laps: draft.lapDrafts.map {
+                PendingOutdoorRideSave.Lap(
+                    lapNumber: $0.lapNumber,
+                    startTime: $0.startTime,
+                    endTime: $0.endTime,
+                    duration: $0.duration,
+                    distance: $0.distance,
+                    averageSpeedKmh: $0.averageSpeedKmh
+                )
+            }
+        )
+        guard let data = try? JSONEncoder().encode(payload) else { return }
+        UserDefaults.standard.set(data, forKey: Self.pendingOutdoorRideSaveKey)
+    }
+
+    private func clearPendingRideSave() {
+        UserDefaults.standard.removeObject(forKey: Self.pendingOutdoorRideSaveKey)
+    }
+
+    private func retryPendingRideSaveIfNeeded() {
+        guard let data = UserDefaults.standard.data(forKey: Self.pendingOutdoorRideSaveKey),
+            let payload = try? JSONDecoder().decode(PendingOutdoorRideSave.self, from: data)
+        else { return }
+
+        let workout = Workout(startDate: payload.startDate)
+        workout.duration = payload.duration
+        workout.distance = payload.distance
+        workout.elevationGain = payload.elevationGain
+        workout.avgSpeed = payload.averageSpeed
+        workout.endDate = payload.endDate
+        workout.status = .completed
+        workout.plannedRouteDistanceMeters = payload.plannedRouteDistanceMeters
+        workout.savedRouteKindRaw = payload.savedRouteKindRaw
+        workout.savedRouteName = payload.savedRouteName
+        workout.routeDestinationSummary = payload.routeDestinationSummary
+        workout.notes = payload.notes
+
+        var splits: [LapSplit] = []
+        for lap in payload.laps {
+            let split = LapSplit(lapNumber: lap.lapNumber, startTime: lap.startTime)
+            split.endTime = lap.endTime
+            split.duration = lap.duration
+            split.distance = lap.distance
+            split.avgSpeed = lap.averageSpeedKmh
+            split.avgPower = 0
+            split.maxPower = 0
+            split.avgCadence = 0
+            split.avgHR = 0
+            split.workout = workout
+            splits.append(split)
+        }
+
+        do {
+            try workoutPersistenceRepository.saveOutdoorRide(workout: workout, splits: splits)
+            clearPendingRideSave()
+        } catch {
+            // Keep payload for next foreground retry.
+        }
     }
 
     private func routeDraftDetails(for mode: OutdoorRideModeDraft) -> (

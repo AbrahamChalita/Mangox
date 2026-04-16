@@ -70,6 +70,23 @@ enum InstagramStoryShare {
         image.pngData()
     }
 
+    /// JPEG/PNG compression is CPU-heavy; offload so ``UIPasteboard`` + Instagram handoff stay smooth on the main actor.
+    static func encodeBackgroundImageDataAsync(_ image: UIImage) async -> Data? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: Self.encodeBackgroundImageData(image))
+            }
+        }
+    }
+
+    static func encodeStickerImageDataAsync(_ image: UIImage) async -> Data? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: Self.encodeStickerImageData(image))
+            }
+        }
+    }
+
     // MARK: - Render
 
     /// Renders a **full-bleed** 1080×1920 story bitmap (same as ``/storySize``) — no letterboxing, no corner logo.
@@ -81,9 +98,11 @@ enum InstagramStoryShare {
         totalElevationGain: Double,
         personalRecordNames: [String] = [],
         options: InstagramStoryCardOptions? = nil,
+        sessionKind: InstagramStoryCardSessionKind? = nil,
         whoopStrain: Double? = nil,
         whoopRecovery: Double? = nil,
-        aiTitle: String? = nil
+        aiTitle: String? = nil,
+        backgroundImage: UIImage? = nil
     ) -> UIImage {
         InstagramStoryCardRenderer.render(
             workout: workout,
@@ -92,9 +111,11 @@ enum InstagramStoryShare {
             totalElevationGain: totalElevationGain,
             personalRecordNames: personalRecordNames,
             options: options,
+            sessionKind: sessionKind,
             whoopStrain: whoopStrain,
             whoopRecovery: whoopRecovery,
-            aiTitle: aiTitle
+            aiTitle: aiTitle,
+            backgroundImage: backgroundImage
         )
     }
 

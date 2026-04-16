@@ -164,6 +164,10 @@ final class WorkoutViewModel {
     var isStravaConnected: Bool { stravaService.isConnected }
     var isStravaConfigured: Bool { stravaService.isConfigured }
     var stravaAthleteDisplayName: String? { stravaService.athleteDisplayName }
+    /// Local preferred name, then Strava — for summaries and on-device copy (not Strava upload UI).
+    var riderPersonalizationDisplayName: String? {
+        RiderIdentityDisplay.personalizationName(stravaDisplayName: stravaService.athleteDisplayName)
+    }
     var stravaLastError: String? { stravaService.lastError }
 
     var hasRoute: Bool { routeService.hasRoute }

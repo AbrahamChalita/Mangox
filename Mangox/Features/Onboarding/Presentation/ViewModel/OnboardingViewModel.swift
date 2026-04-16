@@ -25,6 +25,7 @@ final class OnboardingViewModel {
     var onboardingWeightKg: Double = RidePreferences.shared.riderWeightKg
     var onboardingBirthYear: Int = RidePreferences.shared.riderBirthYear
         ?? (Calendar.current.component(.year, from: .now) - 30)
+    var onboardingRiderDisplayName: String = RidePreferences.shared.riderDisplayName
 
     /// BLE trigger retained so CBCentralManager stays alive during permission polling.
     var bleTrigger: CBCentralManager?
@@ -155,6 +156,17 @@ final class OnboardingViewModel {
         }
     }
 
+    /// When opening the rider profile step, pre-fill the name from Strava if the field is still empty.
+    func prepareRiderProfileStep() {
+        let trimmed = onboardingRiderDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty else { return }
+        if stravaConnected,
+           let n = stravaService.athleteDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !n.isEmpty {
+            onboardingRiderDisplayName = String(n.prefix(50))
+        }
+    }
+
     /// Check OS notification permission.
     private static func notificationPermissionGranted() async -> Bool {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
@@ -204,6 +216,7 @@ final class OnboardingViewModel {
             let prefs = RidePreferences.shared
             prefs.riderWeightKg = onboardingWeightKg
             prefs.riderBirthYear = onboardingBirthYear
+            prefs.riderDisplayName = onboardingRiderDisplayName
             advance()
         case 7:
             HapticManager.shared.onboardingCelebration()

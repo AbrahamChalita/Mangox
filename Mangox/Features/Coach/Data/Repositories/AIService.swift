@@ -112,7 +112,7 @@ struct UserContext: Encodable {
     let adaptiveErgPercent: Int
     let ftpHistory: String?
     let lastRide: LastRideContext?
-    /// Optional goal event / phase from in-app settings.
+    /// Reserved; always `nil` (goal/season UI removed).
     let seasonGoalSummary: String?
     /// Short hint about optional vs mandatory plan days when the active week includes flexible sessions.
     let planKeyDaySemanticsHint: String?
@@ -1732,7 +1732,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
             adaptiveErgPercent: adaptiveErgPercent,
             ftpHistory: ftpHistory.isEmpty ? nil : ftpHistory,
             lastRide: lastRideContext,
-            seasonGoalSummary: MangoxTrainingGoals.summaryLineForCoach,
+            seasonGoalSummary: nil,
             planKeyDaySemanticsHint: planSemanticsHint,
             recentRideDigest: recentRideDigest.isEmpty ? nil : recentRideDigest,
             riderWeightKg: riderWeight,

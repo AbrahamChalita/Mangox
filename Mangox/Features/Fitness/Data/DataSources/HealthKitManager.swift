@@ -432,6 +432,7 @@ final class HealthKitManager: HealthKitServiceProtocol {
         var metadata: [String: Any] = [
             HKMetadataKeyExternalUUID: externalID,
             HKMetadataKeySyncIdentifier: "mangox-\(externalID)",
+            HKMetadataKeySyncVersion: NSNumber(value: 1),
         ]
         if isIndoor {
             metadata[HKMetadataKeyIndoorWorkout] = true

@@ -17,6 +17,7 @@ protocol LocationServiceProtocol: AnyObject {
     func restoreRecordingIfNeeded()
     func persistRecordingCheckpointIfNeeded()
     func persistRecordingCheckpointNow()
+    func consumeDidRestoreRecordingFlag() -> Bool
 
     // MARK: - Live GPS Metrics
 
@@ -58,6 +59,7 @@ protocol LocationServiceProtocol: AnyObject {
 
     // MARK: - Preview Mode
 
+    var mapFollowActive: Bool { get set }
     func startOutdoorLocationPreview()
     func stopOutdoorLocationPreviewIfIdle()
 }
@@ -68,4 +70,5 @@ extension LocationServiceProtocol {
     func restoreRecordingIfNeeded() {}
     func persistRecordingCheckpointIfNeeded() {}
     func persistRecordingCheckpointNow() {}
+    func consumeDidRestoreRecordingFlag() -> Bool { false }
 }

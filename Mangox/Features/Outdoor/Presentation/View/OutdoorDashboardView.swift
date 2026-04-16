@@ -38,6 +38,182 @@ struct OutdoorDashboardView: View {
     @State private var showAllSensors = false
     /// Avoid disabling follow mode for tiny/implicit camera changes.
     @State private var lastMapCameraForFollowGuard: MapCamera?
+    @State private var showFollowResumeChip = false
+    @State private var restoredRideToastVisible = false
+
+    @State private var renderedBreadcrumbChunks: [RenderedBreadcrumbChunk] = []
+    @State private var renderedLiveTail: [CLLocationCoordinate2D] = []
+    @State private var renderedCompletedRoutePolylines: [[CLLocationCoordinate2D]] = []
+    @State private var renderedRemainingRoutePolylines: [[CLLocationCoordinate2D]] = []
+    @State private var renderedLookaheadPolylines: [[CLLocationCoordinate2D]] = []
+
+    private struct RenderedBreadcrumbChunk: Identifiable {
+        let id: UUID
+        let coords: [CLLocationCoordinate2D]
+        let avgSpeed: Double
+    }
+
+    private var mapRenderBudgetBucket: Int {
+        let cameraDistance = mapCameraService.mapCameraPosition.camera?.distance ?? 1_200
+        switch cameraDistance {
+        case ..<450: return 0
+        case ..<1_000: return 1
+        case ..<2_500: return 2
+        default: return 3
+        }
+    }
+
+    private var routePolylinePointBudget: Int {
+        switch mapRenderBudgetBucket {
+        case 0:
+            return 320
+        case 1:
+            return 220
+        case 2:
+            return 150
+        default:
+            return 90
+        }
+    }
+
+    private var breadcrumbPointBudget: Int {
+        switch mapRenderBudgetBucket {
+        case 0:
+            return 220
+        case 1:
+            return 160
+        case 2:
+            return 110
+        default:
+            return 80
+        }
+    }
+
+    private var breadcrumbRenderFingerprint: Int {
+        var hasher = Hasher()
+        hasher.combine(ls.frozenBreadcrumbChunks.count)
+        if let lastChunk = ls.frozenBreadcrumbChunks.last {
+            hasher.combine(lastChunk.coords.count)
+            hasher.combine(lastChunk.avgSpeed.bitPattern)
+            if let first = lastChunk.coords.first {
+                hasher.combine(first.latitude.bitPattern)
+                hasher.combine(first.longitude.bitPattern)
+            }
+            if let last = lastChunk.coords.last {
+                hasher.combine(last.latitude.bitPattern)
+                hasher.combine(last.longitude.bitPattern)
+            }
+        }
+        hasher.combine(ls.liveBreadcrumbTail.count)
+        if let first = ls.liveBreadcrumbTail.first {
+            hasher.combine(first.latitude.bitPattern)
+            hasher.combine(first.longitude.bitPattern)
+        }
+        if let last = ls.liveBreadcrumbTail.last {
+            hasher.combine(last.latitude.bitPattern)
+            hasher.combine(last.longitude.bitPattern)
+        }
+        return hasher.finalize()
+    }
+
+    private var routeRenderFingerprint: Int {
+        var hasher = Hasher()
+        combinePolylineFingerprint(ns.completedRoutePolylines, into: &hasher)
+        combinePolylineFingerprint(ns.remainingRoutePolylines, into: &hasher)
+        combinePolylineFingerprint(ns.lookaheadPolylines, into: &hasher)
+        return hasher.finalize()
+    }
+
+    private func combinePolylineFingerprint(
+        _ polylines: [[CLLocationCoordinate2D]],
+        into hasher: inout Hasher
+    ) {
+        hasher.combine(polylines.count)
+        for polyline in polylines {
+            hasher.combine(polyline.count)
+            if let first = polyline.first {
+                hasher.combine(first.latitude.bitPattern)
+                hasher.combine(first.longitude.bitPattern)
+            }
+            if let last = polyline.last {
+                hasher.combine(last.latitude.bitPattern)
+                hasher.combine(last.longitude.bitPattern)
+            }
+        }
+    }
+
+    private var shouldUseMapFollowUpdates: Bool {
+        guard scenePhase == .active else { return false }
+        guard outdoorMapReady else { return false }
+        guard !viewModel.showSetupPhase, !viewModel.showDestinationSearch else { return false }
+        if hSizeClass == .compact {
+            return viewModel.showMapInCompact
+        }
+        return true
+    }
+
+    private func updateMapFollowActivation() {
+        ls.mapFollowActive = shouldUseMapFollowUpdates
+    }
+
+    private func refreshMapDerivedOverlays() {
+        refreshBreadcrumbRenderCache()
+        refreshRouteRenderCache()
+    }
+
+    private func refreshBreadcrumbRenderCache() {
+        guard shouldUseMapFollowUpdates else {
+            renderedBreadcrumbChunks = []
+            renderedLiveTail = []
+            return
+        }
+        renderedBreadcrumbChunks = ls.frozenBreadcrumbChunks.compactMap { chunk in
+            let sanitized = chunk.coords.sanitizedForMapPolyline(maxPoints: breadcrumbPointBudget)
+            guard sanitized.count > 1 else { return nil }
+            return RenderedBreadcrumbChunk(id: chunk.id, coords: sanitized, avgSpeed: chunk.avgSpeed)
+        }
+        renderedLiveTail = ls.liveBreadcrumbTail.sanitizedForMapPolyline(
+            maxPoints: max(160, breadcrumbPointBudget)
+        )
+    }
+
+    private func refreshRouteRenderCache() {
+        guard shouldUseMapFollowUpdates else {
+            renderedCompletedRoutePolylines = []
+            renderedRemainingRoutePolylines = []
+            renderedLookaheadPolylines = []
+            return
+        }
+        renderedCompletedRoutePolylines = ns.completedRoutePolylines.map {
+            $0.sanitizedForMapPolyline(maxPoints: routePolylinePointBudget)
+        }
+        renderedRemainingRoutePolylines = ns.remainingRoutePolylines.map {
+            $0.sanitizedForMapPolyline(maxPoints: routePolylinePointBudget)
+        }
+        renderedLookaheadPolylines = ns.lookaheadPolylines.map {
+            $0.sanitizedForMapPolyline(maxPoints: max(90, routePolylinePointBudget - 40))
+        }
+    }
+
+    private var routeLineWidth: CGFloat {
+        let cameraDistance = mapCameraService.mapCameraPosition.camera?.distance ?? 1_200
+        switch cameraDistance {
+        case ..<450: return 6
+        case ..<1_000: return 5
+        case ..<2_500: return 4
+        default: return 3
+        }
+    }
+
+    private var breadcrumbLineWidth: CGFloat {
+        let cameraDistance = mapCameraService.mapCameraPosition.camera?.distance ?? 1_200
+        switch cameraDistance {
+        case ..<450: return 5
+        case ..<1_000: return 4
+        case ..<2_500: return 3.5
+        default: return 3
+        }
+    }
 
     @Bindable private var prefs = RidePreferences.shared
 
@@ -98,6 +274,12 @@ struct OutdoorDashboardView: View {
     // MARK: - Body
 
     var body: some View {
+        let root = AnyView(outdoorDashboardRootZStack)
+        let withObservers = outdoorDashboardAttachObservers(root)
+        return outdoorDashboardAttachChrome(withObservers)
+    }
+
+    private var outdoorDashboardRootZStack: some View {
         ZStack {
             AppColor.bg.ignoresSafeArea()
 
@@ -159,174 +341,275 @@ struct OutdoorDashboardView: View {
                 .transition(.move(edge: .trailing))
             }
         }
-        .animation(MangoxMotion.standard, value: viewModel.showDestinationSearch)
-        .onAppear {
-            viewModel.handleAppear(
-                locationManager: ls,
-                autoLapIntervalMeters: prefs.outdoorAutoLapIntervalMeters
-            )
-        }
-        .task {
-            // Defer the hidden Map until the navigation push eases (~280ms). Slightly earlier than
-            // before: MapKit tile init still avoids the heaviest part of the transition.
-            try? await Task.sleep(for: .milliseconds(280))
-            mapKitPreWarmActive = true
-            searchCompleter.warmUp()
-        }
-        .onChange(of: viewModel.setupMode) { _, mode in
-            viewModel.handleSetupModeChange(
-                mode: mode,
-                showSetupPhase: viewModel.showSetupPhase,
-                locationManager: ls
-            )
-        }
-        .onChange(of: viewModel.showSetupPhase) { _, committed in
-            viewModel.handleSetupPhaseChange(
-                committed: committed,
-                locationManager: ls
-            )
-        }
-        .onChange(of: viewModel.showDestinationSearch) { _, open in
-            viewModel.handleDestinationSearchChange(
-                isOpen: open,
-                locationManager: ls
-            )
-        }
-        .onDisappear {
-            ls.persistRecordingCheckpointIfNeeded()
-            viewModel.handleDisappear(locationManager: ls)
-        }
-        .onChange(of: scenePhase) { _, phase in
-            guard phase == .background else { return }
-            ls.persistRecordingCheckpointNow()
-        }
-        .task(id: ls.isAuthorized) {
-            outdoorLoadingBypassed = false
-            try? await Task.sleep(for: .seconds(12))
-            outdoorLoadingBypassed = true
-        }
-        .task(id: ls.isRecording) {
-            await viewModel.syncLiveActivity(
-                isRecording: ls.isRecording,
-                prefs: prefs,
-                locationManager: ls
-            )
-        }
-        .onChange(of: ls.currentLocation) {
-            guard !viewModel.showSetupPhase else { return }
-            if let loc = ls.currentLocation {
-                ns.updatePosition(loc)
-            }
-        }
-        .onChange(of: ls.newLapJustCompleted) {
-            guard ls.newLapJustCompleted else { return }
-            ls.newLapJustCompleted = false
-            withAnimation(MangoxMotion.smooth) {
-                viewModel.presentLapToast(for: ls.completedLaps.last)
-            }
-            Task {
-                try? await Task.sleep(for: .seconds(3))
-                withAnimation(MangoxMotion.smooth) { viewModel.dismissLapToast() }
-            }
-        }
-        .onChange(of: ls.authorizationStatus) {
-            viewModel.handleAuthorizationChange(
-                status: ls.authorizationStatus,
-                locationManager: ls
-            )
-        }
-        .sheet(
-            isPresented: binding(\.showRouteSheet),
-            onDismiss: {
-                viewModel.dismissRouteSheet()
-            }
-        ) {
-            routePlanningSheet
-        }
-        .fileImporter(
-            isPresented: binding(\.showRouteImporter),
-            allowedContentTypes: [UTType(filenameExtension: "gpx") ?? .xml],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                Task {
-                    if let error = await viewModel.importRoute(
-                        from: url
-                    ) {
-                        await MainActor.run {
-                            viewModel.presentRouteImportError(error)
-                        }
-                    } else {
-                        await MainActor.run {
-                            withAnimation(MangoxMotion.standard) {}
-                        }
-                    }
-                }
-            case .failure(let error):
-                viewModel.presentRouteImportError(error.localizedDescription)
-            }
-        }
-        .overlay {
-            if let error = viewModel.rideCompletionError {
-                MangoxConfirmOverlay(
-                    title: "Could not save ride",
-                    message: error,
-                    onDismiss: { viewModel.clearRideCompletionError() }
-                ) {
-                    Button {
-                        viewModel.clearRideCompletionError()
-                    } label: {
-                        Text("OK")
-                            .mangoxButtonChrome(.hero)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+    }
 
-            if let error = viewModel.routeImportError {
-                MangoxConfirmOverlay(
-                    title: "Route Import Failed",
-                    message: error,
-                    onDismiss: { viewModel.clearRouteImportError() }
-                ) {
-                    Button {
-                        viewModel.clearRouteImportError()
-                    } label: {
-                        Text("OK")
-                            .mangoxButtonChrome(.hero)
-                    }
-                    .buttonStyle(.plain)
+    private func outdoorDashboardAttachObservers(_ root: AnyView) -> AnyView {
+        AnyView(
+            root
+                .animation(MangoxMotion.standard, value: viewModel.showDestinationSearch)
+                .onAppear(perform: handleViewAppear)
+                .task { await runOutdoorMapPrewarmTask() }
+                .onChange(of: viewModel.setupMode) { _, mode in
+                    handleSetupModeChange(mode)
                 }
-            }
+                .onChange(of: viewModel.showSetupPhase) { _, committed in
+                    handleSetupPhaseChange(committed)
+                }
+                .onChange(of: viewModel.showDestinationSearch) { _, isOpen in
+                    handleDestinationSearchChange(isOpen)
+                }
+                .onDisappear(perform: handleViewDisappear)
+                .onChange(of: scenePhase) { _, phase in
+                    handleScenePhaseChange(phase)
+                }
+                .onChange(of: mapCameraService.isFollowingUser) { _, isFollowing in
+                    handleFollowStateChange(isFollowing)
+                }
+                .onChange(of: viewModel.showMapInCompact) { _, _ in updateMapFollowActivation() }
+                .onChange(of: hSizeClass) { _, _ in updateMapFollowActivation() }
+                .onChange(of: outdoorMapReady) { _, _ in updateMapFollowActivation() }
+                .onChange(of: mapRenderBudgetBucket) { _, _ in refreshMapDerivedOverlays() }
+                .onChange(of: breadcrumbRenderFingerprint) { _, _ in refreshBreadcrumbRenderCache() }
+                .onChange(of: routeRenderFingerprint) { _, _ in refreshRouteRenderCache() }
+                .task(id: ls.isAuthorized) {
+                    await runOutdoorLoadingBypassTask()
+                }
+                .onChange(of: ls.currentLocation) { _, location in
+                    handleCurrentLocationChange(location)
+                }
+                .onChange(of: ls.newLapJustCompleted) { _, didCompleteLap in
+                    handleLapCompletionChange(didCompleteLap)
+                }
+                .onChange(of: ls.authorizationStatus) { _, status in
+                    handleAuthorizationStatusChange(status)
+                }
+        )
+    }
 
-            if let error = viewModel.routeBuildError {
-                MangoxConfirmOverlay(
-                    title: "Couldn’t build route",
-                    message: error,
-                    onDismiss: { viewModel.clearRouteBuildError() }
-                ) {
-                    Button {
-                        viewModel.clearRouteBuildError()
-                    } label: {
-                        Text("OK")
-                            .mangoxButtonChrome(.hero)
-                    }
-                    .buttonStyle(.plain)
+    private func outdoorDashboardAttachChrome(_ root: AnyView) -> some View {
+        root
+            .sheet(
+                isPresented: binding(\.showRouteSheet),
+                onDismiss: {
+                    viewModel.dismissRouteSheet()
                 }
+            ) {
+                routePlanningSheet
+            }
+            .fileImporter(
+                isPresented: binding(\.showRouteImporter),
+                allowedContentTypes: [UTType(filenameExtension: "gpx") ?? .xml],
+                allowsMultipleSelection: false
+            ) { result in
+                handleRouteImportResult(result)
+            }
+            .overlay {
+                outdoorDashboardBlockingOverlays
+            }
+            // Hide the NavigationStack bar — we use a fully custom chrome.
+            .toolbar(.hidden, for: .navigationBar)
+            .onChange(of: prefs.outdoorAutoLapIntervalMeters) {
+                ls.lapIntervalMeters = prefs.outdoorAutoLapIntervalMeters
+            }
+            .environment(viewModel)
+    }
+
+    @ViewBuilder
+    private var outdoorDashboardBlockingOverlays: some View {
+        if let notice = viewModel.routeOfflineFallbackNotice {
+            MangoxConfirmOverlay(
+                title: "Offline navigation",
+                message: notice,
+                onDismiss: { viewModel.clearRouteOfflineFallbackNotice() }
+            ) {
+                Button {
+                    viewModel.clearRouteOfflineFallbackNotice()
+                } label: {
+                    Text("Got it")
+                        .mangoxButtonChrome(.hero)
+                }
+                .buttonStyle(.plain)
             }
         }
-        // Hide the NavigationStack bar — we use a fully custom chrome.
-        .toolbar(.hidden, for: .navigationBar)
-        .onChange(of: prefs.outdoorAutoLapIntervalMeters) {
-            ls.lapIntervalMeters = prefs.outdoorAutoLapIntervalMeters
+
+        if let error = viewModel.rideCompletionError {
+            MangoxConfirmOverlay(
+                title: "Could not save ride",
+                message: error,
+                onDismiss: { viewModel.clearRideCompletionError() }
+            ) {
+                Button {
+                    viewModel.clearRideCompletionError()
+                } label: {
+                    Text("OK")
+                        .mangoxButtonChrome(.hero)
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .environment(viewModel)
+
+        if let error = viewModel.routeImportError {
+            MangoxConfirmOverlay(
+                title: "Route Import Failed",
+                message: error,
+                onDismiss: { viewModel.clearRouteImportError() }
+            ) {
+                Button {
+                    viewModel.clearRouteImportError()
+                } label: {
+                    Text("OK")
+                        .mangoxButtonChrome(.hero)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+
+        if let error = viewModel.routeBuildError {
+            MangoxConfirmOverlay(
+                title: "Couldn’t build route",
+                message: error,
+                onDismiss: { viewModel.clearRouteBuildError() }
+            ) {
+                Button {
+                    viewModel.clearRouteBuildError()
+                } label: {
+                    Text("OK")
+                        .mangoxButtonChrome(.hero)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     private var hasActiveRoute: Bool {
         ns.routePolyline.count > 1
+    }
+
+    private func handleCurrentLocationChange(_ location: CLLocation?) {
+        guard !viewModel.showSetupPhase else { return }
+        guard let location else { return }
+        ns.updatePosition(location)
+    }
+
+    private func scheduleLapToastDismiss() {
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(MangoxMotion.smooth) {
+                    viewModel.dismissLapToast()
+                }
+            }
+        }
+    }
+
+    private func handleLapCompletionChange(_ didCompleteLap: Bool) {
+        guard didCompleteLap else { return }
+        ls.newLapJustCompleted = false
+        withAnimation(MangoxMotion.smooth) {
+            viewModel.presentLapToast(for: ls.completedLaps.last)
+        }
+        scheduleLapToastDismiss()
+    }
+
+    private func handleRouteImportResult(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            Task {
+                if let error = await viewModel.importRoute(from: url) {
+                    await MainActor.run {
+                        viewModel.presentRouteImportError(error)
+                    }
+                } else {
+                    await MainActor.run {
+                        withAnimation(MangoxMotion.standard) {}
+                    }
+                }
+            }
+        case .failure(let error):
+            viewModel.presentRouteImportError(error.localizedDescription)
+        }
+    }
+
+    // MARK: - Lifecycle (body wiring)
+
+    private func handleViewAppear() {
+        viewModel.handleAppear(
+            locationManager: ls,
+            autoLapIntervalMeters: prefs.outdoorAutoLapIntervalMeters,
+            prefs: prefs
+        )
+        updateMapFollowActivation()
+        refreshMapDerivedOverlays()
+    }
+
+    private func runOutdoorMapPrewarmTask() async {
+        try? await Task.sleep(for: .milliseconds(280))
+        guard !Task.isCancelled else { return }
+        mapKitPreWarmActive = true
+    }
+
+    private func handleSetupModeChange(_ mode: OutdoorSetupMode) {
+        viewModel.handleSetupModeChange(
+            mode: mode,
+            showSetupPhase: viewModel.showSetupPhase,
+            locationManager: ls
+        )
+    }
+
+    private func handleSetupPhaseChange(_ committed: Bool) {
+        viewModel.handleSetupPhaseChange(committed: committed, locationManager: ls)
+        updateMapFollowActivation()
+        refreshMapDerivedOverlays()
+    }
+
+    private func handleDestinationSearchChange(_ isOpen: Bool) {
+        viewModel.handleDestinationSearchChange(isOpen: isOpen, locationManager: ls)
+    }
+
+    private func handleViewDisappear() {
+        viewModel.handleDisappear(locationManager: ls)
+    }
+
+    private func handleScenePhaseChange(_ phase: ScenePhase) {
+        if phase != .active {
+            showFollowResumeChip = false
+        }
+        updateMapFollowActivation()
+        refreshMapDerivedOverlays()
+    }
+
+    private func handleFollowStateChange(_ isFollowing: Bool) {
+        withAnimation(MangoxMotion.standard) {
+            if isFollowing {
+                showFollowResumeChip = false
+            } else {
+                showFollowResumeChip = ls.currentLocation != nil
+            }
+        }
+    }
+
+    private func runOutdoorLoadingBypassTask() async {
+        guard ls.isAuthorized else {
+            outdoorLoadingBypassed = false
+            return
+        }
+        outdoorLoadingBypassed = false
+        for _ in 0..<30 {
+            if Task.isCancelled { return }
+            if hasGoodOutdoorFix { return }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        if !hasGoodOutdoorFix {
+            outdoorLoadingBypassed = true
+        }
+    }
+
+    private func handleAuthorizationStatusChange(_ status: CLAuthorizationStatus) {
+        viewModel.handleAuthorizationChange(status: status, locationManager: ls)
+        updateMapFollowActivation()
+        refreshMapDerivedOverlays()
     }
 
     /// Mapless iPhone layout: surface navigation under speed when a route or TBT is active.
@@ -369,6 +652,11 @@ struct OutdoorDashboardView: View {
                         )
                     } else {
                         Text("No route loaded")
+                    }
+
+                    if viewModel.routeOfflineFallbackNotice != nil {
+                        Text("Offline")
+                            .foregroundStyle(AppColor.orange)
                     }
 
                     if ns.mode == .turnByTurn {
@@ -449,6 +737,10 @@ struct OutdoorDashboardView: View {
                             Text(
                                 "\(AppFormat.distanceString(ns.routeDistance, imperial: isImperial)) \(AppFormat.distanceUnit(imperial: isImperial))"
                             )
+                        }
+                        if viewModel.routeOfflineFallbackNotice != nil {
+                            Text("Offline")
+                                .foregroundStyle(AppColor.orange)
                         }
                         Text("Turn-by-turn")
                     }
@@ -1920,45 +2212,41 @@ struct OutdoorDashboardView: View {
             )
         ) {
             // Frozen breadcrumb chunks — colour-coded by average speed
-            ForEach(ls.frozenBreadcrumbChunks) { chunk in
-                let crumbs = chunk.coords.sanitizedForMapPolyline(maxPoints: 120)
-                if crumbs.count > 1 {
-                    MapPolyline(coordinates: crumbs)
-                        .stroke(speedColor(chunk.avgSpeed), lineWidth: 4)
-                }
+            ForEach(renderedBreadcrumbChunks) { chunk in
+                MapPolyline(coordinates: chunk.coords)
+                    .stroke(speedColor(chunk.avgSpeed), lineWidth: breadcrumbLineWidth)
             }
 
             // Live tail — always mango coloured
-            let tail = ls.liveBreadcrumbTail.sanitizedForMapPolyline(maxPoints: 240)
-            if tail.count > 1 {
-                MapPolyline(coordinates: tail)
-                    .stroke(AppColor.mango, lineWidth: 4)
+            if renderedLiveTail.count > 1 {
+                MapPolyline(coordinates: renderedLiveTail)
+                    .stroke(AppColor.mango, lineWidth: breadcrumbLineWidth)
             }
 
             // Route overlay — traversed (grey) vs remaining (yellow)
-            ForEach(ns.completedRoutePolylines.indices, id: \.self) { i in
-                let done = ns.completedRoutePolylines[i].sanitizedForMapPolyline(maxPoints: 180)
+            ForEach(renderedCompletedRoutePolylines.indices, id: \.self) { i in
+                let done = renderedCompletedRoutePolylines[i]
                 if done.count > 1 {
                     MapPolyline(coordinates: done)
-                        .stroke(Color.white.opacity(0.35), lineWidth: 5)
+                        .stroke(Color.white.opacity(0.35), lineWidth: routeLineWidth)
                 }
             }
-            ForEach(ns.remainingRoutePolylines.indices, id: \.self) { i in
-                let left = ns.remainingRoutePolylines[i].sanitizedForMapPolyline(maxPoints: 180)
+            ForEach(renderedRemainingRoutePolylines.indices, id: \.self) { i in
+                let left = renderedRemainingRoutePolylines[i]
                 if left.count > 1 {
                     MapPolyline(coordinates: left)
-                        .stroke(AppColor.yellow, lineWidth: 5)
+                        .stroke(AppColor.yellow, lineWidth: routeLineWidth)
                 }
             }
 
             // Lookahead ghost — dashed white, 300m ahead on remaining route
-            ForEach(ns.lookaheadPolylines.indices, id: \.self) { i in
-                let lookahead = ns.lookaheadPolylines[i].sanitizedForMapPolyline(maxPoints: 120)
+            ForEach(renderedLookaheadPolylines.indices, id: \.self) { i in
+                let lookahead = renderedLookaheadPolylines[i]
                 if lookahead.count > 1 {
                     MapPolyline(coordinates: lookahead)
                         .stroke(
                             Color.white.opacity(0.45),
-                            style: StrokeStyle(lineWidth: 3, dash: [8, 6])
+                            style: StrokeStyle(lineWidth: max(2, routeLineWidth - 1), dash: [8, 6])
                         )
                 }
             }
@@ -1991,11 +2279,24 @@ struct OutdoorDashboardView: View {
                     ? mapCameraService.smoothedRiderCoordinate
                     : loc.coordinate
                 Annotation("", coordinate: riderCoord) {
-                    Circle()
-                        .fill(AppColor.mango)
-                        .frame(width: 18, height: 18)
-                        .overlay(Circle().strokeBorder(.white, lineWidth: 3))
-                        .shadow(color: .black.opacity(0.35), radius: 3)
+                    ZStack {
+                        if ls.horizontalAccuracy >= 0 {
+                            let ring = CGFloat(min(max(ls.horizontalAccuracy, 5), 60))
+                            Circle()
+                                .fill(AppColor.mango.opacity(0.12))
+                                .frame(width: 18 + ring, height: 18 + ring)
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(AppColor.mango.opacity(0.2), lineWidth: 1)
+                                )
+                        }
+
+                        Circle()
+                            .fill(AppColor.mango)
+                            .frame(width: 18, height: 18)
+                            .overlay(Circle().strokeBorder(.white, lineWidth: 3))
+                            .shadow(color: .black.opacity(0.35), radius: 3)
+                    }
                 }
             }
 
@@ -2037,6 +2338,48 @@ struct OutdoorDashboardView: View {
         // no overlapping card. statsCardHeight is measured live from the card.
         .safeAreaPadding(.bottom, hSizeClass == .compact ? statsCardHeight : 0)
         .overlay {
+            if restoredRideToastVisible {
+                VStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.arrow.trianglehead.counterclockwise")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AppColor.mango)
+                        Text("Ride restored from checkpoint")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .mangoxSurface(.mapOverlay, shape: .capsule)
+                    .padding(.top, 22)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            if showFollowResumeChip && !mapCameraService.isFollowingUser && ls.currentLocation != nil {
+                VStack {
+                    Spacer()
+                    Button {
+                        mapCameraService.centerMapOnUser()
+                    } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: "location.viewfinder")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Resume Follow")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .mangoxSurface(.mapOverlay, shape: .capsule)
+                    }
+                    .buttonStyle(MangoxPressStyle())
+                    .padding(.bottom, hSizeClass == .compact ? statsCardHeight + 14 : 24)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if ns.isCalculating {
                 ZStack {
                     Color.black.opacity(0.35).ignoresSafeArea()
@@ -2392,6 +2735,11 @@ struct OutdoorDashboardView: View {
             applyCompactNavChrome(style: chromeStyle, shape: .roundedRect) {
                 VStack(alignment: .leading, spacing: 6) {
                     navCardGpsLine(surface: surface)
+                    if viewModel.routeOfflineFallbackNotice != nil {
+                        Text("Offline: guidance paused, recording active")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(AppColor.orange.opacity(0.95))
+                    }
                     HStack(spacing: 10) {
                         Image(systemName: turn.symbol)
                             .font(.system(size: 22, weight: .bold))
@@ -2428,6 +2776,11 @@ struct OutdoorDashboardView: View {
             applyCompactNavChrome(style: chromeStyle, shape: .roundedRect) {
                 VStack(alignment: .leading, spacing: 6) {
                     navCardGpsLine(surface: surface)
+                    if viewModel.routeOfflineFallbackNotice != nil {
+                        Text("Offline: guidance paused, recording active")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(AppColor.orange.opacity(0.95))
+                    }
                     HStack(spacing: 10) {
                         Image(systemName: hint.symbol)
                             .font(.system(size: 20, weight: .bold))

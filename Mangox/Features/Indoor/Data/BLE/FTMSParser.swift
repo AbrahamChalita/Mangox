@@ -160,6 +160,8 @@ enum FTMSParser {
 
         // Remaining bits (metabolic equivalent, elapsed time, remaining time) skipped
 
+        metrics.includesTotalDistanceInPacket = distancePresent
+
         return IndoorBikeDataPacket(
             metrics: metrics,
             hasSpeed: speedPresent,

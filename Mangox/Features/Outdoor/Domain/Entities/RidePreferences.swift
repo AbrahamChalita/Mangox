@@ -223,6 +223,7 @@ final class RidePreferences {
         static let gpxTrimEndM = "ride_pref_gpx_privacy_trim_end_m_v1"
         static let bikeOutdoorName = "ride_pref_bike_outdoor_name_v1"
         static let bikeIndoorName = "ride_pref_bike_indoor_name_v1"
+        static let riderDisplayName = "ride_pref_rider_display_name_v1"
     }
 
     // MARK: - Lap Visibility
@@ -415,6 +416,18 @@ final class RidePreferences {
     /// Display label for indoor / trainer setup.
     var primaryIndoorBikeName: String {
         didSet { UserDefaults.standard.set(primaryIndoorBikeName, forKey: Key.bikeIndoorName) }
+    }
+
+    /// Preferred name shown in the app when not using Strava (or to override the header label). Max 50 characters.
+    var riderDisplayName: String {
+        didSet {
+            let capped = String(riderDisplayName.prefix(50))
+            if capped != riderDisplayName {
+                riderDisplayName = capped
+                return
+            }
+            UserDefaults.standard.set(riderDisplayName, forKey: Key.riderDisplayName)
+        }
     }
 
     /// Sensible physical range for road tire circumference (meters).
@@ -610,6 +623,7 @@ final class RidePreferences {
         }
         self.primaryOutdoorBikeName = UserDefaults.standard.string(forKey: Key.bikeOutdoorName) ?? ""
         self.primaryIndoorBikeName = UserDefaults.standard.string(forKey: Key.bikeIndoorName) ?? ""
+        self.riderDisplayName = UserDefaults.standard.string(forKey: Key.riderDisplayName) ?? ""
 
         // Birth year — nil when not set (user hasn't entered it yet)
         if UserDefaults.standard.object(forKey: Key.riderBirthYear) != nil {

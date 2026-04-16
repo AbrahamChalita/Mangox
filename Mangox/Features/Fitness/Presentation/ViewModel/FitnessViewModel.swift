@@ -49,24 +49,30 @@ final class FitnessViewModel {
 
     // MARK: - PMC rebuild
 
-    func schedulePMCRebuild(with workouts: [WorkoutMetricsSnapshot]) {
-        if workouts.isEmpty || pmcData.isEmpty {
+    func schedulePMCRebuild(
+        pmcWorkouts: [WorkoutMetricsSnapshot],
+        powerCurveWorkouts: [WorkoutMetricsSnapshot]
+    ) {
+        if pmcWorkouts.isEmpty || pmcData.isEmpty {
             pmcRebuildTask?.cancel()
-            rebuildPMC(from: workouts)
+            rebuildPMC(pmcWorkouts: pmcWorkouts, powerCurveWorkouts: powerCurveWorkouts)
             return
         }
         pmcRebuildTask?.cancel()
         pmcRebuildTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(64))
             guard !Task.isCancelled else { return }
-            rebuildPMC(from: workouts)
+            rebuildPMC(pmcWorkouts: pmcWorkouts, powerCurveWorkouts: powerCurveWorkouts)
         }
     }
 
-    func rebuildPMC(from workouts: [WorkoutMetricsSnapshot]) {
-        rebuildPowerCurve(from: workouts)
+    func rebuildPMC(
+        pmcWorkouts: [WorkoutMetricsSnapshot],
+        powerCurveWorkouts: [WorkoutMetricsSnapshot]
+    ) {
+        rebuildPowerCurve(from: powerCurveWorkouts)
 
-        guard !workouts.isEmpty else {
+        guard !pmcWorkouts.isEmpty else {
             pmcData = []
             return
         }
@@ -79,7 +85,7 @@ final class FitnessViewModel {
         else { return }
 
         var tssByDay: [Date: Double] = [:]
-        for workout in workouts {
+        for workout in pmcWorkouts {
             let day = cal.startOfDay(for: workout.startDate)
             if day < warmStart || day > today { continue }
             tssByDay[day, default: 0] += workout.tss

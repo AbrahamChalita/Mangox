@@ -14,5 +14,8 @@ struct CyclingMetrics: Sendable {
     var heartRate: Int = 0       // bpm
     var hrSource: HRSource = .none
     var totalDistance: Double = 0 // meters
+    /// True only when this snapshot’s transport actually included total distance (BLE FTMS bit 4, Wi‑Fi field, etc.).
+    /// Odometer may legitimately read `0`; do not infer presence from `totalDistance > 0`.
+    var includesTotalDistanceInPacket: Bool = false
     var lastUpdate: Date?
 }

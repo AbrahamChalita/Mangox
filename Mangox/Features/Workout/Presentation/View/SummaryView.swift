@@ -6,7 +6,7 @@ import os.log
 private let summaryLogger = Logger(subsystem: "com.abchalita.Mangox", category: "SummaryView")
 
 private enum SummaryRiderNaming {
-    /// First token of Strava display name for on-device insight headlines (optional).
+    /// First token of the rider’s display name for on-device insight headlines (optional).
     static func stravaFirstName(from displayName: String?) -> String? {
         guard let raw = displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
         else { return nil }
@@ -41,6 +41,7 @@ struct SummaryView: View {
 
     @Environment(\.openURL) private var openURL
     @Environment(\.modelContext) private var modelContext
+    @Environment(WhoopService.self) private var whoopService
     @Query private var workouts: [Workout]
 
     /// When false, generated Strava description omits the duration line (Strava still shows elapsed time on the activity).
@@ -217,7 +218,7 @@ struct SummaryView: View {
                         showExportModal: binding(\.showExportModal),
                         selectedExportFormat: binding(\.selectedExportFormat),
                         lastExportedFileURL: viewModel.lastExportedFileURL,
-                        stravaAthleteDisplayName: viewModel.stravaAthleteDisplayName,
+                        riderPersonalizationDisplayName: viewModel.riderPersonalizationDisplayName,
                         syncWorkoutsToAppleHealth: viewModel.syncWorkoutsToAppleHealth,
                         workoutSyncToHealthLastError: viewModel.workoutSyncToHealthLastError,
                         onDone: popFromSummary,
@@ -289,7 +290,7 @@ struct SummaryView: View {
                         viewModel.dismissInstagramStoryStudio()
                         viewModel.presentError(message)
                     },
-                    viewModel: SocialViewModel()
+                    viewModel: SocialViewModel(whoopService: whoopService)
                 )
             }
         }
@@ -693,7 +694,7 @@ private struct SummaryContentView: View {
     @Binding var showExportModal: Bool
     @Binding var selectedExportFormat: ExportFormat
     let lastExportedFileURL: URL?
-    let stravaAthleteDisplayName: String?
+    let riderPersonalizationDisplayName: String?
     let syncWorkoutsToAppleHealth: Bool
     let workoutSyncToHealthLastError: String?
     let onDone: () -> Void
@@ -845,7 +846,7 @@ private struct SummaryContentView: View {
                             },
                             ftpWatts: PowerZone.ftp,
                             riderCallName: SummaryRiderNaming.stravaFirstName(
-                                from: stravaAthleteDisplayName),
+                                from: riderPersonalizationDisplayName),
                             onDeviceInsightFailed: $onDeviceInsightFailed
                         )
                         .id(workout.id)
@@ -2355,6 +2356,7 @@ private final class _SummaryPreviewPersistenceRepository: WorkoutPersistenceRepo
             workoutPersistenceRepository: _SummaryPreviewPersistenceRepository()
         )
     )
+    .environment(WhoopService())
     .modelContainer(
         for: [
             Workout.self, WorkoutSample.self, LapSplit.self, TrainingPlanProgress.self,

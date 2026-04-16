@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 import UIKit
 import UserNotifications
@@ -1618,95 +1619,6 @@ struct IntegrationsSettingsView: View {
     }
 }
 
-// MARK: - Goal & season (coach context)
-
-struct GoalEventSettingsView: View {
-    @State private var eventName: String = ""
-    @State private var phaseLabel: String = ""
-    @State private var hasEventDate = false
-    @State private var eventDate = Date()
-
-    var body: some View {
-        SettingsSubviewShell(title: "Goal & Season") {
-            settingsSubCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Optional context for the AI coach and your own planning—not tied to calendar export.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.38))
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Goal event name")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.35))
-                        TextField("e.g. Local fondo, gravel race", text: $eventName)
-                            .textFieldStyle(.plain)
-                            .accessibilityLabel("Goal event name")
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(Color.white.opacity(0.05))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .foregroundStyle(.white.opacity(0.9))
-                    }
-
-                    Toggle("Set an event date", isOn: $hasEventDate)
-                        .tint(AppColor.mango)
-                        .font(.system(size: 13, weight: .semibold))
-
-                    if hasEventDate {
-                        DatePicker(
-                            "Event date",
-                            selection: $eventDate,
-                            displayedComponents: .date
-                        )
-                        .tint(AppColor.mango)
-                        .foregroundStyle(.white.opacity(0.85))
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Training phase label")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.35))
-                        TextField("e.g. Base, Build, Peak, Taper", text: $phaseLabel)
-                            .textFieldStyle(.plain)
-                            .accessibilityLabel("Training phase label")
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(Color.white.opacity(0.05))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .foregroundStyle(.white.opacity(0.9))
-                    }
-
-                    Button {
-                        MangoxTrainingGoals.eventName = eventName
-                        MangoxTrainingGoals.phaseLabel = phaseLabel
-                        MangoxTrainingGoals.eventDate = hasEventDate ? eventDate : nil
-                    } label: {
-                        Text("Save")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.black)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(AppColor.success)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .onAppear {
-            eventName = MangoxTrainingGoals.eventName
-            phaseLabel = MangoxTrainingGoals.phaseLabel
-            if let d = MangoxTrainingGoals.eventDate {
-                hasEventDate = true
-                eventDate = d
-            } else {
-                hasEventDate = false
-            }
-        }
-    }
-}
-
 // MARK: - Gear labels
 
 struct GearSettingsView: View {
@@ -2071,92 +1983,314 @@ struct DataPrivacyNotificationsHubView: View {
 
 // MARK: - Rider Profile
 
-/// Rider body weight and birth year — used for W/kg display, AI coaching context, and indoor speed estimation.
+/// Rider display identity, body weight, and birth year — used in the app UI, W/kg, AI coaching, and indoor speed.
 struct RiderProfileSettingsView: View {
     @Bindable private var prefs = RidePreferences.shared
+    @State private var riderProfilePhotoItem: PhotosPickerItem?
+    @State private var riderProfileAvatarToken = UUID()
+    /// Year-only control — avoids `DatePicker` + optional-year sync fighting the wheel (and the July 1 anchor).
+    @State private var draftBirthYear: Int = RiderProfileSettingsView.initialDraftBirthYear()
+    /// Defers `onChange(of: draftBirthYear)` until after the first load from `RidePreferences` (avoids writing on appear).
+    @State private var birthYearDraftReady = false
+    /// When birth year is unset, the wheel still shows a default year — do not persist until the rider moves it.
+    @State private var userDidEditBirthYearPicker = false
 
     var body: some View {
         SettingsSubviewShell(title: "Rider Profile") {
+            settingsSubSectionLabel("Identity")
             settingsSubCard {
-                VStack(spacing: 12) {
-                    riderInputCard(
-                        icon: "scalemass.fill",
-                        title: "WEIGHT",
-                        value: "\(weightDisplayString) \(prefs.isImperial ? "lb" : "kg")",
-                        accent: AppColor.mango
-                    ) {
-                        Slider(value: weightBinding, in: weightRange, step: weightStep)
-                            .tint(AppColor.mango)
+                VStack(alignment: .leading, spacing: MangoxSpacing.lg.rawValue) {
+                    riderDisplayNameSection
+                    riderProfilePhotoSection
+                }
+            }
 
-                        HStack {
-                            Text("\(Int(weightRange.lowerBound)) \(prefs.isImperial ? "lb" : "kg")")
-                            Spacer()
-                            Text("\(Int(weightRange.upperBound)) \(prefs.isImperial ? "lb" : "kg")")
-                        }
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.35))
+            settingsSubSectionLabel("Training context")
+            settingsSubCard {
+                VStack(alignment: .leading, spacing: MangoxSpacing.lg.rawValue) {
+                    riderWeightSection
 
-                        if PowerZone.ftp > 0 {
-                            let wkg = Double(PowerZone.ftp) / prefs.riderWeightKg
-                            Text(String(format: "%.2f W/kg at %d W FTP", wkg, PowerZone.ftp))
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(AppColor.mango.opacity(0.85))
-                        }
+                    Rectangle()
+                        .fill(Color.white.opacity(AppOpacity.divider))
+                        .frame(height: 1)
+                        .padding(.vertical, MangoxSpacing.xs.rawValue)
 
-                        Text("Also used for indoor speed estimation when computing from power.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.3))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    riderInputCard(
-                        icon: "calendar",
-                        title: "BIRTH DATE",
-                        value: birthDateSummary,
-                        accent: AppColor.blue
-                    ) {
-                        DatePicker(
-                            "Birth date",
-                            selection: riderBirthDateBinding,
-                            in: riderBirthDateRange,
-                            displayedComponents: .date
-                        )
-                        .labelsHidden()
-                        .datePickerStyle(.wheel)
-                        .tint(AppColor.blue)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 150)
-                        .clipped()
-                        .background(Color.white.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-
-                        HStack {
-                            Text("Helps the AI coach tailor recovery periods and intensity recommendations.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.3))
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            Spacer(minLength: 10)
-
-                            if prefs.riderBirthYear != nil {
-                                Button {
-                                    prefs.riderBirthYear = nil
-                                } label: {
-                                    Text("Clear")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(AppColor.blue.opacity(0.9))
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 6)
-                                        .background(AppColor.blue.opacity(0.14))
-                                        .clipShape(Capsule())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
+                    riderBirthDateSection
+                }
+            }
+        }
+        .onAppear {
+            birthYearDraftReady = false
+            applyBirthYearDraftFromPreferences()
+            DispatchQueue.main.async {
+                birthYearDraftReady = true
+            }
+        }
+        .onChange(of: draftBirthYear) { _, newYear in
+            guard birthYearDraftReady else { return }
+            let defaultYear = Calendar.current.component(.year, from: Date()) - 30
+            if prefs.riderBirthYear == nil, !userDidEditBirthYearPicker, newYear == defaultYear { return }
+            userDidEditBirthYearPicker = true
+            if prefs.riderBirthYear != newYear {
+                prefs.riderBirthYear = newYear
+            }
+        }
+        .onChange(of: riderProfilePhotoItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                if let data = try? await newItem.loadTransferable(type: Data.self),
+                   let uiImage = UIImage(data: data) {
+                    try? RiderProfileAvatarStore.saveLocalAvatar(uiImage)
+                    await MainActor.run {
+                        riderProfileAvatarToken = UUID()
+                        riderProfilePhotoItem = nil
                     }
                 }
             }
         }
+    }
+
+    // MARK: - Identity
+
+    private var riderDisplayNameSection: some View {
+        HStack(alignment: .top, spacing: MangoxSpacing.md.rawValue) {
+            MangoxIconBadge(systemName: "person.text.rectangle", color: AppColor.mango)
+            VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
+                Text("DISPLAY NAME")
+                    .mangoxFont(.label)
+                    .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
+                    .tracking(1.1)
+                TextField("Your name", text: $prefs.riderDisplayName)
+                    .textContentType(.name)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+                    .mangoxFont(.bodyBold)
+                    .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+                    .padding(.horizontal, MangoxSpacing.md.rawValue)
+                    .padding(.vertical, MangoxSpacing.sm.rawValue + 2)
+                    .background(Color.white.opacity(AppOpacity.pillBg))
+                    .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous)
+                            .strokeBorder(Color.white.opacity(AppOpacity.divider), lineWidth: 1)
+                    )
+                Text("Shown in Home, Settings, ride summaries, and story cards. Strava is optional.")
+                    .mangoxFont(.caption)
+                    .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var riderProfilePhotoSection: some View {
+        HStack(alignment: .center, spacing: MangoxSpacing.lg.rawValue) {
+            riderAvatarPreview
+                .frame(width: 72, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous)
+                        .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
+                )
+                .id(riderProfileAvatarToken)
+
+            VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
+                Text("PROFILE PHOTO")
+                    .mangoxFont(.label)
+                    .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
+                    .tracking(1.1)
+                Text(
+                    RiderProfileAvatarStore.hasLocalAvatar
+                        ? "Using a photo saved on this device."
+                        : "Optional. Shown in Settings when you do not use a Strava profile image."
+                )
+                .mangoxFont(.caption)
+                .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: MangoxSpacing.sm.rawValue) {
+                    PhotosPicker(selection: $riderProfilePhotoItem, matching: .images) {
+                        Label("Choose photo", systemImage: "photo")
+                            .mangoxFont(.callout)
+                            .foregroundStyle(.black)
+                            .labelStyle(.titleAndIcon)
+                            .padding(.horizontal, MangoxSpacing.md.rawValue)
+                            .padding(.vertical, MangoxSpacing.sm.rawValue)
+                            .background(AppColor.mango)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(MangoxPressStyle())
+
+                    if RiderProfileAvatarStore.hasLocalAvatar {
+                        Button {
+                            RiderProfileAvatarStore.clearLocalAvatar()
+                            riderProfileAvatarToken = UUID()
+                        } label: {
+                            Text("Remove")
+                                .mangoxFont(.callout)
+                                .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
+                                .padding(.horizontal, MangoxSpacing.md.rawValue)
+                                .padding(.vertical, MangoxSpacing.sm.rawValue)
+                                .background(Color.white.opacity(AppOpacity.pillBg))
+                                .clipShape(Capsule())
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(Color.white.opacity(AppOpacity.divider), lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(MangoxPressStyle())
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    private var riderAvatarPreview: some View {
+        if let img = RiderProfileAvatarStore.loadLocalAvatar() {
+            Image(uiImage: img)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                Color.white.opacity(AppOpacity.pillBg)
+                Image(systemName: "person.crop.rectangle")
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+            }
+        }
+    }
+
+    // MARK: - Weight
+
+    private var riderWeightSection: some View {
+        HStack(alignment: .top, spacing: MangoxSpacing.md.rawValue) {
+            MangoxIconBadge(systemName: "scalemass.fill", color: AppColor.mango)
+            VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
+                Text("WEIGHT")
+                    .mangoxFont(.label)
+                    .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
+                    .tracking(1.1)
+                Text("\(weightDisplayString) \(prefs.isImperial ? "lb" : "kg")")
+                    .font(MangoxFont.largeValue.value)
+                    .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+
+                Slider(value: weightBinding, in: weightRange, step: weightStep)
+                    .tint(AppColor.mango)
+
+                HStack {
+                    Text("\(Int(weightRange.lowerBound)) \(prefs.isImperial ? "lb" : "kg")")
+                    Spacer()
+                    Text("\(Int(weightRange.upperBound)) \(prefs.isImperial ? "lb" : "kg")")
+                }
+                .mangoxFont(.caption)
+                .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+
+                if PowerZone.ftp > 0 {
+                    let wkg = Double(PowerZone.ftp) / prefs.riderWeightKg
+                    Text(String(format: "%.2f W/kg at %d W FTP", wkg, PowerZone.ftp))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(AppColor.mango.opacity(0.9))
+                }
+
+                Text("Also used for indoor speed when speed is computed from power.")
+                    .mangoxFont(.caption)
+                    .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    // MARK: - Birth date
+
+    private var riderBirthDateSection: some View {
+        HStack(alignment: .top, spacing: MangoxSpacing.md.rawValue) {
+            MangoxIconBadge(systemName: "calendar", color: AppColor.blue)
+            VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
+                Text("BIRTH YEAR")
+                    .mangoxFont(.label)
+                    .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
+                    .tracking(1.1)
+                Text(birthDateSummary)
+                    .font(MangoxFont.compactValue.value)
+                    .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+
+                Picker("Birth year", selection: $draftBirthYear) {
+                    ForEach(birthYearPickerValues, id: \.self) { y in
+                        Text(String(y)).tag(y)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.wheel)
+                .tint(AppColor.blue)
+                .frame(maxWidth: .infinity)
+                .frame(height: 148)
+                .clipped()
+                .background(Color.white.opacity(AppOpacity.pillBg))
+                .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous)
+                        .strokeBorder(Color.white.opacity(AppOpacity.divider), lineWidth: 1)
+                )
+
+                HStack(alignment: .top, spacing: MangoxSpacing.md.rawValue) {
+                    Text("Helps the AI coach tailor recovery and intensity. Only the year is stored.")
+                        .mangoxFont(.caption)
+                        .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: MangoxSpacing.sm.rawValue)
+                    if prefs.riderBirthYear != nil {
+                        Button {
+                            userDidEditBirthYearPicker = false
+                            prefs.riderBirthYear = nil
+                            applyBirthYearDraftFromPreferences()
+                        } label: {
+                            Text("Clear")
+                                .mangoxFont(.callout)
+                                .foregroundStyle(AppColor.blue.opacity(0.95))
+                                .padding(.horizontal, MangoxSpacing.md.rawValue)
+                                .padding(.vertical, MangoxSpacing.sm.rawValue)
+                                .background(AppColor.blue.opacity(0.14))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(MangoxPressStyle())
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Birth year picker
+
+    private static func initialDraftBirthYear() -> Int {
+        let cal = Calendar.current
+        let now = Date()
+        let defaultYear = cal.component(.year, from: now) - 30
+        let stored = RidePreferences.shared.riderBirthYear
+        let maxY = cal.component(.year, from: now) - 16
+        let y = stored ?? defaultYear
+        return min(max(y, 1940), maxY)
+    }
+
+    private var birthYearPickerValues: [Int] {
+        let cal = Calendar.current
+        let maxY = cal.component(.year, from: .now) - 16
+        return Array((1940...maxY).reversed())
+    }
+
+    private func applyBirthYearDraftFromPreferences() {
+        let cal = Calendar.current
+        let defaultYear = cal.component(.year, from: Date()) - 30
+        let maxY = cal.component(.year, from: Date()) - 16
+        let y = prefs.riderBirthYear ?? defaultYear
+        draftBirthYear = min(max(y, 1940), maxY)
+        userDidEditBirthYearPicker = prefs.riderBirthYear != nil
+    }
+
+    private var birthDateSummary: String {
+        guard let year = prefs.riderBirthYear else { return "Not set" }
+        let age = max(0, Calendar.current.component(.year, from: .now) - year)
+        return "\(year) · age \(age)"
     }
 
     // MARK: - Weight helpers (metric / imperial)
@@ -2181,71 +2315,5 @@ struct RiderProfileSettingsView: View {
                 prefs.riderWeightKg = prefs.isImperial ? (newVal / 2.20462) : newVal
             }
         )
-    }
-
-    private var birthDateSummary: String {
-        guard let year = prefs.riderBirthYear else { return "Not set" }
-        let age = max(0, Calendar.current.component(.year, from: .now) - year)
-        return "\(year)  ·  Age \(age)"
-    }
-
-    private var riderBirthDateRange: ClosedRange<Date> {
-        let calendar = Calendar.current
-        let currentYear = calendar.component(.year, from: .now)
-        let minimum = calendar.date(from: DateComponents(year: 1940, month: 1, day: 1)) ?? .distantPast
-        let maximum = calendar.date(from: DateComponents(year: currentYear - 16, month: 12, day: 31)) ?? .now
-        return minimum...maximum
-    }
-
-    private var riderBirthDateBinding: Binding<Date> {
-        let currentYear = Calendar.current.component(.year, from: .now)
-        return Binding(
-            get: {
-                dateFromBirthYear(prefs.riderBirthYear ?? (currentYear - 30))
-            },
-            set: { prefs.riderBirthYear = Calendar.current.component(.year, from: $0) }
-        )
-    }
-
-    private func dateFromBirthYear(_ year: Int) -> Date {
-        Calendar.current.date(from: DateComponents(year: year, month: 7, day: 1)) ?? .now
-    }
-
-    private func riderInputCard<Content: View>(
-        icon: String,
-        title: String,
-        value: String,
-        accent: Color,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 18)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.45))
-                        .tracking(1.1)
-
-                    Text(value)
-                        .font(.system(size: 20, weight: .bold))
-                        .monospacedDigit()
-                        .foregroundStyle(.white)
-                }
-            }
-
-            content()
-        }
-        .padding(14)
-        .background(Color.white.opacity(0.05))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }

@@ -14,7 +14,6 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
 
     private var activity: Activity<MangoxRideAttributes>?
     private var lastUpdate: Date = .distantPast
-    private let minUpdateInterval: TimeInterval = 5
 
     // MARK: - Outdoor
 
@@ -72,30 +71,7 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
         case .turnByTurn: modeLabel = "Navigate"
         }
 
-        if let activeActivity = resolveExistingActivityIfNeeded() {
-            let elapsed = Date().timeIntervalSince(lastUpdate)
-            if elapsed >= minUpdateInterval {
-                await activeActivity.update(
-                    ActivityContent(state: state, staleDate: Date().addingTimeInterval(15)))
-                lastUpdate = Date()
-            }
-        } else {
-            let attrs = MangoxRideAttributes(rideModeLabel: modeLabel)
-            do {
-                activity = try Activity.request(
-                    attributes: attrs,
-                    content: ActivityContent(
-                        state: state, staleDate: Date().addingTimeInterval(15)),
-                    pushType: nil
-                )
-                lastUpdate = Date()
-            } catch {
-                #if DEBUG
-                    liveActivityLogger.debug(
-                        "Activity.request failed: \(error.localizedDescription, privacy: .public)")
-                #endif
-            }
-        }
+        await publishState(state, modeLabel: modeLabel)
     }
 
     // MARK: - Indoor
@@ -117,9 +93,10 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
         }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
-        let hr = max(0, dataSourceService.heartRate)
+        let unified = dataSourceService.snapshotUnifiedMetrics()
+        let hr = max(0, unified.heartRate)
         let power = workoutManager.displayPower
-        let cadence = dataSourceService.cadence
+        let cadence = unified.cadence
         let speed = workoutManager.metricsSpeed
         let distanceM = workoutManager.activeDistance
         let duration = Double(workoutManager.elapsedSeconds)
@@ -139,29 +116,57 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
             useImperial: prefs.isImperial
         )
 
+        await publishState(state, modeLabel: "Indoor")
+    }
+
+    private func publishState(
+        _ state: MangoxRideAttributes.ContentState,
+        modeLabel: String
+    ) async {
+        let now = Date()
         if let activeActivity = resolveExistingActivityIfNeeded() {
-            let elapsed = Date().timeIntervalSince(lastUpdate)
-            if elapsed >= minUpdateInterval {
-                await activeActivity.update(
-                    ActivityContent(state: state, staleDate: Date().addingTimeInterval(15)))
-                lastUpdate = Date()
-            }
-        } else {
-            let attrs = MangoxRideAttributes(rideModeLabel: "Indoor")
-            do {
-                activity = try Activity.request(
-                    attributes: attrs,
-                    content: ActivityContent(
-                        state: state, staleDate: Date().addingTimeInterval(15)),
-                    pushType: nil
-                )
-                lastUpdate = Date()
-            } catch {
+            let elapsed = now.timeIntervalSince(lastUpdate)
+            guard elapsed >= RideLiveActivityConfiguration.minUpdateInterval else {
                 #if DEBUG
                     liveActivityLogger.debug(
-                        "Activity.request failed: \(error.localizedDescription, privacy: .public)")
+                        "skip update (\(modeLabel, privacy: .public)) throttle=\(Int(RideLiveActivityConfiguration.minUpdateInterval - elapsed), privacy: .public)s duration=\(Int(state.durationSeconds), privacy: .public) power=\(state.powerWatts, privacy: .public) speed=\(state.speedKmh, privacy: .public)"
+                    )
                 #endif
+                return
             }
+            await activeActivity.update(
+                ActivityContent(
+                    state: state,
+                    staleDate: now.addingTimeInterval(RideLiveActivityConfiguration.staleWindow)))
+            lastUpdate = now
+            #if DEBUG
+                liveActivityLogger.debug(
+                    "updated (\(modeLabel, privacy: .public)) duration=\(Int(state.durationSeconds), privacy: .public) power=\(state.powerWatts, privacy: .public) speed=\(state.speedKmh, privacy: .public)"
+                )
+            #endif
+            return
+        }
+
+        let attrs = MangoxRideAttributes(rideModeLabel: modeLabel)
+        do {
+            activity = try Activity.request(
+                attributes: attrs,
+                content: ActivityContent(
+                    state: state,
+                    staleDate: now.addingTimeInterval(RideLiveActivityConfiguration.staleWindow)),
+                pushType: nil
+            )
+            lastUpdate = now
+            #if DEBUG
+                liveActivityLogger.debug(
+                    "requested (\(modeLabel, privacy: .public)) duration=\(Int(state.durationSeconds), privacy: .public) power=\(state.powerWatts, privacy: .public) speed=\(state.speedKmh, privacy: .public)"
+                )
+            #endif
+        } catch {
+            #if DEBUG
+                liveActivityLogger.debug(
+                    "Activity.request failed: \(error.localizedDescription, privacy: .public)")
+            #endif
         }
     }
 

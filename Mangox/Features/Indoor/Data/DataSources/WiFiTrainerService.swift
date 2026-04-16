@@ -41,6 +41,8 @@ final class WiFiTrainerService: NSObject, NetServiceBrowserDelegate, NetServiceD
     var speed: Double = 0
     var heartRate: Int = 0
     var totalDistance: Double = 0
+    /// Whether the last decoded payload included a distance value (JSON key or FTMS bit 4).
+    private(set) var lastPacketIncludedDistance: Bool = false
     var smoothedPower: Int = 0
     var lastPacketReceived: Date?
 
@@ -275,6 +277,7 @@ final class WiFiTrainerService: NSObject, NetServiceBrowserDelegate, NetServiceD
         speed = 0
         heartRate = 0
         totalDistance = 0
+        lastPacketIncludedDistance = false
         smoothedPower = 0
         powerEMA = 0
         lastPacketReceived = nil
@@ -337,6 +340,7 @@ final class WiFiTrainerService: NSObject, NetServiceBrowserDelegate, NetServiceD
     }
 
     private func parseJSONTrainerData(_ json: [String: Any]) {
+        lastPacketIncludedDistance = false
         if let p = json["power"] as? Int {
             power = p
             updateSmoothedPower(p)
@@ -352,6 +356,10 @@ final class WiFiTrainerService: NSObject, NetServiceBrowserDelegate, NetServiceD
         }
         if let d = json["distance"] as? Double {
             totalDistance = d
+            lastPacketIncludedDistance = true
+        } else if let i = json["distance"] as? Int {
+            totalDistance = Double(i)
+            lastPacketIncludedDistance = true
         }
 
         notifySubscribers()
@@ -361,6 +369,7 @@ final class WiFiTrainerService: NSObject, NetServiceBrowserDelegate, NetServiceD
         // Attempt to parse as FTMS Indoor Bike Data
         guard data.count >= 4 else { return }
 
+        lastPacketIncludedDistance = false
         let flags = UInt16(data[0]) | (UInt16(data[1]) << 8)
         var offset = 2
 
@@ -382,6 +391,7 @@ final class WiFiTrainerService: NSObject, NetServiceBrowserDelegate, NetServiceD
         if flags & 0x0010 != 0 && offset + 3 <= data.count {
             let raw = UInt32(data[offset]) | (UInt32(data[offset + 1]) << 8) | (UInt32(data[offset + 2]) << 16)
             totalDistance = Double(raw)
+            lastPacketIncludedDistance = true
             offset += 3
         }
 
