@@ -57,7 +57,7 @@ struct SummaryView: View {
     private var isWide: Bool { hSizeClass != .compact }
 
     private let bg = AppColor.bg
-    /// Toolbar size for third-party brand marks (Instagram, Strava) — matches typical bar button metrics.
+    /// Toolbar size for the Strava brand mark — matches typical bar button metrics.
     private let toolbarBrandIconSize: CGFloat = 22
 
     init(
@@ -94,7 +94,7 @@ struct SummaryView: View {
 
     private var dominantZone: PowerZone {
         guard let workout else { return PowerZone.zones[0] }
-        return PowerZone.zone(for: Int(workout.avgPower))
+        return PowerZone.zone(for: Int(workout.avgPower.rounded()))
     }
 
     private var workoutDataSignature: SummaryDataSignature? {
@@ -124,64 +124,10 @@ struct SummaryView: View {
         )
     }
 
-    @ViewBuilder
-    private var stravaButtonLabel: some View {
-        if viewModel.isStravaBusy {
-            ProgressView()
-                .tint(.white)
-        } else if viewModel.lastUploadedActivityID != nil {
-            Image(systemName: "checkmark.circle.fill")
-        } else {
-            Image("BrandStrava")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(width: toolbarBrandIconSize, height: toolbarBrandIconSize)
-                .accessibilityHidden(true)
-        }
-    }
-
-    private var stravaButtonTint: Color {
-        if viewModel.lastUploadedActivityID != nil {
-            return AppColor.success
-        } else if viewModel.isStravaConnected {
-            return .white
-        } else {
-            return AppColor.orange
-        }
-    }
-
-    private var stravaToolbarButton: some View {
-        Button {
-            if viewModel.lastUploadedActivityID != nil {
-                viewModel.requestOpenUploadedStravaActivity()
-            } else {
-                viewModel.presentStravaSheet()
-            }
-        } label: {
-            stravaButtonLabel
-        }
-        .disabled(viewModel.isStravaBusy)
-        .tint(stravaButtonTint)
-        .accessibilityLabel(stravaToolbarAccessibilityLabel)
-    }
-
-    private var stravaToolbarAccessibilityLabel: String {
-        if viewModel.isStravaBusy {
-            return "Uploading to Strava"
-        }
-        if viewModel.lastUploadedActivityID != nil {
-            return "Open in Strava"
-        }
-        return "Upload to Strava"
-    }
-
     private func resetPreparedSummary(resetHero: Bool = false) {
         viewModel.invalidatePreparedSummaryData()
         viewModel.clearStravaDraft()
-        if resetHero {
-            heroAppeared = false
-        }
+        if resetHero { heroAppeared = false }
     }
 
     private func prepareSummaryData(force: Bool = false) async {
@@ -215,19 +161,9 @@ struct SummaryView: View {
                         hrZoneBuckets: hrZoneBuckets,
                         dominantZone: dominantZone,
                         heroAppeared: heroAppeared,
-                        showExportModal: binding(\.showExportModal),
-                        selectedExportFormat: binding(\.selectedExportFormat),
-                        lastExportedFileURL: viewModel.lastExportedFileURL,
                         riderPersonalizationDisplayName: viewModel.riderPersonalizationDisplayName,
                         syncWorkoutsToAppleHealth: viewModel.syncWorkoutsToAppleHealth,
-                        workoutSyncToHealthLastError: viewModel.workoutSyncToHealthLastError,
-                        onDone: popFromSummary,
-                        onDelete: promptDeleteWorkout,
-                        onOpenStravaUploader: viewModel.requestOpenStravaUploader,
-                        onRepeatStructuredWorkout: repeatStructuredWorkout,
-                        customRepeatTemplateID: viewModel.customRepeatTemplateID,
-                        onSaveAsCustomWorkout: saveWorkoutAsCustomTemplate,
-                        onRepeatSavedCustomWorkout: repeatSavedCustomWorkout
+                        workoutSyncToHealthLastError: viewModel.workoutSyncToHealthLastError
                     )
                     .environment(\.isWideSummary, isWide)
                 } else {
@@ -247,35 +183,25 @@ struct SummaryView: View {
             }
 
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    guard workout != nil, viewModel.isSummaryDataReady else { return }
-                    viewModel.presentInstagramStoryStudio()
-                } label: {
-                    Image("BrandInstagram")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: toolbarBrandIconSize, height: toolbarBrandIconSize)
-                        .accessibilityHidden(true)
-                }
-                .disabled(!viewModel.isSummaryDataReady)
-                .tint(
-                    Color(
-                        red: 0.88,
-                        green: 0.19,
-                        blue: 0.42
+                if let workout {
+                    SummaryActionMenu(
+                        isSummaryDataReady: viewModel.isSummaryDataReady,
+                        canRepeatStructuredWorkout: workout.planDayID != nil,
+                        canSaveCustomWorkout: workout.planDayID == nil
+                            && workout.status == .completed
+                            && workout.isValid,
+                        canRepeatSavedCustomWorkout: viewModel.customRepeatTemplateID != nil,
+                        onOpenInstagramStoryStudio: viewModel.presentInstagramStoryStudio,
+                        onOpenExportShare: { viewModel.showExportModal = true },
+                        onRepeatStructuredWorkout: repeatStructuredWorkout,
+                        onSaveAsCustomWorkout: saveWorkoutAsCustomTemplate,
+                        onRepeatSavedCustomWorkout: repeatSavedCustomWorkout,
+                        onDelete: promptDeleteWorkout
                     )
-                )
-                .accessibilityLabel("Instagram Story — customize and share")
+                    .accessibilityIdentifier("summary.action.menu")
+                }
             }
 
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    viewModel.showExportModal = true
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
-                }
-            }
         }
         .sheet(isPresented: binding(\.showInstagramStoryStudio)) {
             if let workout, viewModel.isSummaryDataReady {
@@ -346,18 +272,15 @@ struct SummaryView: View {
         } message: {
             Text(viewModel.actionError ?? "")
         }
-        .task {
-            await prepareSummaryData()
-            withAnimation(.easeOut(duration: 0.6).delay(0.1)) {
-                heroAppeared = true
-            }
-        }
-        .onChange(of: workoutDataSignature) { _, newSignature in
-            guard newSignature != nil else {
-                resetPreparedSummary(resetHero: true)
+        .task(id: workoutDataSignature) {
+            guard workoutDataSignature != nil else {
+                resetPreparedSummary()
                 return
             }
-            Task { await prepareSummaryData(force: true) }
+            await prepareSummaryData(force: true)
+            withAnimation(.smooth(duration: 0.5)) {
+                heroAppeared = true
+            }
         }
         .onChange(of: workouts) { _, newWorkouts in
             // After deletion the filtered @Query is empty — drop cached graphs so we never
@@ -506,6 +429,51 @@ struct SummaryView: View {
             guard viewModel.stravaDraftWorkoutID == workout.id else { return }
             applyStravaDescriptionTemplate(for: workout)
         }
+    }
+
+    // MARK: - Strava Toolbar Button
+
+    @ViewBuilder
+    private var stravaToolbarButton: some View {
+        let uploaded = viewModel.lastUploadedActivityID != nil
+        let tint: Color = {
+            if uploaded { return AppColor.success }
+            if viewModel.isStravaConnected { return .white }
+            return AppColor.orange
+        }()
+
+        Button {
+            if uploaded {
+                viewModel.requestOpenUploadedStravaActivity()
+            } else {
+                viewModel.presentStravaSheet()
+            }
+        } label: {
+            Group {
+                if viewModel.isStravaBusy {
+                    ProgressView().tint(.white)
+                } else if uploaded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .symbolRenderingMode(.hierarchical)
+                        .contentTransition(.symbolEffect(.replace))
+                } else {
+                    Image("BrandStrava")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: toolbarBrandIconSize, height: toolbarBrandIconSize)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .disabled(viewModel.isStravaBusy)
+        .tint(tint)
+        .accessibilityLabel(
+            viewModel.isStravaBusy
+                ? "Uploading to Strava"
+                : (uploaded ? "Open in Strava" : "Upload to Strava")
+        )
+        .accessibilityIdentifier("summary.toolbar.strava")
     }
 
     // MARK: - Actions
@@ -680,8 +648,6 @@ struct SummaryView: View {
 
 // MARK: - Summary Content View
 
-// MARK: - Summary Content View
-
 private struct SummaryContentView: View {
     let workout: Workout
     let linkedPlanDay: PlanDay?
@@ -690,38 +656,51 @@ private struct SummaryContentView: View {
     let hrZoneBuckets: [HRZoneBucket]
     let dominantZone: PowerZone
     let heroAppeared: Bool
-
-    @Binding var showExportModal: Bool
-    @Binding var selectedExportFormat: ExportFormat
-    let lastExportedFileURL: URL?
     let riderPersonalizationDisplayName: String?
     let syncWorkoutsToAppleHealth: Bool
     let workoutSyncToHealthLastError: String?
-    let onDone: () -> Void
-    let onDelete: () -> Void
-    let onOpenStravaUploader: () -> Void
-    let onRepeatStructuredWorkout: () -> Void
-    let customRepeatTemplateID: UUID?
-    let onSaveAsCustomWorkout: () -> Void
-    let onRepeatSavedCustomWorkout: () -> Void
 
     @Environment(\.isWideSummary) private var isWide
+    @Environment(\.modelContext) private var modelContext
 
-    // RPE Slider State
-    @State private var rpeRating: Int = 5
-    /// When on-device insight is unavailable, show the standalone power-zones card again.
+    @State private var rpeRating: Int
+    @State private var isAnalysisExpanded = false
     @State private var onDeviceInsightFailed = false
+
+    init(
+        workout: Workout,
+        linkedPlanDay: PlanDay?,
+        sortedLaps: [LapSplit],
+        zoneBuckets: [ZoneBucket],
+        hrZoneBuckets: [HRZoneBucket],
+        dominantZone: PowerZone,
+        heroAppeared: Bool,
+        riderPersonalizationDisplayName: String?,
+        syncWorkoutsToAppleHealth: Bool,
+        workoutSyncToHealthLastError: String?
+    ) {
+        self.workout = workout
+        self.linkedPlanDay = linkedPlanDay
+        self.sortedLaps = sortedLaps
+        self.zoneBuckets = zoneBuckets
+        self.hrZoneBuckets = hrZoneBuckets
+        self.dominantZone = dominantZone
+        self.heroAppeared = heroAppeared
+        self.riderPersonalizationDisplayName = riderPersonalizationDisplayName
+        self.syncWorkoutsToAppleHealth = syncWorkoutsToAppleHealth
+        self.workoutSyncToHealthLastError = workoutSyncToHealthLastError
+        // Hydrate from persisted RPE; 0 means "unrated" — start at the neutral 5.
+        _rpeRating = State(initialValue: workout.rpe == 0 ? 5 : workout.rpe)
+    }
 
     private var hPad: CGFloat { isWide ? 40 : 20 }
     private var cardGap: CGFloat { isWide ? 16 : 12 }
-
-    private var isOutdoor: Bool {
-        return workout.savedRouteName != nil || workout.elevationGain > 0
+    private var summaryLayout: SummaryLayoutModel {
+        SummaryLayoutModel(workout: workout, linkedPlanDay: linkedPlanDay)
     }
 
-    /// Power zones appear inside the ride insight card while insight loads or succeeds; otherwise use the full zone card.
-    private var showStandalonePowerZoneCard: Bool {
-        workout.status != .completed || !workout.isValid || onDeviceInsightFailed
+    private var isOutdoor: Bool {
+        workout.savedRouteName != nil || workout.elevationGain > 0
     }
 
     private func plannedVsActualCard(plan: PlanDay) -> some View {
@@ -768,12 +747,7 @@ private struct SummaryContentView: View {
             }
         }
         .padding(14)
-        .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .mangoxSurface(.frosted, shape: .rounded(16))
     }
 
     private func appleHealthSyncWarningBanner(message: String) -> some View {
@@ -795,6 +769,7 @@ private struct SummaryContentView: View {
         .padding(14)
         .background(Color.orange.opacity(0.12))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityIdentifier("summary.health.warning")
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(Color.orange.opacity(0.25), lineWidth: 1)
@@ -802,172 +777,116 @@ private struct SummaryContentView: View {
     }
 
     var body: some View {
-        ZStack {
-            ScrollView {
-                VStack(spacing: 0) {
-                    if !workout.isValid {
-                        SummaryInvalidBanner()
-                            .padding(.horizontal, hPad)
-                            .padding(.top, 16)
-                    }
+        ScrollView {
+            VStack(spacing: 0) {
+                if !workout.isValid {
+                    SummaryInvalidBanner()
+                        .padding(.horizontal, hPad)
+                        .padding(.top, 16)
+                        .accessibilityIdentifier("summary.invalid.banner")
+                }
 
-                    if syncWorkoutsToAppleHealth,
-                        let hkErr = workoutSyncToHealthLastError
-                    {
-                        appleHealthSyncWarningBanner(message: hkErr)
-                            .padding(.horizontal, hPad)
-                            .padding(.top, 12)
-                    }
-
-                    SummaryHeroHeader(
-                        workout: workout,
-                        linkedPlanDay: linkedPlanDay,
-                        heroAppeared: heroAppeared,
-                        onDone: onDone,
-                        onDelete: onDelete
-                    )
-                    .padding(.horizontal, hPad)
-                    .padding(.top, isWide ? 28 : 20)
-
-                    if workout.status == .completed, workout.isValid {
-                        SummaryOnDeviceInsightCard(
-                            workout: workout,
-                            zoneSegments: zoneBuckets.map {
-                                RideInsightZoneSegment(
-                                    zone: $0.zone, seconds: $0.seconds, percent: $0.percent)
-                            },
-                            powerZoneLine: zoneBuckets.map { z in
-                                "Z\(z.zone.id) \(Int((z.percent * 100).rounded()))%"
-                            }.joined(separator: ", "),
-                            planLine: linkedPlanDay.map { plan in
-                                let ftp = PowerZone.ftp
-                                let tss = Int(plan.estimatedPlannedTSS(ftp: ftp))
-                                return "\(plan.title) · est TSS \(tss)"
-                            },
-                            ftpWatts: PowerZone.ftp,
-                            riderCallName: SummaryRiderNaming.stravaFirstName(
-                                from: riderPersonalizationDisplayName),
-                            onDeviceInsightFailed: $onDeviceInsightFailed
-                        )
-                        .id(workout.id)
+                if syncWorkoutsToAppleHealth,
+                    let hkErr = workoutSyncToHealthLastError
+                {
+                    appleHealthSyncWarningBanner(message: hkErr)
                         .padding(.horizontal, hPad)
                         .padding(.top, 12)
-                    }
+                }
 
+                SummaryOverviewPanel(
+                    layout: summaryLayout,
+                    accent: dominantZone.color,
+                    heroAppeared: heroAppeared
+                )
+                .padding(.horizontal, hPad)
+                .padding(.top, isWide ? 28 : 20)
+
+                if workout.status == .completed, workout.isValid {
+                    SummaryOnDeviceInsightCard(
+                        workout: workout,
+                        zoneSegments: zoneBuckets.map {
+                            RideInsightZoneSegment(
+                                zone: $0.zone, seconds: $0.seconds, percent: $0.percent)
+                        },
+                        powerZoneLine: zoneBuckets.map { z in
+                            "Z\(z.zone.id) \(Int((z.percent * 100).rounded()))%"
+                        }.joined(separator: ", "),
+                        planLine: linkedPlanDay.map { plan in
+                            let ftp = PowerZone.ftp
+                            let tss = Int(plan.estimatedPlannedTSS(ftp: ftp))
+                            return "\(plan.title) · est TSS \(tss)"
+                        },
+                        ftpWatts: PowerZone.ftp,
+                        riderCallName: SummaryRiderNaming.stravaFirstName(
+                            from: riderPersonalizationDisplayName),
+                        displayMode: .compact,
+                        onDeviceInsightFailed: $onDeviceInsightFailed
+                    )
+                    .id(workout.id)
+                    .padding(.horizontal, hPad)
+                    .padding(.top, 12)
+                }
+
+                rpeSliderSection
+                    .padding(.horizontal, hPad)
+                    .padding(.top, 12)
+
+                SummaryAnalysisDisclosure(
+                    isExpanded: $isAnalysisExpanded,
+                    contentPadding: isWide ? 20 : 14
+                ) {
                     if let plan = linkedPlanDay {
                         plannedVsActualCard(plan: plan)
-                            .padding(.horizontal, hPad)
-                            .padding(.top, 12)
                     }
 
-                    if workout.planDayID != nil {
-                        Button(action: onRepeatStructuredWorkout) {
-                            Label("Repeat this session", systemImage: "arrow.clockwise.circle.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.black)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(AppColor.mango)
-                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, hPad)
-                        .padding(.top, 12)
-                    }
-
-                    if isWide {
-                        wideBody
-                    } else {
-                        compactBody
-                    }
-
-                    if workout.planDayID == nil, workout.status == .completed, workout.isValid {
-                        VStack(spacing: 10) {
-                            Button(action: onSaveAsCustomWorkout) {
-                                Label(
-                                    "Save as custom workout",
-                                    systemImage: "square.and.arrow.down.on.square"
-                                )
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.9))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(Color.white.opacity(0.08))
-                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-
-                            if customRepeatTemplateID != nil {
-                                Button(action: onRepeatSavedCustomWorkout) {
-                                    Label(
-                                        "Repeat saved workout",
-                                        systemImage: "arrow.clockwise.circle.fill"
-                                    )
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.black)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .background(AppColor.mango)
-                                    .clipShape(
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal, hPad)
-                        .padding(.top, 12)
-                    }
-
-                    // RPE Rating Section
-                    rpeSliderSection
-                        .padding(.horizontal, hPad)
-                        .padding(.vertical, 24)
+                    analysisBody
                 }
-                .frame(maxWidth: isWide ? 1100 : .infinity)
-                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("summary.analysis.toggle")
+                .padding(.horizontal, hPad)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
-            .onChange(of: workout.id) { _, _ in
-                onDeviceInsightFailed = false
-            }
+            .frame(maxWidth: isWide ? 1100 : .infinity)
+            .frame(maxWidth: .infinity)
+        }
+        .onChange(of: workout.id) { _, _ in
+            onDeviceInsightFailed = false
+            isAnalysisExpanded = false
         }
     }
 
-    // MARK: Wide (iPad two-column)
-
-    private var wideBody: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: cardGap) {
-                // LEFT — Metrics (2x2 grid)
-                VStack(spacing: cardGap) {
-                    metricsGrid
-                }
-                .frame(maxWidth: .infinity)
-
-                // RIGHT — Zones, Laps
-                VStack(spacing: cardGap) {
-                    if showStandalonePowerZoneCard {
-                        SummaryZoneCard(
-                            title: "POWER ZONES", icon: "bolt.fill", buckets: zoneBuckets)
-                    }
-                    if workout.maxHR > 0 {
-                        SummaryHRZoneCard(buckets: hrZoneBuckets)
-                    }
-                    if sortedLaps.count > 1 {
-                        SummaryLapTable(laps: sortedLaps, hasHR: workout.avgHR > 0)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .padding(.horizontal, hPad)
-            .padding(.top, 24)
-            .padding(.bottom, 20)
+    @ViewBuilder
+    private var analysisBody: some View {
+        if isWide {
+            wideAnalysisBody
+        } else {
+            compactAnalysisBody
         }
     }
 
-    // MARK: Compact (iPhone single-column)
+    private var wideAnalysisBody: some View {
+        HStack(alignment: .top, spacing: cardGap) {
+            VStack(spacing: cardGap) {
+                metricsGrid
+            }
+            .frame(maxWidth: .infinity)
 
-    private var compactBody: some View {
-        VStack(spacing: 0) {
+            VStack(spacing: cardGap) {
+                SummaryZoneCard(title: "POWER ZONES", icon: "bolt.fill", buckets: zoneBuckets)
+                if workout.maxHR > 0 {
+                    SummaryHRZoneCard(buckets: hrZoneBuckets)
+                }
+                if sortedLaps.count > 1 {
+                    SummaryLapTable(laps: sortedLaps, hasHR: workout.avgHR > 0)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var compactAnalysisBody: some View {
+        VStack(spacing: cardGap) {
             VStack(spacing: cardGap) {
                 SummaryMetricCard(title: "POWER", icon: "bolt.fill") {
                     SummaryPowerMetrics(workout: workout)
@@ -990,30 +909,18 @@ private struct SummaryContentView: View {
                     }
                 }
             }
-            .padding(.horizontal, hPad)
-            .padding(.top, 20)
 
-            if showStandalonePowerZoneCard {
-                SummaryZoneCard(title: "POWER ZONES", icon: "bolt.fill", buckets: zoneBuckets)
-                    .padding(.horizontal, hPad)
-                    .padding(.top, 16)
-            }
+            SummaryZoneCard(title: "POWER ZONES", icon: "bolt.fill", buckets: zoneBuckets)
 
             if workout.maxHR > 0 {
                 SummaryHRZoneCard(buckets: hrZoneBuckets)
-                    .padding(.horizontal, hPad)
-                    .padding(.top, 16)
             }
 
             if sortedLaps.count > 1 {
                 SummaryLapTable(laps: sortedLaps, hasHR: workout.avgHR > 0)
-                    .padding(.horizontal, hPad)
-                    .padding(.top, 16)
             }
         }
     }
-
-    // MARK: Metrics Grid (iPad 2x2)
 
     @ViewBuilder
     private var metricsGrid: some View {
@@ -1047,39 +954,510 @@ private struct SummaryContentView: View {
         }
     }
 
-    // MARK: RPE Slider Section
+    private var rpeDescriptor: String {
+        switch rpeRating {
+        case ...2: return "Recovery"
+        case 3...4: return "Easy"
+        case 5...6: return "Moderate"
+        case 7...8: return "Hard"
+        default: return "All-out"
+        }
+    }
 
     private var rpeSliderSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SummarySectionHeader(title: "RATE OF PERCEIVED EXERTION", icon: "brain")
+            HStack(alignment: .firstTextBaseline) {
+                SummarySectionHeader(title: "PERCEIVED EXERTION", icon: "brain")
+                Spacer(minLength: 8)
+                if workout.rpe == 0 {
+                    Text("Tap to log")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
 
-            HStack {
+            HStack(spacing: 10) {
                 Text("Easy")
                     .font(.caption.bold())
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.white.opacity(0.45))
 
                 Slider(
                     value: Binding(
                         get: { Double(rpeRating) },
-                        set: { rpeRating = Int($0) }
+                        set: { rpeRating = Int($0.rounded()) }
                     ),
                     in: 1...10,
                     step: 1
                 )
-                .tint(Color.accentColor)
+                .tint(dominantZone.color)
 
                 Text("Max")
                     .font(.caption.bold())
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.white.opacity(0.45))
             }
 
-            Text("Score: \(rpeRating) / 10")
-                .font(.system(.subheadline, design: .monospaced, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity, alignment: .center)
+            HStack {
+                Text(rpeDescriptor)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                Spacer()
+                HStack(spacing: 2) {
+                    Text("\(rpeRating)")
+                        .contentTransition(.numericText(value: Double(rpeRating)))
+                        .font(.system(.subheadline, design: .monospaced, weight: .bold))
+                        .foregroundStyle(.white)
+                    Text("/ 10")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+            }
+        }
+        .padding(isWide ? 16 : 12)
+        .cardStyle(cornerRadius: isWide ? 20 : 16)
+        .sensoryFeedback(.selection, trigger: rpeRating)
+        .animation(.snappy, value: rpeRating)
+        .onChange(of: rpeRating) { _, newValue in
+            guard workout.rpe != newValue else { return }
+            workout.rpe = newValue
+            try? modelContext.save()
+        }
+        .accessibilityIdentifier("summary.rpe.card")
+    }
+}
+
+private struct SummaryLayoutModel {
+    struct Metric: Identifiable {
+        let id: String
+        let label: String
+        let value: String
+        let unit: String
+        let accessibilityIdentifier: String
+    }
+
+    struct Badge: Identifiable {
+        let id: String
+        let icon: String
+        let text: String
+        let color: Color
+    }
+
+    let dateLine: String
+    let timeLine: String
+    let vibeLine: String
+    let metrics: [Metric]
+    let badges: [Badge]
+
+    func metric(id: String) -> Metric? {
+        metrics.first(where: { $0.id == id })
+    }
+
+    init(workout: Workout, linkedPlanDay: PlanDay?) {
+        let imperial = RidePreferences.shared.isImperial
+        let distance = AppFormat.distance(workout.distance, imperial: imperial)
+
+        dateLine = workout.startDate.formatted(.dateTime.weekday(.wide).month(.wide).day())
+        timeLine = workout.startDate.formatted(.dateTime.hour().minute())
+        if workout.duration > 7_200 {
+            vibeLine = "Long-haul effort with steady intent."
+        } else if workout.avgPower >= Double(PowerZone.ftp) * 0.9 {
+            vibeLine = "High-output session with real bite."
+        } else if workout.tss >= 100 {
+            vibeLine = "Strong training load, clean execution."
+        } else {
+            vibeLine = "Solid work banked for the next block."
+        }
+
+        metrics = [
+            Metric(
+                id: "duration",
+                label: "Duration",
+                value: AppFormat.duration(workout.duration),
+                unit: "",
+                accessibilityIdentifier: "summary.overview.duration"
+            ),
+            Metric(
+                id: "distance",
+                label: "Distance",
+                value: String(format: "%.1f", distance.value),
+                unit: distance.unit,
+                accessibilityIdentifier: "summary.overview.distance"
+            ),
+            Metric(
+                id: "avg_power",
+                label: "Avg Power",
+                value: "\(Int(workout.avgPower))",
+                unit: "W",
+                accessibilityIdentifier: "summary.overview.avgpower"
+            ),
+            Metric(
+                id: "tss",
+                label: "TSS",
+                value: "\(Int(workout.tss.rounded()))",
+                unit: "",
+                accessibilityIdentifier: "summary.overview.tss"
+            ),
+        ]
+
+        var builtBadges: [Badge] = []
+
+        if let day = linkedPlanDay {
+            builtBadges.append(
+                Badge(
+                    id: "plan",
+                    icon: "calendar.badge.checkmark",
+                    text: "W\(day.weekNumber)D\(day.dayOfWeek) · \(day.title)",
+                    color: AppColor.yellow
+                ))
+        }
+
+        if let raw = workout.savedRouteKindRaw, let kind = SavedRouteKind(rawValue: raw) {
+            let title: String = {
+                switch kind {
+                case .free:
+                    return "Outdoor · Free ride"
+                case .gpx:
+                    return "GPX · \(workout.savedRouteName ?? "Route")"
+                case .directions:
+                    return "Directions · \(workout.savedRouteName ?? "Route")"
+                }
+            }()
+
+            builtBadges.append(
+                Badge(
+                    id: "route",
+                    icon: "map",
+                    text: title,
+                    color: AppColor.blue
+                ))
+        }
+
+        badges = builtBadges
+    }
+}
+
+private struct SummaryOverviewPanel: View {
+    let layout: SummaryLayoutModel
+    var accent: Color = AppColor.mango
+    var heroAppeared: Bool = true
+
+    @Environment(\.isWideSummary) private var isWide
+
+    private var durationMetric: SummaryLayoutModel.Metric? { layout.metric(id: "duration") }
+    private var distanceMetric: SummaryLayoutModel.Metric? { layout.metric(id: "distance") }
+    private var avgPowerMetric: SummaryLayoutModel.Metric? { layout.metric(id: "avg_power") }
+    private var tssMetric: SummaryLayoutModel.Metric? { layout.metric(id: "tss") }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: isWide ? 16 : 13) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("RIDE SUMMARY")
+                    .font(.system(size: isWide ? 10 : 9, weight: .heavy))
+                    .foregroundStyle(.white.opacity(0.42))
+                    .tracking(1.3)
+                Spacer(minLength: 0)
+                Text(layout.timeLine)
+                    .font(.system(size: isWide ? 14 : 12, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.38))
+            }
+
+            Text(layout.dateLine)
+                .font(.system(size: isWide ? 16 : 13, weight: .medium))
+                .foregroundStyle(.white.opacity(0.72))
+
+            if let durationMetric {
+                SummaryOverviewMetric(
+                    metric: durationMetric,
+                    style: .hero,
+                    accent: accent
+                )
+                .contentTransition(.numericText())
+                .opacity(heroAppeared ? 1 : 0)
+                .scaleEffect(heroAppeared ? 1 : 0.96, anchor: .leading)
+                .blur(radius: heroAppeared ? 0 : 6)
+            }
+
+            if !layout.badges.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(layout.badges) { badge in
+                            HStack(spacing: 6) {
+                                Image(systemName: badge.icon)
+                                    .font(.system(size: isWide ? 11 : 10))
+                                Text(badge.text)
+                                    .font(.system(size: isWide ? 12 : 11, weight: .semibold))
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(badge.color)
+                            .padding(.horizontal, isWide ? 12 : 10)
+                            .padding(.vertical, isWide ? 6 : 5)
+                            .background(badge.color.opacity(0.1))
+                            .clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+
+            HStack(spacing: isWide ? 10 : 8) {
+                if let distanceMetric {
+                    SummaryOverviewMetric(
+                        metric: distanceMetric,
+                        style: .compact,
+                        accent: AppColor.blue
+                    )
+                }
+                if let avgPowerMetric {
+                    SummaryOverviewMetric(
+                        metric: avgPowerMetric,
+                        style: .compact,
+                        accent: AppColor.orange
+                    )
+                }
+                if let tssMetric {
+                    SummaryOverviewMetric(
+                        metric: tssMetric,
+                        style: .compact,
+                        accent: AppColor.yellow
+                    )
+                }
+            }
+
+            Text(layout.vibeLine)
+                .font(.system(size: isWide ? 13 : 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(isWide ? 20 : 14)
-        .cardStyle(cornerRadius: isWide ? 20 : 16)
+        .background(
+            // Subtle accent wash sits *over* the glass so the dominant zone
+            // still tints the panel — glass alone would read flat.
+            LinearGradient(
+                colors: [
+                    accent.opacity(0.10),
+                    Color.clear,
+                    accent.opacity(0.04),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: isWide ? 20 : 16, style: .continuous)
+        )
+        .mangoxSurface(.frosted, shape: .rounded(isWide ? 20 : 16))
+    }
+}
+
+private enum SummaryOverviewMetricStyle {
+    case hero
+    case compact
+}
+
+private struct SummaryOverviewMetric: View {
+    let metric: SummaryLayoutModel.Metric
+    var style: SummaryOverviewMetricStyle = .compact
+    var accent: Color = .white.opacity(0.8)
+
+    @Environment(\.isWideSummary) private var isWide
+
+    var body: some View {
+        Group {
+            if style == .hero {
+                VStack(alignment: .leading, spacing: isWide ? 8 : 6) {
+                    Text(metric.label.uppercased())
+                        .font(.system(size: isWide ? 10 : 9, weight: .heavy))
+                        .foregroundStyle(accent.opacity(0.78))
+                        .tracking(1.0)
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text(metric.value)
+                            .font(
+                                .system(
+                                    size: isWide ? 58 : 46,
+                                    weight: .heavy,
+                                    design: .monospaced
+                                )
+                            )
+                            .foregroundStyle(.white.opacity(0.96))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                        if !metric.unit.isEmpty {
+                            Text(metric.unit)
+                                .font(.system(size: isWide ? 16 : 13, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.52))
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(isWide ? 16 : 12)
+                .background(
+                    LinearGradient(
+                        colors: [accent.opacity(0.13), Color.white.opacity(0.03)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: isWide ? 16 : 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: isWide ? 16 : 14, style: .continuous)
+                        .strokeBorder(accent.opacity(0.25), lineWidth: 1)
+                )
+            } else {
+                VStack(alignment: .leading, spacing: isWide ? 5 : 4) {
+                    Capsule()
+                        .fill(accent.opacity(0.92))
+                        .frame(width: isWide ? 32 : 24, height: 3)
+                    Text(metric.label.uppercased())
+                        .font(.system(size: isWide ? 10 : 9, weight: .heavy))
+                        .foregroundStyle(accent.opacity(0.82))
+                        .tracking(0.9)
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text(metric.value)
+                            .font(
+                                .system(
+                                    size: isWide ? 24 : 20,
+                                    weight: .bold,
+                                    design: .monospaced
+                                )
+                            )
+                            .foregroundStyle(.white.opacity(0.95))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.65)
+                        if !metric.unit.isEmpty {
+                            Text(metric.unit)
+                                .font(.system(size: isWide ? 12 : 10, design: .monospaced))
+                                .foregroundStyle(accent.opacity(0.7))
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(isWide ? 12 : 10)
+                .background(
+                    LinearGradient(
+                        colors: [
+                            accent.opacity(0.2),
+                            accent.opacity(0.09),
+                            Color.white.opacity(0.03),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: isWide ? 12 : 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: isWide ? 12 : 10, style: .continuous)
+                        .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+                )
+            }
+        }
+        .accessibilityIdentifier(metric.accessibilityIdentifier)
+    }
+}
+
+private struct SummaryAnalysisDisclosure<Content: View>: View {
+    @Binding var isExpanded: Bool
+    let contentPadding: CGFloat
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.snappy) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppColor.mango.opacity(0.95))
+                    Text(isExpanded ? "ANALYSIS" : "SHOW POWER, HR, LAPS")
+                        .font(.system(size: 12, weight: .heavy))
+                        .foregroundStyle(.white.opacity(0.82))
+                        .tracking(1.2)
+                        .contentTransition(.opacity)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                }
+                .padding(contentPadding)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("summary.analysis.button")
+
+            if isExpanded {
+                Divider()
+                    .overlay(Color.white.opacity(AppOpacity.divider))
+                    .padding(.horizontal, contentPadding)
+                    .padding(.bottom, 12)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    content
+                }
+                .padding(.horizontal, contentPadding)
+                .padding(.bottom, contentPadding)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .cardStyle(cornerRadius: 16)
+        .sensoryFeedback(.impact(weight: .light), trigger: isExpanded)
+    }
+}
+
+private struct SummaryActionMenu: View {
+    let isSummaryDataReady: Bool
+    let canRepeatStructuredWorkout: Bool
+    let canSaveCustomWorkout: Bool
+    let canRepeatSavedCustomWorkout: Bool
+    let onOpenInstagramStoryStudio: () -> Void
+    let onOpenExportShare: () -> Void
+    let onRepeatStructuredWorkout: () -> Void
+    let onSaveAsCustomWorkout: () -> Void
+    let onRepeatSavedCustomWorkout: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        Menu {
+            Button("Instagram Story", systemImage: "camera.viewfinder") {
+                onOpenInstagramStoryStudio()
+            }
+            .disabled(!isSummaryDataReady)
+
+            Button("Export & Share", systemImage: "square.and.arrow.up") {
+                onOpenExportShare()
+            }
+
+            if canRepeatStructuredWorkout || canSaveCustomWorkout || canRepeatSavedCustomWorkout {
+                Divider()
+            }
+
+            if canRepeatStructuredWorkout {
+                Button("Repeat this session", systemImage: "arrow.clockwise.circle") {
+                    onRepeatStructuredWorkout()
+                }
+            }
+
+            if canSaveCustomWorkout {
+                Button("Save as custom workout", systemImage: "square.and.arrow.down.on.square") {
+                    onSaveAsCustomWorkout()
+                }
+            }
+
+            if canRepeatSavedCustomWorkout {
+                Button("Repeat saved workout", systemImage: "arrow.counterclockwise.circle") {
+                    onRepeatSavedCustomWorkout()
+                }
+            }
+
+            Divider()
+
+            Button("Delete Ride", systemImage: "trash", role: .destructive) {
+                onDelete()
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 18, weight: .semibold))
+        }
+        .accessibilityIdentifier("summary.action.menu")
+        .accessibilityLabel("Summary actions")
     }
 }
 
@@ -1110,198 +1488,6 @@ private struct SummaryInvalidBanner: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(AppColor.orange.opacity(0.25), lineWidth: 1)
         )
-    }
-}
-
-// MARK: - Hero Header (with Done / Delete actions inline)
-
-private struct SummaryHeroHeader: View {
-    let workout: Workout
-    let linkedPlanDay: PlanDay?
-    let heroAppeared: Bool
-    let onDone: () -> Void
-    let onDelete: () -> Void
-
-    @Environment(\.isWideSummary) private var isWide
-
-    private var oneSentenceInsight: String {
-        if workout.duration > 3600 {
-            return "Epic session! You burned \(Int(estimateCalories)) kcal."
-        } else if workout.avgPower > 200 {
-            return "Intense session! Way to push those watts."
-        } else {
-            return "Great job getting it done today!"
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: isWide ? 18 : 14) {
-            HStack {
-                planDayBadge
-                savedOutdoorRouteBadge
-
-                // Optional PR Badge
-                if workout.avgPower > 250 {  // Adjust your condition for Personal Record
-                    Text("🏆 PR")
-                        .font(.system(size: isWide ? 13 : 11, weight: .bold))
-                        .padding(.horizontal, isWide ? 12 : 8)
-                        .padding(.vertical, isWide ? 6 : 4)
-                        .background(AppColor.yellow.opacity(0.1))
-                        .foregroundStyle(AppColor.yellow)
-                        .clipShape(Capsule())
-                }
-            }
-
-            HStack(spacing: 8) {
-                Text(workout.startDate, format: .dateTime.weekday(.wide).month(.wide).day())
-                    .font(.system(size: isWide ? 17 : 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
-                Text("·")
-                    .foregroundStyle(.white.opacity(0.15))
-                Text(workout.startDate, format: .dateTime.hour().minute())
-                    .font(.system(size: isWide ? 17 : 14))
-                    .foregroundStyle(.white.opacity(0.35))
-            }
-
-            // Duration row with Done ✓ and Delete 🗑 icons
-            HStack(alignment: .firstTextBaseline) {
-                Text(AppFormat.duration(workout.duration))
-                    .font(.system(size: isWide ? 64 : 48, weight: .heavy, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-
-                Spacer()
-
-                // Action buttons at the same vertical level as the duration
-                GlassEffectContainer(spacing: isWide ? 14 : 10) {
-                    HStack(spacing: isWide ? 14 : 10) {
-                        Button(action: onDone) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: isWide ? 22 : 18))
-                                .foregroundStyle(AppColor.success)
-                                .frame(width: isWide ? 44 : 36, height: isWide ? 44 : 36)
-                                .glassEffect(.regular.interactive(), in: .circle)
-                        }
-
-                        Button(role: .destructive, action: onDelete) {
-                            Image(systemName: "trash")
-                                .font(.system(size: isWide ? 18 : 14))
-                                .foregroundStyle(AppColor.red.opacity(0.7))
-                                .frame(width: isWide ? 44 : 36, height: isWide ? 44 : 36)
-                                .glassEffect(.regular.interactive(), in: .circle)
-                        }
-                    }
-                }
-                .padding(.bottom, isWide ? 10 : 6)
-            }
-            .opacity(heroAppeared ? 1 : 0)
-            .offset(y: heroAppeared ? 0 : 12)
-
-            heroStatsRow
-
-            // Humanized insight
-            Text(oneSentenceInsight)
-                .font(.system(size: isWide ? 16 : 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.8))
-                .padding(.top, 4)
-                .opacity(heroAppeared ? 1 : 0)
-                .offset(y: heroAppeared ? 0 : 8)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private var savedOutdoorRouteBadge: some View {
-        if let raw = workout.savedRouteKindRaw, let kind = SavedRouteKind(rawValue: raw) {
-            let title: String = {
-                switch kind {
-                case .free:
-                    return "Outdoor · Free ride"
-                case .gpx:
-                    let n = workout.savedRouteName ?? "GPX"
-                    return "GPX · \(n)"
-                case .directions:
-                    let n = workout.savedRouteName ?? "Route"
-                    if let sub = workout.routeDestinationSummary, !sub.isEmpty {
-                        return "Directions · \(n) — \(sub)"
-                    }
-                    return "Directions · \(n)"
-                }
-            }()
-            HStack(spacing: 6) {
-                Image(systemName: "map")
-                    .font(.system(size: isWide ? 12 : 10))
-                Text(title)
-                    .font(.system(size: isWide ? 13 : 11, weight: .semibold))
-                    .lineLimit(2)
-            }
-            .foregroundStyle(AppColor.blue)
-            .padding(.horizontal, isWide ? 16 : 12)
-            .padding(.vertical, isWide ? 7 : 5)
-            .background(AppColor.blue.opacity(0.1))
-            .clipShape(Capsule())
-        }
-    }
-
-    @ViewBuilder
-    private var planDayBadge: some View {
-        if let day = linkedPlanDay {
-            HStack(spacing: 6) {
-                Image(systemName: "calendar.badge.checkmark")
-                    .font(.system(size: isWide ? 12 : 10))
-                Text("W\(day.weekNumber)D\(day.dayOfWeek) · \(day.title)")
-                    .font(.system(size: isWide ? 13 : 11, weight: .semibold))
-            }
-            .foregroundStyle(AppColor.yellow)
-            .padding(.horizontal, isWide ? 16 : 12)
-            .padding(.vertical, isWide ? 7 : 5)
-            .background(AppColor.yellow.opacity(0.1))
-            .clipShape(Capsule())
-        }
-    }
-
-    private var heroStatsRow: some View {
-        HStack(spacing: 0) {
-            heroStat(
-                value: String(format: "%.1f", workout.distance / 1000), unit: "km",
-                icon: "road.lanes")
-            Spacer()
-            heroStat(
-                value: String(format: "%.0f", estimateCalories), unit: "kcal", icon: "flame.fill")
-            Spacer()
-            heroStat(value: "\(Int(workout.avgPower))", unit: "W", icon: "bolt.fill")
-            if workout.avgHR > 0 {
-                Spacer()
-                heroStat(value: "\(Int(workout.avgHR))", unit: "bpm", icon: "heart.fill")
-            }
-        }
-        .opacity(heroAppeared ? 1 : 0)
-        .offset(y: heroAppeared ? 0 : 8)
-    }
-
-    private func heroStat(value: String, unit: String, icon: String) -> some View {
-        VStack(spacing: isWide ? 5 : 3) {
-            Image(systemName: icon)
-                .font(.system(size: isWide ? 13 : 10))
-                .foregroundStyle(.white.opacity(0.25))
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(.system(size: isWide ? 22 : 17, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                Text(unit)
-                    .font(.system(size: isWide ? 11 : 9))
-                    .foregroundStyle(.white.opacity(0.3))
-            }
-        }
-    }
-
-    private var estimateCalories: Double {
-        Double(
-            WorkoutExportService.estimateCalories(
-                avgPower: workout.avgPower, durationSeconds: workout.duration))
     }
 }
 

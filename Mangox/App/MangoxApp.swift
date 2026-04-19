@@ -83,7 +83,7 @@ private struct NotificationLifecycleHook: View {
                     TrainingNotificationsScheduler.rescheduleFTPReminder()
                     WorkoutRAGIndex.scheduleBackgroundSync()
                 case .background:
-                    di.locationService.persistRecordingCheckpointIfNeeded()
+                    di.locationService.persistRecordingCheckpointNow()
                     TrainingNotificationsScheduler.rescheduleEveningPreview()
                 default:
                     break

@@ -56,6 +56,7 @@ protocol AIServiceProtocol: AnyObject {
     func deleteSession(_ sessionID: UUID)
     func fetchSessions() -> [ChatSession]
     func clearMessages()
+    func dismissError()
     func submitFeedback(for messageID: UUID, score: Int)
     func regenerateLastMessage(isPro: Bool) async
 

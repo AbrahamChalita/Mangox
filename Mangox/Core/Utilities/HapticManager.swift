@@ -104,6 +104,11 @@ final class HapticManager {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
+    /// Subtle ack when the assistant's reply finishes streaming.
+    func coachReplyReceived() {
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+    }
+
     // MARK: - Onboarding
 
     /// Permission or integration step completed during first-launch onboarding.

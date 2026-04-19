@@ -515,7 +515,7 @@ struct HeartRateSettingsView: View {
                         .tint(AppColor.mango)
 
                         Text(
-                            "For calendar (.ics), FIT export, and Zwift (.zwo), open Connections > Calendar & File Sharing."
+                            "Plan to calendar (.ics) options live in Data, Privacy & Alerts. Ride file export (FIT/GPX) is on Ride Summary; Zwift (.zwo) import is in Indoor Ride Setup."
                         )
                         .font(.system(size: 10))
                         .foregroundStyle(.white.opacity(0.28))
@@ -1527,98 +1527,6 @@ struct MangoxProSettingsView: View {
     }
 }
 
-// MARK: - Calendar export & file-sharing guides (Health lives under Heart Rate)
-
-struct IntegrationsSettingsView: View {
-    @State private var icsStartHour = PlanICSPreferences.defaultStartHour
-    @State private var icsValarm = PlanICSPreferences.includeWorkoutReminder
-
-    var body: some View {
-        SettingsSubviewShell(title: "Calendar & File Sharing") {
-            settingsSubCard {
-                VStack(alignment: .leading, spacing: 14) {
-                    Label("Training Plan to Calendar (.ics)", systemImage: "calendar")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.88))
-                    Text(
-                        "From your active plan, open the menu and choose Export Calendar (.ics), then import it into Apple Calendar, Google Calendar, or Outlook."
-                    )
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.42))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Default workout start (local hour)")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.55))
-                            Spacer()
-                            Stepper(
-                                value: $icsStartHour,
-                                in: 0...23,
-                                step: 1
-                            ) {
-                                Text(String(format: "%02d:00", icsStartHour))
-                                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(.white.opacity(0.85))
-                                    .frame(minWidth: 52, alignment: .trailing)
-                            }
-                            .onChange(of: icsStartHour) { _, v in
-                                PlanICSPreferences.defaultStartHour = v
-                            }
-                        }
-                        Toggle(isOn: $icsValarm) {
-                            Text("15-minute reminder before each timed workout")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.white.opacity(0.55))
-                        }
-                        .tint(AppColor.mango)
-                        .onChange(of: icsValarm) { _, v in
-                            PlanICSPreferences.includeWorkoutReminder = v
-                        }
-                    }
-                }
-            }
-
-            settingsSubCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("Ride files & Zwift workouts", systemImage: "square.and.arrow.up")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.88))
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("After a ride")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.5))
-                        Text(
-                            "Open Ride Summary and use Share to export FIT or GPX. AirDrop or open in Garmin Connect, TrainingPeaks, Intervals.icu, and similar apps."
-                        )
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.42))
-                        .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Before an indoor workout")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.5))
-                        Text(
-                            "Home > Indoor Ride Setup > Custom Workout > Import .zwo. Mangox maps common Zwift steps (steady state, intervals, ramps, warm up/cool down, free ride, short max efforts) to guided ERG."
-                        )
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.42))
-                        .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-        }
-        .onAppear {
-            icsStartHour = PlanICSPreferences.defaultStartHour
-            icsValarm = PlanICSPreferences.includeWorkoutReminder
-        }
-    }
-}
-
 // MARK: - Gear labels
 
 struct GearSettingsView: View {
@@ -1677,6 +1585,8 @@ struct DataPrivacyNotificationsHubView: View {
     @State private var notifyHour = TrainingNotificationsPreferences.tomorrowReminderHour
     @State private var notifyMissed = TrainingNotificationsPreferences.missedKeyWorkoutNudge
     @State private var notifyFtp = TrainingNotificationsPreferences.ftpTestReminder
+    @State private var icsStartHour = PlanICSPreferences.defaultStartHour
+    @State private var icsValarm = PlanICSPreferences.includeWorkoutReminder
     @State private var authStatusText = "Loading..."
     @State private var exportURL: URL?
     @State private var showExportShare = false
@@ -1705,7 +1615,7 @@ struct DataPrivacyNotificationsHubView: View {
                         ok: viewModel.healthKitSyncWorkoutsToAppleHealth
                     )
                     Text(
-                        "Ride files: Ride Summary > Share for FIT, GPX, or TCX. Plan calendar: Connections > Calendar & File Sharing."
+                        "Ride files: Ride Summary > Share for FIT, GPX, or TCX."
                     )
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.35))
@@ -1725,6 +1635,48 @@ struct DataPrivacyNotificationsHubView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
                     .buttonStyle(.plain)
+                }
+            }
+
+            MangoxSectionLabel(title: "Plan to calendar")
+            settingsSubCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(
+                        "From your active plan, open the menu and choose Export Calendar (.ics), then import into Apple Calendar, Google Calendar, or Outlook."
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    HStack {
+                        Text("Default workout start (local hour)")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.55))
+                        Spacer()
+                        Stepper(
+                            value: $icsStartHour,
+                            in: 0...23,
+                            step: 1
+                        ) {
+                            Text(String(format: "%02d:00", icsStartHour))
+                                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .frame(minWidth: 52, alignment: .trailing)
+                        }
+                        .onChange(of: icsStartHour) { _, v in
+                            PlanICSPreferences.defaultStartHour = v
+                        }
+                    }
+
+                    Toggle(isOn: $icsValarm) {
+                        Text("15-minute reminder before each timed workout")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                    .tint(AppColor.mango)
+                    .onChange(of: icsValarm) { _, v in
+                        PlanICSPreferences.includeWorkoutReminder = v
+                    }
                 }
             }
 

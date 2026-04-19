@@ -74,7 +74,7 @@ struct LapCardView: View {
             }
         }
         .padding(12)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+        .glassEffect(.regular, in: .rect(cornerRadius: 12))
     }
 
     private var compactBody: some View {
@@ -106,7 +106,7 @@ struct LapCardView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 10))
+        .glassEffect(.regular, in: .rect(cornerRadius: 10))
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {

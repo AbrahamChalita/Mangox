@@ -498,6 +498,10 @@ final class AIService: AIServiceProtocol, CoachRepository {
         clearMessages(modelContext: persistenceContext)
     }
 
+    func dismissError() {
+        error = nil
+    }
+
     func regenerateLastMessage(isPro: Bool) async {
         await regenerateLastMessage(isPro: isPro, modelContext: persistenceContext)
     }
@@ -819,6 +823,11 @@ final class AIService: AIServiceProtocol, CoachRepository {
             "coachFlow cloud runMangoxCloudCoachTurn begin provider=\(provider.kind.rawValue) historyTurns=\(history.count) userChars=\(userText.count)"
         )
 
+        // Always tear down streaming UI state, even on error / cancellation.
+        // The final assistant bubble is appended inside the do-block before this fires,
+        // so the visible draft is never blanked while there is no message to take its place.
+        defer { resetStreamingState(clearLoading: true) }
+
         do {
             var finalResponse: ChatAPIResponse?
             var streamFailure: String?
@@ -842,58 +851,23 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 }
             }
 
-            flushStreamDraftToUI()
-            streamDraftText = ""
-            streamRawBuffer = ""
-            streamDisplayThrottleTask?.cancel()
-            streamDisplayThrottleTask = nil
-            streamStatusText = nil
-            streamIsThinking = false
-            isLoading = false
-
             if let streamFailure {
-                let errMsg = ChatMessage(
-                    id: UUID(),
-                    role: .assistant,
-                    content: streamFailure,
-                    timestamp: .now,
-                    suggestedActions: [],
-                    followUpQuestion: nil,
-                    followUpBlocks: [],
-                    thinkingSteps: [],
+                appendAssistantErrorBubble(
+                    streamFailure,
                     category: "error",
-                    tags: [],
-                    references: [],
-                    usedWebSearch: false,
-                    feedbackScore: nil,
-                    confidence: 0
+                    modelContext: modelContext
                 )
-                messages.append(errMsg)
-                persistCoachMessage(errMsg, modelContext: modelContext)
                 self.error = streamFailure
                 logCoachFlow("coachFlow cloud end streamFailure assistantErrorBubble")
                 return
             }
 
             guard let response = finalResponse else {
-                let errMsg = ChatMessage(
-                    id: UUID(),
-                    role: .assistant,
-                    content: "The coach didn't return a complete reply. Please try again.",
-                    timestamp: .now,
-                    suggestedActions: [],
-                    followUpQuestion: nil,
-                    followUpBlocks: [],
-                    thinkingSteps: [],
+                appendAssistantErrorBubble(
+                    "The coach didn't return a complete reply. Please try again.",
                     category: "error",
-                    tags: [],
-                    references: [],
-                    usedWebSearch: false,
-                    feedbackScore: nil,
-                    confidence: 0
+                    modelContext: modelContext
                 )
-                messages.append(errMsg)
-                persistCoachMessage(errMsg, modelContext: modelContext)
                 self.error = "Empty response"
                 logCoachFlow("coachFlow cloud end emptyFinalResponse")
                 return
@@ -955,8 +929,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 feedbackScore: nil,
                 confidence: response.confidence
             )
-            messages.append(aiMsg)
-            persistCoachMessage(aiMsg, modelContext: modelContext)
+            commitAssistantMessage(aiMsg, modelContext: modelContext)
 
             logCoachFlow(
                 "coachFlow cloud success category=\(response.category) suggestedActions=\(panelActions.count) followUpBlocks=\(blocks.count)"
@@ -968,37 +941,67 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 isPro: isPro,
                 modelContext: modelContext
             )
+        } catch is CancellationError {
+            logCoachFlow("coachFlow cloud cancelled")
         } catch {
             logger.error("runMangoxCloudCoachTurn failed: \(error)")
             logCoachFlow("coachFlow cloud catch transportOrDecodeError")
-            streamDraftText = ""
-            streamRawBuffer = ""
-            streamDisplayThrottleTask?.cancel()
-            streamDisplayThrottleTask = nil
-            streamStatusText = nil
-            streamIsThinking = false
-            isLoading = false
-            let errMsg = ChatMessage(
-                id: UUID(),
-                role: .assistant,
-                content:
-                    "I couldn't connect to the coaching server. Please check your connection and try again.",
-                timestamp: .now,
-                suggestedActions: [],
-                followUpQuestion: nil,
-                followUpBlocks: [],
-                thinkingSteps: [],
+            appendAssistantErrorBubble(
+                "I couldn't connect to the coaching server. Please check your connection and try again.",
                 category: "error",
-                tags: [],
-                references: [],
-                usedWebSearch: false,
-                feedbackScore: nil,
-                confidence: 0
+                modelContext: modelContext
             )
-            messages.append(errMsg)
-            persistCoachMessage(errMsg, modelContext: modelContext)
             self.error = error.localizedDescription
         }
+    }
+
+    /// Persist-first commit: write to disk, then append to the in-memory array. Keeps
+    /// the visible transcript in lock-step with what `loadPersistedMessages()` would
+    /// rehydrate, eliminating "the message was there a second ago" disappearances.
+    private func commitAssistantMessage(_ message: ChatMessage, modelContext: ModelContext) {
+        do {
+            try persistCoachMessage(message, modelContext: modelContext)
+            messages.append(message)
+        } catch {
+            logger.error("commitAssistantMessage persist failed: \(error)")
+            self.error = "Couldn't save coach reply: \(error.localizedDescription)"
+            // Still surface the reply this session so the user isn't stuck in silence.
+            messages.append(message)
+        }
+        notifyAssistantMessageArrived(message)
+    }
+
+    private func notifyAssistantMessageArrived(_ message: ChatMessage) {
+        // Skip silent ack on error bubbles — the banner above the input bar already
+        // tells the user (and via VoiceOver) that something failed.
+        guard message.category != "error" else { return }
+        HapticManager.shared.coachReplyReceived()
+        let summary = String(message.content.prefix(140))
+        UIAccessibility.post(notification: .announcement, argument: "Coach replied. \(summary)")
+    }
+
+    private func appendAssistantErrorBubble(
+        _ text: String,
+        category: String,
+        modelContext: ModelContext
+    ) {
+        let errMsg = ChatMessage(
+            id: UUID(),
+            role: .assistant,
+            content: text,
+            timestamp: .now,
+            suggestedActions: [],
+            followUpQuestion: nil,
+            followUpBlocks: [],
+            thinkingSteps: [],
+            category: category,
+            tags: [],
+            references: [],
+            usedWebSearch: false,
+            feedbackScore: nil,
+            confidence: 0
+        )
+        commitAssistantMessage(errMsg, modelContext: modelContext)
     }
 
     private func bumpSessionUpdatedAt(modelContext: ModelContext) {
@@ -1069,10 +1072,19 @@ final class AIService: AIServiceProtocol, CoachRepository {
         }
 
         let userMsg = ChatMessage.user(trimmed)
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
-            messages.append(userMsg)
+        do {
+            try persistCoachMessage(userMsg, modelContext: modelContext)
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
+                messages.append(userMsg)
+            }
+        } catch {
+            logger.error("sendMessage user persist failed: \(error)")
+            self.error = "Couldn't save your message: \(error.localizedDescription)"
+            // Still show it locally so the user sees what they typed.
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
+                messages.append(userMsg)
+            }
         }
-        persistCoachMessage(userMsg, modelContext: modelContext)
 
         // Update session title from first user message
         updateSessionTitleIfNeeded(modelContext: modelContext)
@@ -1081,8 +1093,108 @@ final class AIService: AIServiceProtocol, CoachRepository {
         error = nil
         resetStreamingState(clearLoading: false)
 
+        if await tryOnDeviceNarrowTurn(
+            userText: trimmed,
+            modelContext: modelContext
+        ) {
+            logCoachFlow("coachFlow sendMessage path=onDeviceNarrow")
+            return
+        }
+
         logCoachFlow("coachFlow sendMessage path=cloudOnly")
         await runMangoxCloudCoachTurn(userText: trimmed, isPro: isPro, modelContext: modelContext)
+    }
+
+    // MARK: - On-device narrow routing
+
+    /// Returns `true` when the on-device Foundation Models path produced a final assistant
+    /// reply. Returns `false` to fall back to the cloud (model unavailable, locale unsupported,
+    /// message looks heavy, on-device generation failed, or the reply was empty).
+    private func tryOnDeviceNarrowTurn(
+        userText: String,
+        modelContext: ModelContext
+    ) async -> Bool {
+        guard OnDeviceCoachEngine.isOnDeviceWritingModelAvailable else { return false }
+        if OnDeviceCoachEngine.heuristicCloudRoute(for: userText) { return false }
+
+        let length = userText.count
+        let isShort = length <= 220
+        let prefersLocal = OnDeviceCoachEngine.heuristicLocalPreferred(for: userText)
+        guard isShort || prefersLocal else { return false }
+
+        let snapshot = await coachTrainingSnapshotForOnDeviceNarrow(modelContext: modelContext)
+        let tools: [any Tool] = [
+            MangoxOnDeviceRecentWorkoutsTool(
+                digest: coachWorkoutHistoryDigestForOnDeviceTools(modelContext: modelContext)
+            ),
+            MangoxOnDeviceRiderExtendedTool(
+                digest: coachRiderExtendedProfileToolPayload(modelContext: modelContext)
+            ),
+            MangoxOnDeviceFTPHistoryTool(digest: coachFTPTestHistoryToolPayload()),
+            MangoxOnDeviceWhoopRecoveryTool(
+                digest: coachWhoopRecoveryToolPayload(modelContext: modelContext)
+            ),
+            MangoxOnDeviceActivePlanTool(
+                digest: coachActivePlanContextToolPayload(modelContext: modelContext)
+            ),
+        ]
+        let session = OnDeviceCoachEngine.makeNarrowSession(tools: tools)
+
+        do {
+            let final = try await OnDeviceCoachEngine.signpostOnDeviceNarrow {
+                try await OnDeviceCoachEngine.streamNarrowReply(
+                    userMessage: userText,
+                    trainingSnapshot: snapshot,
+                    session: session
+                ) { partial in
+                    let body = partial.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    self.streamRawBuffer = body
+                    self.streamStatusText = nil
+                    self.streamIsThinking = body.isEmpty
+                    self.scheduleStreamDraftDisplayFlush()
+                }
+            }
+
+            guard let reply = final, !reply.body.isEmpty else {
+                // Leave streaming state intact so the cloud fallback continues
+                // displaying the thinking indicator without a flicker.
+                logCoachFlow("coachFlow onDevice empty -> fallback cloud")
+                return false
+            }
+
+            // Final cleanup happens here only on success; on fallback we hand the
+            // streaming UI state to the cloud path untouched.
+            defer { resetStreamingState(clearLoading: true) }
+
+            let actions = reply.suggestedActions
+                .map { SuggestedAction(label: $0.label, type: "follow_up") }
+                .prefix(4)
+                .map { $0 }
+            let followUp = reply.followUp.trimmingCharacters(in: .whitespacesAndNewlines)
+            let aiMsg = ChatMessage(
+                id: UUID(),
+                role: .assistant,
+                content: reply.body,
+                timestamp: .now,
+                suggestedActions: Self.sanitizedSuggestedActions(actions),
+                followUpQuestion: followUp.isEmpty ? nil : followUp,
+                followUpBlocks: [],
+                thinkingSteps: [],
+                category: "on_device",
+                tags: [],
+                references: [],
+                usedWebSearch: false,
+                feedbackScore: nil,
+                confidence: 1.0
+            )
+            commitAssistantMessage(aiMsg, modelContext: modelContext)
+            logCoachFlow("coachFlow onDevice success chars=\(reply.body.count)")
+            return true
+        } catch {
+            logger.error("on-device narrow turn failed: \(error)")
+            logCoachFlow("coachFlow onDevice error -> fallback cloud")
+            return false
+        }
     }
 
     // MARK: - Generate Plan
@@ -1549,8 +1661,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
             feedbackScore: nil,
             confidence: 1.0
         )
-        messages.append(msg)
-        persistCoachMessage(msg, modelContext: modelContext)
+        commitAssistantMessage(msg, modelContext: modelContext)
     }
 
     // MARK: - Context Building
@@ -1900,7 +2011,10 @@ final class AIService: AIServiceProtocol, CoachRepository {
         createNewSession(modelContext: modelContext)
     }
 
-    private func persistCoachMessage(_ message: ChatMessage, modelContext: ModelContext) {
+    /// Throws on save failure so callers can surface the error and keep `messages` in
+    /// sync with what's actually on disk. Previously this swallowed errors, which is
+    /// what produced the "messages disappear after relaunch" symptom.
+    private func persistCoachMessage(_ message: ChatMessage, modelContext: ModelContext) throws {
         let persisted = CoachChatMessage.from(message)
         if let sessionID = currentSessionID {
             let descriptor = FetchDescriptor<ChatSession>(
@@ -1911,18 +2025,17 @@ final class AIService: AIServiceProtocol, CoachRepository {
             }
         }
         modelContext.insert(persisted)
-        do {
-            try modelContext.save()
-        } catch {
-            logger.error("persistCoachMessage save failed: \(error)")
-        }
+        try modelContext.save()
     }
 
     // MARK: - Helpers
 
     private func buildHistory() -> [HistoryTurn] {
-        // Last 6 turns (12 messages) — exclude the very last user message (sent separately)
+        // Last 6 turns (12 messages) — exclude the very last user message (sent
+        // separately as `ChatRequest.message`); previously the trailing user msg
+        // was duplicated, biasing the model toward repeating itself.
         messages
+            .dropLast()
             .suffix(12)
             .map { HistoryTurn(role: $0.role.rawValue, content: $0.content) }
     }

@@ -272,8 +272,8 @@ struct CoachMessageRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 6)
-        .contentTransition(.opacity)
-        .animation(accessibilityReduceMotion ? .none : MangoxMotion.entrance, value: message.id)
+        // Row entrance is owned by the parent LazyVStack's animation; duplicating it
+        // here caused doubled transitions when new messages were inserted.
     }
 }
 
@@ -723,11 +723,10 @@ struct CoachStreamingBubble: View {
                     .lineSpacing(5)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentTransition(accessibilityReduceMotion ? .identity : .interpolate)
-                    .animation(
-                        accessibilityReduceMotion ? .default : .easeOut(duration: 0.12),
-                        value: text
-                    )
+                    // Streaming text changes every token; animating each delta produced
+                    // visible flicker on fast networks. Identity transition keeps the
+                    // bubble stable while text grows; the final-message swap still fades.
+                    .contentTransition(.identity)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -744,6 +743,145 @@ struct CoachStreamingBubble: View {
         )
         .accessibilityLabel(
             style == .onDevice ? "On-device coach is writing a reply" : "Coach is writing a reply")
+    }
+}
+
+/// Single persistent bubble shown for the entire pending assistant turn — typing dots,
+/// status text, "Reasoning…", and streamed body all render inside the same shell so the
+/// transcript doesn't jump as state moves between phases. Used in place of swapping
+/// between `CoachStreamStatusRow` / `CoachTypingRow` / `CoachStreamingBubble` mid-stream.
+struct CoachPendingReplyBubble: View {
+    let streamingText: String
+    let statusText: String?
+    let isThinking: Bool
+    var style: CoachStreamingBubble.Style = .cloud
+
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
+    private var responseAppearance: CoachResponseAppearance { style.responseAppearance }
+    private var headerLabel: String {
+        if isThinking { return "Reasoning".uppercased() }
+        return responseAppearance.label.uppercased()
+    }
+
+    @ViewBuilder
+    private var inner: some View {
+        if !streamingText.isEmpty {
+            Text(CoachAssistantFormatting.plainTextForStreaming(streamingText))
+                .font(.body)
+                .foregroundStyle(.white.opacity(0.9))
+                .lineSpacing(5)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentTransition(.identity)
+                .transition(.opacity)
+                .id("body")
+        } else if let status = statusText, !status.isEmpty {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .tint(responseAppearance.accent.opacity(0.9))
+                    .scaleEffect(0.78)
+                Text(status)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(2)
+                Spacer(minLength: 0)
+            }
+            .transition(.opacity)
+            .id("status")
+        } else {
+            HStack(spacing: 5) {
+                ForEach(0..<3, id: \.self) { i in
+                    PulsingDot(accent: responseAppearance.accent, delay: Double(i) * 0.14)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(height: 18)
+            .transition(.opacity)
+            .id("typing")
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(responseAppearance.stripGradient)
+                .frame(width: 3)
+                .padding(.vertical, 12)
+                .padding(.leading, 12)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: responseAppearance.icon)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(responseAppearance.accent)
+                    Text(headerLabel)
+                        .font(.system(size: 9, weight: .heavy))
+                        .foregroundStyle(.white.opacity(0.38))
+                        .tracking(0.65)
+                        .contentTransition(.identity)
+                }
+                inner
+                    .animation(
+                        accessibilityReduceMotion ? nil : .easeInOut(duration: 0.18),
+                        value: contentKey
+                    )
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(responseAppearance.bubbleFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(responseAppearance.bubbleStroke, lineWidth: 1)
+        )
+        .accessibilityLabel(accessibilityDescription)
+    }
+
+    private var contentKey: String {
+        if !streamingText.isEmpty { return "body" }
+        if statusText?.isEmpty == false { return "status" }
+        return "typing"
+    }
+
+    private var accessibilityDescription: String {
+        if !streamingText.isEmpty {
+            return style == .onDevice
+                ? "On-device coach is writing a reply"
+                : "Coach is writing a reply"
+        }
+        if let status = statusText, !status.isEmpty {
+            return "Coach status: \(status)"
+        }
+        if isThinking { return "Coach is reasoning" }
+        return "Coach is typing"
+    }
+}
+
+private struct PulsingDot: View {
+    let accent: Color
+    let delay: Double
+
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @State private var on = false
+
+    var body: some View {
+        Circle()
+            .fill(accent.opacity(0.72))
+            .frame(width: 7, height: 7)
+            .scaleEffect(accessibilityReduceMotion ? 1 : (on ? 1.2 : 0.72))
+            .animation(
+                accessibilityReduceMotion
+                    ? nil
+                    : .easeInOut(duration: 0.38).repeatForever(autoreverses: true).delay(delay),
+                value: on
+            )
+            .onAppear { on = true }
     }
 }
 
@@ -816,7 +954,12 @@ struct CoachTallPromptButton: View {
         }
         .buttonStyle(MangoxPressStyle())
         .disabled(!isEnabled)
-        .accessibilityLabel(accessibilityLabelOverride ?? title)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            accessibilityLabelOverride
+                ?? [title, subtitle].compactMap { $0 }.joined(separator: ", ")
+        )
+        .accessibilityAddTraits(.isButton)
     }
 }
 

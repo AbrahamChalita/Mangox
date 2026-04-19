@@ -67,7 +67,12 @@ final class CoachViewModel {
             starterContent = nil
             return
         }
-        starterContent = await coach.loadCoachEmptyStartersContent()
+        let sessionAtStart = currentSessionID
+        let content = await coach.loadCoachEmptyStartersContent()
+        // Bail if the user switched sessions or sent a message while we were
+        // generating starters, so stale starters don't land over the new state.
+        guard sessionAtStart == currentSessionID, messages.isEmpty else { return }
+        starterContent = content
     }
 
     func contextualQuickPrompts() -> [QuickPrompt] {
@@ -105,6 +110,17 @@ final class CoachViewModel {
 
     func deleteSession(_ sessionID: UUID) {
         coach.deleteSession(sessionID)
+    }
+
+    func dismissError() {
+        coach.dismissError()
+    }
+
+    func retryLastUserMessage(isPro: Bool) async {
+        guard let lastUser = messages.last(where: { $0.role == .user })?.content,
+              !lastUser.isEmpty
+        else { return }
+        await coach.sendMessage(lastUser, isPro: isPro)
     }
 
     func submitFeedback(for messageID: UUID, score: Int) {

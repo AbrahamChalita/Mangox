@@ -27,6 +27,8 @@ final class Workout {
     var elevationGain: Double = 0           // meters of positive elevation gain (from GPX route)
     var statusRaw: String = "active"        // active, paused, completed
     var notes: String = ""                  // user-added post-ride notes
+    /// Borg-style 1–10 rating of perceived exertion. `0` means unrated.
+    var rpe: Int = 0
     var originRaw: String = WorkoutOrigin.recorded.rawValue
     var importFormatRaw: String?
 

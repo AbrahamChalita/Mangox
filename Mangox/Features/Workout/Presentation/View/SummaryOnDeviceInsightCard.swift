@@ -90,7 +90,84 @@ private struct InsightPowerZonesFooter: View {
     }
 }
 
+private struct InsightPowerZonesCompactStrip: View {
+    let segments: [RideInsightZoneSegment]
+    var subdued: Bool = false
+
+    @Environment(\.isWideSummary) private var isWide
+
+    private var nonzero: [RideInsightZoneSegment] {
+        segments.filter { $0.percent > 0.001 }
+    }
+
+    private var total: Double {
+        max(nonzero.reduce(0) { $0 + $1.percent }, 0.000_001)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: isWide ? 8 : 7) {
+            HStack(spacing: 6) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: isWide ? 11 : 10))
+                    .foregroundStyle(.white.opacity(0.35))
+                Text("ZONE MIX")
+                    .font(.system(size: isWide ? 10 : 9, weight: .heavy))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .tracking(1.1)
+            }
+
+            GeometryReader { geo in
+                let spacing: CGFloat = 1
+                let count = nonzero.count
+                let totalSpacing = spacing * CGFloat(max(0, count - 1))
+                let usable = max(geo.size.width - totalSpacing, 0)
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.05))
+                    if !nonzero.isEmpty {
+                        HStack(spacing: spacing) {
+                            ForEach(nonzero) { seg in
+                                let width = max(2, usable * CGFloat(seg.percent / total))
+                                Rectangle()
+                                    .fill(seg.zone.color.opacity(subdued ? 0.5 : 0.95))
+                                    .frame(width: width, height: 8)
+                            }
+                        }
+                        .clipShape(Capsule())
+                    }
+                }
+                .frame(height: 8)
+            }
+            .frame(height: 8)
+
+            HStack(spacing: isWide ? 8 : 6) {
+                ForEach(segments) { seg in
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(seg.zone.color.opacity(subdued ? 0.5 : 1))
+                            .frame(width: 6, height: 6)
+                        Text("Z\(seg.zone.id)")
+                            .font(.system(size: isWide ? 10 : 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.72))
+                        Text("\(Int((seg.percent * 100).rounded()))%")
+                            .font(.system(size: isWide ? 9 : 8, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.42))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .opacity(subdued ? 0.65 : 1)
+    }
+}
+
 /// On-device Apple Intelligence takeaway for the ride summary (Foundation Models).
+enum SummaryInsightCardDisplayMode {
+    case regular
+    case compact
+}
+
 struct SummaryOnDeviceInsightCard: View {
     let workout: Workout
     let zoneSegments: [RideInsightZoneSegment]
@@ -99,50 +176,59 @@ struct SummaryOnDeviceInsightCard: View {
     let ftpWatts: Int
     /// First name when known (e.g. Strava); insights avoid naming the app as the rider.
     var riderCallName: String? = nil
+    var displayMode: SummaryInsightCardDisplayMode = .regular
     /// When `true`, the standalone summary power-zones card should appear (insight unavailable).
     @Binding var onDeviceInsightFailed: Bool
 
     @State private var insight: WorkoutSummaryOnDeviceInsight?
     /// True when ``insight`` was built from ``OnDeviceModelFallbackCopy`` (no on-device language model or model returned nothing).
     @State private var insightIsStatsFallback = false
+    private var isCompact: Bool { displayMode == .compact }
 
     var body: some View {
         Group {
             if let insight {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: isCompact ? 10 : 12) {
                     HStack(spacing: 8) {
                         Image(systemName: "apple.intelligence")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: isCompact ? 13 : 14, weight: .semibold))
                             .foregroundStyle(AppColor.mango)
-                        Text("RIDE INSIGHT")
-                            .font(.system(size: 10, weight: .bold))
+                        Text(isCompact ? "COACHING" : "RIDE INSIGHT")
+                            .font(.system(size: isCompact ? 11 : 10, weight: .bold))
                             .foregroundStyle(.white.opacity(0.35))
                             .tracking(1.0)
                         Spacer(minLength: 0)
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.35))
+                        if !isCompact {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.35))
+                        }
                     }
 
                     Text(insight.displayHeadline)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: isCompact ? 15 : 16, weight: .semibold))
                         .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
                         .fixedSize(horizontal: false, vertical: true)
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(Array(insight.displayBullets.enumerated()), id: \.offset) { _, line in
+                    VStack(alignment: .leading, spacing: isCompact ? 5 : 6) {
+                        ForEach(
+                            Array(
+                                insight.displayBullets.prefix(isCompact ? 2 : insight.displayBullets.count)
+                                    .enumerated()),
+                            id: \.offset
+                        ) { _, line in
                             HStack(alignment: .top, spacing: 8) {
                                 Text("•")
                                     .foregroundStyle(.white.opacity(0.45))
                                 Text(line)
-                                    .font(.system(size: 13))
+                                    .font(.system(size: isCompact ? 12 : 13))
                                     .foregroundStyle(.white.opacity(0.78))
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
 
-                    if let narrative = insight.displayNarrative {
+                    if !isCompact, let narrative = insight.displayNarrative {
                         Text(narrative)
                             .font(.system(size: 13))
                             .foregroundStyle(.white.opacity(0.75))
@@ -150,7 +236,7 @@ struct SummaryOnDeviceInsightCard: View {
                             .padding(.top, 2)
                     }
 
-                    if let caveat = insight.displayCaveat {
+                    if !isCompact, let caveat = insight.displayCaveat {
                         Text(caveat)
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.45))
@@ -161,33 +247,47 @@ struct SummaryOnDeviceInsightCard: View {
                         Text(
                             "Stats-based summary. Apple Intelligence is not available on this device."
                         )
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.38))
-                        .fixedSize(horizontal: false, vertical: true)
+                        .font(.system(size: isCompact ? 11 : 10))
+                            .foregroundStyle(.white.opacity(0.38))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    Text("Private on this device — not sent to the cloud coach.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.32))
+                    if isCompact {
+                        InsightPowerZonesCompactStrip(segments: zoneSegments, subdued: false)
+                    }
 
-                    InsightPowerZonesFooter(segments: zoneSegments, subdued: false)
+                    if !isCompact {
+                        Text("Private on this device — not sent to the cloud coach.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.32))
+                    }
+
+                    if !isCompact {
+                        InsightPowerZonesFooter(segments: zoneSegments, subdued: false)
+                    }
                 }
-                .padding(14)
+                .padding(isCompact ? 12 : 14)
                 .cardStyle(cornerRadius: 16)
             } else {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: isCompact ? 8 : 12) {
                     HStack(spacing: 10) {
                         ProgressView()
                             .tint(AppColor.mango)
-                        Text("Generating on-device insight…")
-                            .font(.system(size: 13))
+                        Text(isCompact ? "Generating coaching insight…" : "Generating on-device insight…")
+                            .font(.system(size: isCompact ? 12 : 13))
                             .foregroundStyle(.white.opacity(0.45))
                         Spacer(minLength: 0)
                     }
 
-                    InsightPowerZonesFooter(segments: zoneSegments, subdued: true)
+                    if isCompact {
+                        InsightPowerZonesCompactStrip(segments: zoneSegments, subdued: true)
+                    }
+
+                    if !isCompact {
+                        InsightPowerZonesFooter(segments: zoneSegments, subdued: true)
+                    }
                 }
-                .padding(14)
+                .padding(isCompact ? 12 : 14)
                 .cardStyle(cornerRadius: 16)
             }
         }

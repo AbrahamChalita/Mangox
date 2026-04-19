@@ -8,7 +8,6 @@ private enum SettingsRoute: Hashable {
     case heartRate
     case strava
     case whoop
-    case integrations
     case indoorTrainer
     case outdoorRide
     case audioHaptics
@@ -106,26 +105,6 @@ struct SettingsView: View {
                                     ? AppColor.success : .white.opacity(0.3),
                                 route: .whoop
                             )
-                            rowDivider
-                            navRow(
-                                icon: "calendar.badge.clock",
-                                iconColor: AppColor.blue,
-                                title: "Calendar & File Sharing",
-                                value: ".ics export · guides",
-                                route: .integrations
-                            )
-                            rowDivider
-                            Button {
-                                navigationPath.append(AppRoute.outdoorSensorsSetup)
-                            } label: {
-                                rowContent(
-                                    icon: "antenna.radiowaves.left.and.right",
-                                    iconColor: AppColor.blue,
-                                    title: "Bluetooth Sensors",
-                                    value: ""
-                                )
-                            }
-                            .buttonStyle(.plain)
                         }
 
                         // MARK: Ride Settings
@@ -145,6 +124,18 @@ struct SettingsView: View {
                                 value: "",
                                 route: .outdoorRide
                             )
+                            rowDivider
+                            Button {
+                                navigationPath.append(AppRoute.outdoorSensorsSetup)
+                            } label: {
+                                rowContent(
+                                    icon: "antenna.radiowaves.left.and.right",
+                                    iconColor: AppColor.blue,
+                                    title: "Bluetooth Sensors",
+                                    value: ""
+                                )
+                            }
+                            .buttonStyle(.plain)
                             rowDivider
                             navRow(
                                 icon: "bicycle",
@@ -221,7 +212,7 @@ struct SettingsView: View {
                             .padding(.horizontal, 16)
                         }
 
-                        // TEMPORARY debug entry — remove after story QA
+                        #if DEBUG
                         sectionLabel("Debug")
                             .padding(.top, 24)
                         settingsGroup {
@@ -244,12 +235,12 @@ struct SettingsView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                        #endif
 
                         Spacer().frame(height: 48)
                     }
                 }
                 .scrollIndicators(.hidden)
-                .navigationTitle("Settings")
                 .navigationBarTitleDisplayMode(.inline)
                 .keyboardDismissToolbar()
                 .navigationDestination(for: SettingsRoute.self) { route in
@@ -259,7 +250,6 @@ struct SettingsView: View {
                     case .heartRate: HeartRateSettingsView(viewModel: viewModel)
                     case .strava: StravaSettingsView(viewModel: viewModel)
                     case .whoop: WhoopSettingsView(viewModel: viewModel)
-                    case .integrations: IntegrationsSettingsView()
                     case .indoorTrainer: IndoorTrainerSettingsView()
                     case .outdoorRide: OutdoorRideSettingsView()
                     case .audioHaptics: AudioHapticsSettingsView()

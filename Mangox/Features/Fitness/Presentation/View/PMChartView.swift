@@ -2,13 +2,28 @@ import Charts
 import SwiftData
 import SwiftUI
 
-/// Performance Management Chart (PMC) showing CTL, ATL, and TSB over time.
-/// The industry-standard training load visualization.
+/// Performance Management Chart (PMC) + power curve for the Stats tab.
+/// Form (TSB), fitness (CTL), and fatigue (ATL) live in one panel above an
+/// interactive chart that supports scrubbing. Compaction notes:
+/// - The old hero + metric strip are merged into a single `formPanel`.
+/// - The range selector + series toggle + footnote all collapse into the
+///   chart card's title bar so the chart itself is the center of the screen.
+/// - Power curve is a log-scaled LineMark with tap-to-inspect instead of bars.
+/// - A slim sticky pill appears above the chart once the form panel scrolls
+///   off so the current TSB is always in view.
 struct PMChartView: View {
     @Binding var navigationPath: NavigationPath
     @State private var viewModel: FitnessViewModel
+    @State private var pmcWorkoutSnapshotCache: [WorkoutMetricsSnapshot] = []
+    @State private var powerCurveSnapshotCache: [WorkoutMetricsSnapshot] = []
 
-    /// Hard cap keeps the stats tab responsive; matches footnote when the store returns a full page.
+    @State private var selectedPMCDate: Date?
+    @State private var selectedPowerDuration: Int?
+    @State private var showScopeInfo = false
+    @State private var stickyVisible = false
+    @State private var formPanelBottomY: CGFloat = .infinity
+
+    /// Hard cap keeps the stats tab responsive; surfaced via an info popover.
     private static let pmcFetchLimit = 600
 
     private static let pmcWorkoutsDescriptor: FetchDescriptor<Workout> = {
@@ -28,494 +43,503 @@ struct PMChartView: View {
 
     @Query(Self.recentPlanProgressDescriptor) private var recentPlanProgress: [TrainingPlanProgress]
 
-    @MainActor
-    private var pmcWorkoutSnapshots: [WorkoutMetricsSnapshot] {
-        allWorkouts.map { WorkoutMetricsSnapshot(pmcFieldsFrom: $0) }
-    }
-
-    @MainActor
-    private func schedulePMCAndPowerCurveRebuild() {
-        let powerSnapshots = WorkoutMetricsSnapshot.powerCurveCandidates(
-            from: allWorkouts,
-            rangeDays: viewModel.rangeDays
-        )
-        viewModel.schedulePMCRebuild(
-            pmcWorkouts: pmcWorkoutSnapshots,
-            powerCurveWorkouts: powerSnapshots
-        )
-    }
-
     init(navigationPath: Binding<NavigationPath>, viewModel: FitnessViewModel) {
         _navigationPath = navigationPath
         _viewModel = State(initialValue: viewModel)
     }
 
+    @MainActor
+    private func rebuildWorkoutSnapshotCaches() {
+        pmcWorkoutSnapshotCache = allWorkouts.map { WorkoutMetricsSnapshot(pmcFieldsFrom: $0) }
+        rebuildPowerCurveSnapshotCache()
+    }
+
+    @MainActor
+    private func rebuildPowerCurveSnapshotCache() {
+        powerCurveSnapshotCache = WorkoutMetricsSnapshot.powerCurveCandidates(
+            from: allWorkouts,
+            rangeDays: viewModel.rangeDays
+        )
+    }
+
+    @MainActor
+    private func schedulePMCAndPowerCurveRebuild() {
+        viewModel.schedulePMCRebuild(
+            pmcWorkouts: pmcWorkoutSnapshotCache,
+            powerCurveWorkouts: powerCurveSnapshotCache
+        )
+    }
+
+    @MainActor
+    private func setRange(_ days: Int) {
+        guard days != viewModel.rangeDays else { return }
+        withAnimation(.snappy) {
+            viewModel.setRange(days)
+            rebuildPowerCurveSnapshotCache()
+            schedulePMCAndPowerCurveRebuild()
+        }
+    }
+
+    // MARK: - Body
+
     var body: some View {
         ZStack {
             AppColor.bg.ignoresSafeArea()
 
-            ScrollView {
-                VStack(spacing: 0) {
-                    header
-                        .padding(.horizontal, 20)
-                        .padding(.top, 12)
-                        .padding(.bottom, 16)
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Training Load")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+                ScrollView {
+                    VStack(spacing: 16) {
+                    if let latest = viewModel.pmcData.last {
+                        formPanel(latest)
+                            .onGeometryChange(
+                                for: CGFloat.self,
+                                of: { $0.frame(in: .named("stats.scroll")).maxY }
+                            ) { newValue in
+                                if abs(newValue - formPanelBottomY) > 0.5 {
+                                    formPanelBottomY = newValue
+                                }
+                            }
+                    }
 
                     if let compliance = viewModel.planCompliance {
-                        planComplianceCard(compliance)
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 16)
+                        planComplianceRow(compliance)
                     }
 
-                    // Form summary (TSB + coaching copy); trend lives in the PMC chart below.
-                    if let latest = viewModel.pmcData.last {
-                        trainingLoadHero(latest)
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 20)
-                    }
-
-                    // Range selector
-                    HStack(spacing: 0) {
-                        ForEach(viewModel.rangeOptions, id: \.self) { days in
-                            let isSelected = days == viewModel.rangeDays
-                            let dayLabel = "\(days)d"
-                            Button(action: {
-                                withAnimation {
-                                    viewModel.setRange(days)
-                                    schedulePMCAndPowerCurveRebuild()
-                                }
-                            }) {
-                                Text(dayLabel)
-                                    .font(
-                                        .system(
-                                            size: 13,
-                                            weight: isSelected ? .semibold : .medium)
-                                    )
-                                    .foregroundStyle(
-                                        isSelected ? .black : .white.opacity(0.6)
-                                    )
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        Capsule()
-                                            .fill(isSelected ? AppColor.mango : Color.clear)
-                                    )
-                            }
-                        }
-                    }
-                    .padding(4)
-                    .background(Color.white.opacity(0.06))
-                    .clipShape(Capsule())
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
-
-                    // Legend
-                    HStack(spacing: 16) {
-                        legendItem(label: "Fitness", color: AppColor.blue, isOn: $viewModel.showCTL)
-                        legendItem(label: "Fatigue", color: AppColor.red, isOn: $viewModel.showATL)
-                        legendItem(label: "Form", color: AppColor.success, isOn: $viewModel.showTSB)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 12)
-
-                    pmcQueryScopeFootnote
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 8)
-
-                    // Chart
-                    if viewModel.pmcData.isEmpty {
-                        emptyState
-                    } else {
-                        pmcChart
-                            .padding(.horizontal, 16)
-                    }
-
-                    // CTL / ATL / TSB breakdown
-                    if let latest = viewModel.pmcData.last {
-                        metricStrip(latest)
-                            .padding(.horizontal, 20)
-                            .padding(.top, 20)
-                    }
+                    pmcChartCard
 
                     if !viewModel.powerCurve.isEmpty {
-                        powerCurveSection
-                            .padding(.horizontal, 20)
-                            .padding(.top, 24)
+                        powerCurveCard
                     }
-
-                    Spacer(minLength: 40)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 40)
+            }
+            .coordinateSpace(name: "stats.scroll")
+            .scrollIndicators(.hidden)
+            .onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentOffset.y
+            } action: { _, offset in
+                // Show the sticky pill once the form panel has scrolled past
+                // the top safe area. Slight hysteresis avoids flicker.
+                let threshold: CGFloat = 8
+                let shouldShow = offset > (formPanelBottomY - offset) + threshold
+                    && offset > 60
+                if shouldShow != stickyVisible {
+                    withAnimation(.snappy(duration: 0.22)) { stickyVisible = shouldShow }
                 }
             }
-            .scrollIndicators(.hidden)
+            }
         }
-        .navigationBarBackButtonHidden()
+        .toolbar(.hidden, for: .navigationBar)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if stickyVisible, let latest = viewModel.pmcData.last {
+                stickyFormPill(latest)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
         .onChange(of: allWorkouts, initial: true) { _, _ in
+            rebuildWorkoutSnapshotCaches()
             schedulePMCAndPowerCurveRebuild()
+            viewModel.updatePlanCompliance(
+                progress: recentPlanProgress,
+                workouts: pmcWorkoutSnapshotCache
+            )
         }
         .onReceive(NotificationCenter.default.publisher(for: .mangoxWorkoutAggregatesMayHaveChanged)) {
             _ in
             schedulePMCAndPowerCurveRebuild()
         }
         .onChange(of: recentPlanProgress, initial: true) { _, _ in
-            viewModel.updatePlanCompliance(progress: recentPlanProgress, workouts: pmcWorkoutSnapshots)
-        }
-    }
-
-    private var pmcAtFetchCap: Bool {
-        allWorkouts.count >= Self.pmcFetchLimit
-    }
-
-    private var pmcQueryScopeFootnote: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(
-                "Chart uses up to the \(Self.pmcFetchLimit.formatted()) most recent rides in the training load query."
+            viewModel.updatePlanCompliance(
+                progress: recentPlanProgress,
+                workouts: pmcWorkoutSnapshotCache
             )
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.white.opacity(0.38))
-            .fixedSize(horizontal: false, vertical: true)
-            if pmcAtFetchCap {
-                Text(
-                    "You're at that cap — oldest rides in this query are omitted; fitness trend still warms up from the included history."
-                )
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.48))
-                .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        HStack(spacing: 10) {
-            Text("Training Load")
-                .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(.white)
-
-            Spacer()
         }
     }
 
-    private func planComplianceCard(_ snap: PlanWeekCompliance.Snapshot) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Plan adherence")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.white.opacity(0.35))
-                .tracking(0.6)
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(snap.planName)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
-                        .lineLimit(2)
-                    Text("Scheduled workouts this week (Mon–Sun)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.38))
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("\(snap.completedWorkouts)/\(snap.scheduledWorkouts)")
-                        .font(.system(size: 22, weight: .bold, design: .monospaced))
-                        .foregroundStyle(AppColor.mango)
-                    Text(snap.percentLabel + " complete")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.45))
-                }
-            }
+    // MARK: - Form Panel (hero + metric strip, merged)
 
-            if snap.plannedWeekTSS > 0 {
-                HStack {
-                    Text("Week load (TSS)")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
-                    Spacer()
-                    Text("\(snap.actualWeekTSS) / \(snap.plannedWeekTSS)")
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.82))
-                    Text("(\(snap.tssPercentLabel) of plan)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.35))
-                }
-                .padding(.top, 4)
-            }
-
-            if snap.keySessionsPlanned > 0 {
-                HStack {
-                    Text("Key sessions")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
-                    Spacer()
-                    Text("\(snap.keySessionsCompleted)/\(snap.keySessionsPlanned) done")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.65))
-                }
-            }
-        }
-        .padding(16)
-        .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private var powerCurveSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Power curve")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.white.opacity(0.9))
-            Text(
-                "Best average power for each duration — rides with a power meter in the last \(viewModel.rangeDays) days (up to 80 sessions)."
-            )
-            .font(.system(size: 11))
-            .foregroundStyle(.white.opacity(0.38))
-            .fixedSize(horizontal: false, vertical: true)
-
-            Chart(viewModel.powerCurve) { pt in
-                BarMark(
-                    x: .value("Duration", powerDurationLabel(pt.durationSeconds)),
-                    y: .value("Watts", pt.watts)
-                )
-                .foregroundStyle(AppColor.mango.opacity(0.85))
-            }
-            .chartXAxis {
-                AxisMarks { _ in
-                    AxisValueLabel()
-                        .foregroundStyle(Color.white.opacity(0.45))
-                }
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading) { val in
-                    AxisGridLine().foregroundStyle(Color.white.opacity(0.06))
-                    AxisValueLabel()
-                        .foregroundStyle(Color.white.opacity(0.4))
-                }
-            }
-            .frame(height: 200)
-            .padding(12)
-            .background(Color.white.opacity(0.02))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    private func formStatus(for tsb: Double) -> (label: String, color: Color, icon: String, advice: String) {
+        if tsb > 25 {
+            return ("Very fresh", AppColor.blue, "bolt.fill", "Ready to push")
+        } else if tsb > 5 {
+            return ("Fresh", AppColor.success, "checkmark.seal.fill", "Good for intensity")
+        } else if tsb > -10 {
+            return ("Neutral", AppColor.yellow, "equal.circle.fill", "Balanced")
+        } else if tsb > -30 {
+            return ("Fatigued", AppColor.orange, "flame.fill", "Take it easy")
+        } else {
+            return ("Overreached", AppColor.red, "exclamationmark.triangle.fill", "Recover")
         }
     }
 
-    private func powerDurationLabel(_ seconds: Int) -> String {
-        if seconds < 60 { return "\(seconds)s" }
-        if seconds % 60 == 0 { return "\(seconds / 60)m" }
-        return "\(seconds / 60)m\(seconds % 60)s"
-    }
-
-    // MARK: - Training Load Hero Card
-
-    /// One-line form trend vs 7 calendar days ago (no mini-chart); uses the same PMC series as the main graph.
-    private func formTSBWeekOverWeekLine(for latest: PMCPoint) -> String? {
+    private func formWoWDelta(_ latest: PMCPoint) -> Int? {
         let cal = Calendar.current
         let latestDay = cal.startOfDay(for: latest.date)
         guard let weekAgoDay = cal.date(byAdding: .day, value: -7, to: latestDay) else { return nil }
         let target = cal.startOfDay(for: weekAgoDay)
-        let points = viewModel.pmcData
-        guard let prior = points.first(where: { cal.startOfDay(for: $0.date) == target }) else {
-            return nil
-        }
-
+        guard let prior = viewModel.pmcData.first(where: { cal.startOfDay(for: $0.date) == target })
+        else { return nil }
         let delta = latest.tsb - prior.tsb
-        let rounded = Int(delta.rounded())
-        if abs(delta) < 1 {
-            return "About the same as last week"
-        }
-        if rounded > 0 {
-            return "Up \(rounded) vs last week"
-        }
-        return "Down \(abs(rounded)) vs last week"
+        guard abs(delta) >= 1 else { return 0 }
+        return Int(delta.rounded())
     }
 
-    private func trainingLoadHero(_ latest: PMCPoint) -> some View {
-        let tsb = latest.tsb
-        let status: String
-        let statusColor: Color
-        let statusIcon: String
-        let advice: String
+    private func formPanel(_ latest: PMCPoint) -> some View {
+        let status = formStatus(for: latest.tsb)
+        let delta = formWoWDelta(latest)
+        // Shared scale so the two bars are visually comparable.
+        let scaleMax = max(latest.ctl, latest.atl, 1)
 
-        if tsb > 25 {
-            status = "Very Fresh"
-            statusColor = AppColor.blue
-            statusIcon = "bolt.fill"
-            advice = "High form — ready for a hard session or race."
-        } else if tsb > 5 {
-            status = "Fresh"
-            statusColor = AppColor.success
-            statusIcon = "checkmark.seal.fill"
-            advice = "Good form — ideal for intensity work."
-        } else if tsb > -10 {
-            status = "Neutral"
-            statusColor = AppColor.yellow
-            statusIcon = "equal.circle.fill"
-            advice = "Balanced fitness and fatigue."
-        } else if tsb > -30 {
-            status = "Fatigued"
-            statusColor = AppColor.orange
-            statusIcon = "flame.fill"
-            advice = "Consider an easy day or rest."
-        } else {
-            status = "Overreached"
-            statusColor = AppColor.red
-            statusIcon = "exclamationmark.triangle.fill"
-            advice = "Recovery needed to avoid overtraining."
-        }
-
-        let cardRadius = MangoxRadius.card.rawValue
-
-        return VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
-            HStack(alignment: .center, spacing: MangoxSpacing.md.rawValue) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("FORM")
-                        .mangoxFont(.label)
-                        .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                        .tracking(1.0)
-                    Text(String(format: "%.0f", tsb))
-                        .font(.system(size: 26, weight: .bold, design: .monospaced))
-                        .foregroundStyle(statusColor)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-
-                Spacer(minLength: MangoxSpacing.sm.rawValue)
-
-                HStack(spacing: 5) {
-                    Image(systemName: statusIcon)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(statusColor)
-                    Text(status)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(statusColor)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(AppColor.wash(for: statusColor))
-                .clipShape(Capsule())
-            }
-
-            if let wow = formTSBWeekOverWeekLine(for: latest) {
-                Text(wow)
-                    .font(.system(size: 12, weight: .medium))
+        return HStack(alignment: .center, spacing: 14) {
+            // LEFT: Hero TSB
+            VStack(alignment: .leading, spacing: 0) {
+                Text("FORM")
+                    .font(.system(size: 10, weight: .heavy))
                     .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                    .fixedSize(horizontal: false, vertical: true)
+                    .tracking(1.1)
+                Text(String(format: "%.0f", latest.tsb))
+                    .font(.system(size: 42, weight: .bold, design: .monospaced))
+                    .foregroundStyle(status.color)
+                    .contentTransition(.numericText(value: latest.tsb))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
+            .frame(minWidth: 72, alignment: .leading)
 
-            Text(advice)
-                .mangoxFont(.callout)
-                .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(MangoxSpacing.md.rawValue)
-        .mangoxSurface(.flat, shape: .rounded(cardRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: cardRadius, style: .continuous)
-                .strokeBorder(statusColor.opacity(0.22), lineWidth: 1)
-        )
-        .accessibilityElement(children: .combine)
-    }
+            // RIGHT: status + advice + stacked balance bars
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 6) {
+                    Image(systemName: status.icon)
+                        .font(.system(size: 10, weight: .bold))
+                        .symbolEffect(.bounce, value: status.label)
+                    Text(status.label)
+                        .font(.system(size: 12, weight: .semibold))
+                    if let delta {
+                        Text("·").foregroundStyle(.white.opacity(0.25))
+                        HStack(spacing: 2) {
+                            Image(systemName:
+                                delta > 0 ? "arrow.up" : (delta < 0 ? "arrow.down" : "equal")
+                            )
+                            .font(.system(size: 8, weight: .bold))
+                            Text(delta == 0 ? "flat" : "\(abs(delta)) wk")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        }
+                        .foregroundStyle(.white.opacity(0.48))
+                    }
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(status.color)
 
-    // MARK: - Metric Strip
-
-    private func metricStrip(_ latest: PMCPoint) -> some View {
-        let tsb = latest.tsb
-        let statusColor: Color =
-            if tsb > 25 {
-                AppColor.blue
-            } else if tsb > 5 {
-                AppColor.success
-            } else if tsb > -10 {
-                AppColor.yellow
-            } else if tsb > -30 {
-                AppColor.orange
-            } else {
-                AppColor.red
-            }
-
-        return HStack(spacing: 12) {
-            pmcStat(
-                label: "CTL", subtitle: "Fitness", value: String(format: "%.0f", latest.ctl),
-                color: AppColor.blue
-            )
-            .padding(.vertical, 16)
-            .background(Color.white.opacity(0.04))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-
-            pmcStat(
-                label: "ATL", subtitle: "Fatigue", value: String(format: "%.0f", latest.atl),
-                color: AppColor.red
-            )
-            .padding(.vertical, 16)
-            .background(Color.white.opacity(0.04))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-
-            pmcStat(
-                label: "TSB", subtitle: "Form", value: String(format: "%.0f", latest.tsb),
-                color: statusColor
-            )
-            .padding(.vertical, 16)
-            .background(Color.white.opacity(0.04))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-    }
-
-    // MARK: - Legend
-
-    private func legendItem(label: String, color: Color, isOn: Binding<Bool>) -> some View {
-        Button {
-            isOn.wrappedValue.toggle()
-        } label: {
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(isOn.wrappedValue ? color : Color.white.opacity(0.15))
-                    .frame(width: 8, height: 8)
-                Text(label)
+                Text(status.advice)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(isOn.wrappedValue ? .white.opacity(0.5) : .white.opacity(0.2))
+                    .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
+
+                balanceBar(
+                    label: "Fit", value: latest.ctl, max: scaleMax, color: AppColor.blue
+                )
+                balanceBar(
+                    label: "Fat", value: latest.atl, max: scaleMax, color: AppColor.red
+                )
             }
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .mangoxSurface(.frosted, shape: .rounded(MangoxRadius.card.rawValue))
+        .overlay(
+            RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            status.color.opacity(0.55),
+                            status.color.opacity(0.12),
+                            status.color.opacity(0.32)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+                .allowsHitTesting(false)
+        )
+        .animation(.snappy, value: latest.tsb)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Form \(Int(latest.tsb.rounded())), \(status.label). Fitness \(Int(latest.ctl.rounded())), fatigue \(Int(latest.atl.rounded()))."
+        )
     }
 
-    // MARK: - Empty State
+    /// Thin horizontal bar — fitness vs fatigue at a glance. Shared scale
+    /// means "fit bar longer than fat bar" reads directly as positive form.
+    private func balanceBar(label: String, value: Double, max: Double, color: Color) -> some View {
+        let pct = max > 0 ? min(1, value / max) : 0
+        return HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 9, weight: .heavy))
+                .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                .tracking(0.6)
+                .frame(width: 22, alignment: .leading)
 
-    private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "chart.line.uptrend.xyaxis")
-                .font(.system(size: 40))
-                .foregroundStyle(.white.opacity(0.15))
-            Text("Not enough data yet")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.4))
-            Text("Complete a few rides to see your training load trends.")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.25))
-                .multilineTextAlignment(.center)
+            Capsule()
+                .fill(Color.white.opacity(0.06))
+                .frame(height: 4)
+                .overlay(alignment: .leading) {
+                    GeometryReader { geo in
+                        Capsule()
+                            .fill(color)
+                            .frame(width: geo.size.width * pct)
+                            .animation(.smooth(duration: 0.4), value: pct)
+                    }
+                }
+
+            Text(String(format: "%.0f", value))
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+                .contentTransition(.numericText(value: value))
+                .frame(width: 24, alignment: .trailing)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
     }
 
-    // MARK: - Chart
+    // MARK: - Sticky Form Pill
+
+    private func stickyFormPill(_ latest: PMCPoint) -> some View {
+        let status = formStatus(for: latest.tsb)
+        return HStack(spacing: 8) {
+            Circle().fill(status.color).frame(width: 6, height: 6)
+            Text("Form")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+            Text(String(format: "%.0f", latest.tsb))
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .foregroundStyle(status.color)
+                .contentTransition(.numericText(value: latest.tsb))
+            Text("·")
+                .foregroundStyle(.white.opacity(0.3))
+            Text(status.label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .mangoxSurface(.frosted, shape: .capsule)
+        .padding(.top, 4)
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Plan Adherence (ring + one line)
+
+    private func planComplianceRow(_ snap: PlanWeekCompliance.Snapshot) -> some View {
+        let fraction = max(0, min(1, snap.fraction))
+        return HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .stroke(Color.white.opacity(0.08), lineWidth: 5)
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(
+                        AppColor.success,
+                        style: StrokeStyle(lineWidth: 5, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                Text(snap.percentLabel)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+                    .contentTransition(.numericText())
+            }
+            .frame(width: 46, height: 46)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("PLAN ADHERENCE")
+                    .font(.system(size: 10, weight: .heavy))
+                    .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                    .tracking(1.1)
+                Text(snap.planName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+                    .lineLimit(1)
+                Text(adherenceSubline(snap))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.card.rawValue))
+        .animation(.snappy, value: snap.fraction)
+    }
+
+    private func adherenceSubline(_ snap: PlanWeekCompliance.Snapshot) -> String {
+        var parts: [String] = ["\(snap.completedWorkouts)/\(snap.scheduledWorkouts) sessions"]
+        if snap.plannedWeekTSS > 0 {
+            parts.append("\(snap.actualWeekTSS)/\(snap.plannedWeekTSS) TSS")
+        }
+        if snap.keySessionsPlanned > 0 {
+            parts.append("\(snap.keySessionsCompleted)/\(snap.keySessionsPlanned) key")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: - PMC Chart Card
+
+    private var pmcAtFetchCap: Bool { allWorkouts.count >= Self.pmcFetchLimit }
+
+    private var pmcChartCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                rangeSegmented
+
+                Menu {
+                    // Buttons (not Toggles) — the menu dismisses on tap, so state
+                    // changes never race the dismissal animation. This avoids the
+                    // "updateVisibleMenuWithBlock while no context menu is visible"
+                    // UIKit warning that Toggle-in-Menu triggers on iOS 26.
+                    Button {
+                        viewModel.showCTL.toggle()
+                    } label: {
+                        Label(
+                            "Fitness (CTL)",
+                            systemImage: viewModel.showCTL ? "checkmark.circle.fill" : "circle"
+                        )
+                    }
+                    Button {
+                        viewModel.showATL.toggle()
+                    } label: {
+                        Label(
+                            "Fatigue (ATL)",
+                            systemImage: viewModel.showATL ? "checkmark.circle.fill" : "circle"
+                        )
+                    }
+                    Button {
+                        viewModel.showTSB.toggle()
+                    } label: {
+                        Label(
+                            "Form (TSB)",
+                            systemImage: viewModel.showTSB ? "checkmark.circle.fill" : "circle"
+                        )
+                    }
+                    Divider()
+                    Button { showScopeInfo = true } label: {
+                        Label("About this chart", systemImage: "info.circle")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .menuOrder(.fixed)
+                .accessibilityLabel("Chart options")
+                .popover(isPresented: $showScopeInfo, arrowEdge: .top) {
+                    scopeInfoPopover
+                }
+            }
+
+            if viewModel.pmcData.isEmpty {
+                emptyState.padding(.vertical, 20)
+            } else {
+                pmcChart
+                    .frame(height: 220)
+            }
+        }
+        .padding(14)
+        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.card.rawValue))
+    }
+
+    private var scopeInfoPopover: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Chart scope")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+            Text(
+                "Uses up to the \(Self.pmcFetchLimit.formatted()) most recent rides for the training load query."
+            )
+            .font(.system(size: 12))
+            .foregroundStyle(.white.opacity(0.7))
+            if pmcAtFetchCap {
+                Text("You're at the cap — oldest rides are omitted; fitness trend still warms up from the included history.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: 280, alignment: .leading)
+        .presentationCompactAdaptation(.popover)
+    }
+
+    private var rangeSegmented: some View {
+        GlassEffectContainer(spacing: 6) {
+            HStack(spacing: 6) {
+                ForEach(viewModel.rangeOptions, id: \.self) { days in
+                    let isSelected = days == viewModel.rangeDays
+                    Button {
+                        setRange(days)
+                    } label: {
+                        Text("\(days)d")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(
+                                isSelected
+                                    ? .white.opacity(AppOpacity.textPrimary)
+                                    : .white.opacity(AppOpacity.textSecondary)
+                            )
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 28)
+                            .contentShape(Rectangle())
+                            .background(
+                                isSelected
+                                    ? AppColor.wash(for: AppColor.blue)
+                                    : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            )
+                            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 9, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(days)-day range")
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
+            }
+        }
+        .sensoryFeedback(.selection, trigger: viewModel.rangeDays)
+    }
+
+    // MARK: - PMC Chart
 
     private var pmcChart: some View {
         Chart {
+            // TSB zero reference line.
+            RuleMark(y: .value("Zero", 0))
+                .foregroundStyle(Color.white.opacity(0.12))
+                .lineStyle(StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+
             if viewModel.showTSB {
                 ForEach(viewModel.pmcData) { point in
                     AreaMark(
                         x: .value("Date", point.date),
-                        yStart: .value("TSB Zero", 0),
-                        yEnd: .value("TSB", point.tsb)
+                        yStart: .value("Zero", 0),
+                        yEnd: .value("Form", point.tsb)
                     )
                     .foregroundStyle(
-                        point.tsb >= 0 ? AppColor.success.opacity(0.1) : AppColor.red.opacity(0.1)
+                        point.tsb >= 0 ? AppColor.success.opacity(0.12) : AppColor.red.opacity(0.12)
                     )
                     .interpolationMethod(.monotone)
 
                     LineMark(
                         x: .value("Date", point.date),
-                        y: .value("TSB", point.tsb)
+                        y: .value("Form", point.tsb),
+                        series: .value("Series", "TSB")
                     )
                     .foregroundStyle(AppColor.success)
                     .interpolationMethod(.monotone)
@@ -526,7 +550,8 @@ struct PMChartView: View {
                 ForEach(viewModel.pmcData) { point in
                     LineMark(
                         x: .value("Date", point.date),
-                        y: .value("CTL", point.ctl)
+                        y: .value("Fitness", point.ctl),
+                        series: .value("Series", "CTL")
                     )
                     .foregroundStyle(AppColor.blue)
                     .interpolationMethod(.monotone)
@@ -537,52 +562,231 @@ struct PMChartView: View {
                 ForEach(viewModel.pmcData) { point in
                     LineMark(
                         x: .value("Date", point.date),
-                        y: .value("ATL", point.atl)
+                        y: .value("Fatigue", point.atl),
+                        series: .value("Series", "ATL")
                     )
                     .foregroundStyle(AppColor.red)
                     .interpolationMethod(.monotone)
                 }
             }
+
+            if let selectedPMCDate,
+                let hit = selectedPMCPoint(for: selectedPMCDate)
+            {
+                RuleMark(x: .value("Selected", hit.date))
+                    .foregroundStyle(Color.white.opacity(0.28))
+                    .lineStyle(StrokeStyle(lineWidth: 1))
+                    .annotation(
+                        position: .top,
+                        alignment: .center,
+                        spacing: 6,
+                        overflowResolution: .init(x: .fit(to: .chart), y: .disabled)
+                    ) {
+                        pmcCallout(for: hit)
+                    }
+            }
         }
+        .chartXSelection(value: $selectedPMCDate)
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 5)) { value in
+            AxisMarks(values: .automatic(desiredCount: 5)) { _ in
                 AxisGridLine().foregroundStyle(Color.white.opacity(0.04))
-                AxisTick().foregroundStyle(Color.white.opacity(0.1))
                 AxisValueLabel(format: .dateTime.month().day(), anchor: .top)
                     .foregroundStyle(Color.white.opacity(0.4))
             }
         }
         .chartYAxis {
-            AxisMarks(position: .leading, values: .automatic(desiredCount: 5)) { value in
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 5)) { _ in
                 AxisGridLine().foregroundStyle(Color.white.opacity(0.04))
-                AxisTick().foregroundStyle(Color.white.opacity(0.1))
                 AxisValueLabel()
                     .foregroundStyle(Color.white.opacity(0.4))
             }
         }
-        .frame(height: 240)
-        .padding()
-        .background(Color.white.opacity(0.02))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .drawingGroup()
+        .animation(.smooth(duration: 0.35), value: viewModel.pmcData.count)
     }
 
-    // MARK: - PMC Stat
+    private func selectedPMCPoint(for date: Date) -> PMCPoint? {
+        let cal = Calendar.current
+        let targetDay = cal.startOfDay(for: date)
+        return viewModel.pmcData.min(by: { lhs, rhs in
+            abs(cal.startOfDay(for: lhs.date).timeIntervalSince(targetDay))
+                < abs(cal.startOfDay(for: rhs.date).timeIntervalSince(targetDay))
+        })
+    }
 
-    private func pmcStat(label: String, subtitle: String, value: String, color: Color) -> some View
-    {
-        VStack(spacing: 3) {
+    private func pmcCallout(for point: PMCPoint) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(point.date.formatted(.dateTime.month().day().weekday(.abbreviated)))
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.55))
+            HStack(spacing: 10) {
+                calloutRow(label: "Fit", value: point.ctl, color: AppColor.blue)
+                calloutRow(label: "Fat", value: point.atl, color: AppColor.red)
+                calloutRow(label: "Form", value: point.tsb, color: AppColor.success)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .mangoxSurface(.frosted, shape: .rounded(10))
+        .allowsHitTesting(false)
+    }
+
+    private func calloutRow(label: String, value: Double, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 5, height: 5)
             Text(label)
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.55))
+            Text(String(format: "%.0f", value))
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+        }
+    }
+
+    // MARK: - Power Curve (log-scaled LineMark)
+
+    private var powerCurveCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Power curve")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+                Spacer()
+                Text("\(viewModel.rangeDays)d")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+            }
+
+            Chart {
+                ForEach(viewModel.powerCurve) { pt in
+                    LineMark(
+                        x: .value("Duration", Double(pt.durationSeconds)),
+                        y: .value("Watts", pt.watts)
+                    )
+                    .interpolationMethod(.monotone)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [AppColor.orange, AppColor.mango],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round))
+
+                    AreaMark(
+                        x: .value("Duration", Double(pt.durationSeconds)),
+                        y: .value("Watts", pt.watts)
+                    )
+                    .interpolationMethod(.monotone)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [AppColor.mango.opacity(0.18), Color.clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                }
+
+                if let selectedPowerDuration,
+                    let hit = powerCurvePoint(nearest: selectedPowerDuration)
+                {
+                    RuleMark(x: .value("Duration", Double(hit.durationSeconds)))
+                        .foregroundStyle(Color.white.opacity(0.28))
+                        .lineStyle(StrokeStyle(lineWidth: 1))
+
+                    PointMark(
+                        x: .value("Duration", Double(hit.durationSeconds)),
+                        y: .value("Watts", hit.watts)
+                    )
+                    .foregroundStyle(AppColor.mango)
+                    .symbolSize(80)
+                    .annotation(
+                        position: .top,
+                        alignment: .center,
+                        spacing: 6,
+                        overflowResolution: .init(x: .fit(to: .chart), y: .disabled)
+                    ) {
+                        powerCallout(for: hit)
+                    }
+                }
+            }
+            .chartXScale(type: .log)
+            .chartXSelection(value: $selectedPowerDuration)
+            .chartXAxis {
+                AxisMarks(values: powerCurveAxisValues) { value in
+                    AxisGridLine().foregroundStyle(Color.white.opacity(0.04))
+                    AxisValueLabel {
+                        if let raw = value.as(Double.self) {
+                            Text(powerDurationLabel(Int(raw.rounded())))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                    }
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { _ in
+                    AxisGridLine().foregroundStyle(Color.white.opacity(0.04))
+                    AxisValueLabel()
+                        .foregroundStyle(Color.white.opacity(0.4))
+                }
+            }
+            .frame(height: 180)
+        }
+        .padding(14)
+        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.card.rawValue))
+    }
+
+    /// Axis tick positions at conventional duration breakpoints that intersect
+    /// the available data. Using a fixed set keeps labels legible on a log axis.
+    private var powerCurveAxisValues: [Double] {
+        let candidates: [Double] = [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600]
+        guard let minD = viewModel.powerCurve.map(\.durationSeconds).min(),
+            let maxD = viewModel.powerCurve.map(\.durationSeconds).max()
+        else { return candidates }
+        return candidates.filter { $0 >= Double(minD) && $0 <= Double(maxD) }
+    }
+
+    private func powerCurvePoint(nearest seconds: Int) -> PowerCurveAnalytics.Point? {
+        viewModel.powerCurve.min(by: { abs($0.durationSeconds - seconds) < abs($1.durationSeconds - seconds) })
+    }
+
+    private func powerCallout(for pt: PowerCurveAnalytics.Point) -> some View {
+        HStack(spacing: 6) {
+            Text(powerDurationLabel(pt.durationSeconds))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.6))
+            Text("\(pt.watts)W")
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .foregroundStyle(AppColor.mango)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .mangoxSurface(.frosted, shape: .rounded(10))
+        .allowsHitTesting(false)
+    }
+
+    private func powerDurationLabel(_ seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds % 60 == 0 { return "\(seconds / 60)m" }
+        return "\(seconds / 60)m\(seconds % 60)s"
+    }
+
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .font(.system(size: 32))
+                .foregroundStyle(.white.opacity(0.15))
+            Text("Not enough data yet")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.4))
+            Text("Complete a few rides to see your training load trends.")
+                .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.25))
-                .tracking(0.8)
-            Text(value)
-                .font(.system(size: 20, weight: .bold, design: .monospaced))
-                .foregroundStyle(color)
-            Text(subtitle)
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.35))
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
     }
 }
+

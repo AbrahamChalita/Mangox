@@ -119,6 +119,9 @@ struct CalendarView: View {
     @State private var workoutImportError: String?
     @State private var showWorkoutImportErrorOverlay = false
     @State private var isImportingWorkout = false
+    @State private var filteredWorkoutGroups: [(day: Date, workouts: [Workout])] = []
+    @State private var filteredWorkoutTotal = 0
+    @Namespace private var layoutModeSelectionNamespace
 
     private let calendar = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
@@ -148,13 +151,8 @@ struct CalendarView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 8)
 
-                Picker("View layout", selection: $screenModeRaw) {
-                    ForEach(CalendarScreenMode.allCases) { mode in
-                        Text(mode.title).tag(mode.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 20)
+                layoutModeGlassSwitcher
+                    .padding(.horizontal, 20)
 
                 subviewStatusRow
                     .padding(.horizontal, 20)
@@ -234,6 +232,10 @@ struct CalendarView: View {
         .onChange(of: workoutImportError) { _, value in
             showWorkoutImportErrorOverlay = value != nil
         }
+        .onChange(of: historyFilterRaw, initial: true) { _, _ in
+            recomputeFilteredWorkoutGroups()
+        }
+        .sensoryFeedback(.selection, trigger: screenModeRaw)
     }
 
     /// One full scan to refresh indexes; debounced after the first population to coalesce SwiftData bursts.
@@ -265,6 +267,7 @@ struct CalendarView: View {
         }
         workoutsByDayStart = byDay
         workoutsGroupedByDay = byDay.keys.sorted(by: >).map { day in (day, byDay[day]!) }
+        recomputeFilteredWorkoutGroups()
     }
 
     /// Shows a warning only when the query cap is reached.
@@ -365,13 +368,13 @@ struct CalendarView: View {
 
     private var listContent: some View {
         Group {
-            if filteredWorkoutsGroupedByDay.isEmpty {
+            if filteredWorkoutGroups.isEmpty {
                 emptyRidesPlaceholder
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        ForEach(filteredWorkoutsGroupedByDay, id: \.day) { group in
+                        ForEach(filteredWorkoutGroups, id: \.day) { group in
                             Section {
                                 ForEach(group.workouts) { workout in
                                     Button {
@@ -434,6 +437,68 @@ struct CalendarView: View {
 
     // MARK: - Header
 
+    private var layoutModeGlassSwitcher: some View {
+        GlassEffectContainer(spacing: 8) {
+            HStack(spacing: 8) {
+                ForEach(CalendarScreenMode.allCases) { mode in
+                    layoutModeSegment(mode)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 34)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 34)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("View layout")
+        .accessibilityValue(screenMode.title)
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                setScreenMode(.list)
+            case .decrement:
+                setScreenMode(.monthGrid)
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    private func layoutModeSegment(_ mode: CalendarScreenMode) -> some View {
+        let isSelected = screenMode == mode
+
+        return Button {
+            setScreenMode(mode)
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.white.opacity(0.001))
+
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(AppColor.mango.opacity(0.18))
+                        .matchedGeometryEffect(id: "layout-mode-selected", in: layoutModeSelectionNamespace)
+                }
+
+                Text(mode.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(
+                        isSelected
+                            ? .white.opacity(AppOpacity.textPrimary)
+                            : .white.opacity(AppOpacity.textSecondary)
+                    )
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 34)
+            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 11, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(mode.title)
+        .accessibilityHint("Switch workout view")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
     private var header: some View {
         HStack(spacing: 10) {
             Text("Workouts")
@@ -442,91 +507,114 @@ struct CalendarView: View {
 
             Spacer()
 
-            // Weekly TSS badge
-            let weekTSS = tssThisWeek()
-            if weekTSS > 0 {
-                HStack(spacing: 4) {
-                    Image(systemName: "chart.bar.fill")
-                        .font(.system(size: 10))
-                    Text("\(Int(weekTSS)) TSS")
-                        .font(.caption2.weight(.semibold))
-                }
-                .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.white.opacity(AppOpacity.cardBg))
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
-                )
-            }
-
-            if screenMode == .list {
-                Button {
-                    showWorkoutImporter = true
-                } label: {
-                    Image(systemName: isImportingWorkout ? "hourglass" : "square.and.arrow.down")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.8))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(Color.white.opacity(AppOpacity.cardBg))
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                .disabled(isImportingWorkout)
-                .accessibilityLabel("Import workout file")
-
-                Menu {
-                    ForEach(WorkoutHistoryFilter.allCases) { filter in
-                        Button {
-                            historyFilterRaw = filter.rawValue
-                        } label: {
-                            Label(filter.title, systemImage: filter.systemImage)
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: historyFilter.systemImage)
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(historyFilter.title)
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(.white.opacity(0.8))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(Color.white.opacity(AppOpacity.cardBg))
-                    .clipShape(Capsule())
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
-                    )
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    importWorkoutButton
                 }
             }
-
         }
         .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
     }
 
     private var subviewStatusRow: some View {
-        HStack(spacing: 10) {
-            Group {
-                if screenMode == .list {
-                    Text(listStatusText)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                } else {
-                    Color.clear
+        Group {
+            if screenMode == .list {
+                listFilterChips
+            } else {
+                Color.clear.frame(height: 0)
+            }
+        }
+    }
+
+    /// Horizontal filter chips — replaces the previous "count left / menu right"
+    /// imbalance. Each filter is directly tappable; the active chip is mango-
+    /// tinted and carries its own count inline as a tight trailing badge.
+    /// Scrolls horizontally so the row never breaks on narrow devices.
+    private var listFilterChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(WorkoutHistoryFilter.allCases) { filter in
+                    historyFilterChip(filter)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 18)
+            .padding(.horizontal, 2)
         }
+        .scrollClipDisabled()
+        .sensoryFeedback(.selection, trigger: historyFilterRaw)
+    }
+
+    @ViewBuilder
+    private func historyFilterChip(_ filter: WorkoutHistoryFilter) -> some View {
+        let isSelected = historyFilter == filter
+        let count = filteredCount(for: filter)
+
+        Button {
+            if historyFilterRaw != filter.rawValue {
+                withAnimation(.snappy(duration: 0.18)) {
+                    historyFilterRaw = filter.rawValue
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: filter.systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(filter.title)
+                    .font(.system(size: 12, weight: .semibold))
+                if isSelected {
+                    Text("\(count)")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(.white.opacity(0.18), in: Capsule())
+                        .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                }
+            }
+            .foregroundStyle(
+                isSelected
+                    ? AppColor.bg
+                    : .white.opacity(AppOpacity.textSecondary)
+            )
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                isSelected ? AppColor.mango : Color.clear,
+                in: Capsule()
+            )
+            .overlay {
+                if !isSelected {
+                    Capsule()
+                        .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(filter.title) — \(count) workouts")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// Count of workouts matching a filter using the already-loaded grouped
+    /// workouts. Cheap — same data source as the list itself.
+    private func filteredCount(for filter: WorkoutHistoryFilter) -> Int {
+        workoutsGroupedByDay.reduce(0) { acc, group in
+            acc + group.workouts.reduce(0) { $0 + (filter.includes($1) ? 1 : 0) }
+        }
+    }
+
+    private var importWorkoutButton: some View {
+        Button {
+            showWorkoutImporter = true
+        } label: {
+            Image(systemName: isImportingWorkout ? "hourglass" : "square.and.arrow.down")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .mangoxSurface(.frostedInteractive, shape: .capsule)
+        }
+        .buttonStyle(.plain)
+        .disabled(isImportingWorkout)
+        .accessibilityLabel("Import workout file")
     }
 
     // MARK: - Selected day empty
@@ -627,41 +715,22 @@ struct CalendarView: View {
         return AppColor.red
     }
 
-    private func tssThisWeek() -> Double {
-        guard let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())) else {
-            return 0
-        }
-        if workoutsByDayStart.isEmpty {
-            return allWorkouts
-                .filter { $0.startDate >= weekStart }
-                .reduce(0.0) { $0 + $1.tss }
-        }
-        var total = 0.0
-        for i in 0..<7 {
-            guard let day = calendar.date(byAdding: .day, value: i, to: weekStart) else { continue }
-            let sod = calendar.startOfDay(for: day)
-            total += workoutsByDayStart[sod]?.reduce(0.0) { $0 + $1.tss } ?? 0
-        }
-        return total
-    }
-
-    private var filteredWorkoutsGroupedByDay: [(day: Date, workouts: [Workout])] {
-        workoutsGroupedByDay.compactMap { group in
-            let filtered = group.workouts.filter { historyFilter.includes($0) }
+    private func recomputeFilteredWorkoutGroups() {
+        let filter = historyFilter
+        let groups = workoutsGroupedByDay.compactMap { group -> (day: Date, workouts: [Workout])? in
+            let filtered = group.workouts.filter { filter.includes($0) }
             guard !filtered.isEmpty else { return nil }
             return (group.day, filtered)
         }
+        filteredWorkoutGroups = groups
+        filteredWorkoutTotal = groups.reduce(0) { $0 + $1.workouts.count }
     }
 
-    private var filteredWorkoutCount: Int {
-        filteredWorkoutsGroupedByDay.reduce(0) { $0 + $1.workouts.count }
-    }
-
-    private var listStatusText: String {
-        if historyFilter == .all {
-            return "\(filteredWorkoutCount) workouts"
+    private func setScreenMode(_ mode: CalendarScreenMode) {
+        guard screenModeRaw != mode.rawValue else { return }
+        withAnimation(.snappy(duration: 0.22, extraBounce: 0)) {
+            screenModeRaw = mode.rawValue
         }
-        return "\(filteredWorkoutCount) \(historyFilter.title.lowercased()) workouts"
     }
 
     private var emptyStateTitle: String {

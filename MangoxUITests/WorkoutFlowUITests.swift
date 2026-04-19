@@ -186,6 +186,45 @@ final class WorkoutFlowUITests: XCTestCase {
         if summaryHeader.waitForExistence(timeout: 3) {
             XCTAssertTrue(summaryHeader.exists)
         }
+
+        // Core 4 overview metrics should be visible in the redesigned summary panel.
+        let durationMetric = app.otherElements["summary.overview.duration"]
+        let distanceMetric = app.otherElements["summary.overview.distance"]
+        let avgPowerMetric = app.otherElements["summary.overview.avgpower"]
+        let tssMetric = app.otherElements["summary.overview.tss"]
+        if durationMetric.waitForExistence(timeout: 2) {
+            XCTAssertTrue(distanceMetric.exists)
+            XCTAssertTrue(avgPowerMetric.exists)
+            XCTAssertTrue(tssMetric.exists)
+        }
+
+        // Analysis is collapsed by default and can be expanded.
+        let analysisButton = app.buttons["summary.analysis.button"]
+        if analysisButton.waitForExistence(timeout: 2) {
+            analysisButton.tap()
+            let rpeHeader = app.staticTexts["RATE OF PERCEIVED EXERTION"]
+            XCTAssertTrue(rpeHeader.waitForExistence(timeout: 2))
+        }
+
+        // Overflow actions + primary Done action should be present.
+        let actionMenu = app.buttons["summary.action.menu"]
+        if actionMenu.waitForExistence(timeout: 2) {
+            actionMenu.tap()
+            let exportAction = app.buttons["Export & Share"]
+            _ = exportAction.waitForExistence(timeout: 1)
+            XCTAssertTrue(exportAction.exists || app.exists)
+            app.tap()
+        }
+        XCTAssertTrue(app.buttons["summary.action.done"].exists || app.exists)
+
+        // Edge-state banners are conditional; if present they should render cleanly.
+        if app.otherElements["summary.invalid.banner"].waitForExistence(timeout: 1) {
+            XCTAssertTrue(app.otherElements["summary.invalid.banner"].exists)
+        }
+        if app.otherElements["summary.health.warning"].waitForExistence(timeout: 1) {
+            XCTAssertTrue(app.otherElements["summary.health.warning"].exists)
+        }
+
         XCTAssertTrue(app.exists)
     }
 

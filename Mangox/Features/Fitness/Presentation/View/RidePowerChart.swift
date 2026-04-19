@@ -5,15 +5,68 @@ import SwiftUI
 struct RidePowerChart: View {
     let samples: [WorkoutSample]
 
-    @State private var selectedSample: WorkoutSample?
+    @State private var selectedIndex: Int?
+    @State private var normalizedSamples: [NormalizedSamplePoint] = []
+    @State private var peakPower: Int = 0
 
-    private var normalizedSamples: [(x: CGFloat, y: CGFloat, power: Int, elapsed: Int)] {
-        guard !samples.isEmpty else { return [] }
-        let maxPower = max(samples.map(\.power).max() ?? 1, 1)
-        return samples.enumerated().map { index, sample in
+    private struct NormalizedSamplePoint {
+        let x: CGFloat
+        let y: CGFloat
+        let power: Int
+        let elapsed: Int
+        let zoneColor: Color
+    }
+
+    private struct ChartCacheKey: Equatable {
+        let count: Int
+        let firstElapsed: Int
+        let lastElapsed: Int
+        let lastPower: Int
+    }
+
+    private var selectedSample: WorkoutSample? {
+        guard let selectedIndex else { return nil }
+        return samples[safe: selectedIndex]
+    }
+
+    private var selectedPoint: NormalizedSamplePoint? {
+        guard let selectedIndex else { return nil }
+        return normalizedSamples[safe: selectedIndex]
+    }
+
+    private var chartCacheKey: ChartCacheKey {
+        ChartCacheKey(
+            count: samples.count,
+            firstElapsed: samples.first?.elapsedSeconds ?? 0,
+            lastElapsed: samples.last?.elapsedSeconds ?? 0,
+            lastPower: samples.last?.power ?? 0
+        )
+    }
+
+    private func rebuildChartData() {
+        guard !samples.isEmpty else {
+            normalizedSamples = []
+            peakPower = 0
+            selectedIndex = nil
+            return
+        }
+
+        let maxPower = max(samples.map(\.power).max() ?? 0, 1)
+        peakPower = maxPower
+        normalizedSamples = samples.enumerated().map { index, sample in
             let x = CGFloat(index) / CGFloat(max(samples.count - 1, 1))
             let y = 1.0 - CGFloat(sample.power) / CGFloat(maxPower)
-            return (x: x, y: y, power: sample.power, elapsed: sample.elapsedSeconds)
+            return NormalizedSamplePoint(
+                x: x,
+                y: y,
+                power: sample.power,
+                elapsed: sample.elapsedSeconds,
+                zoneColor: PowerZone.zone(for: sample.power).color
+            )
+        }
+
+        if let selectedIndex, !samples.indices.contains(selectedIndex) {
+            self.selectedIndex = nil
         }
     }
 
@@ -33,14 +86,13 @@ struct RidePowerChart: View {
                     HStack(spacing: 4) {
                         Text("\(selected.power)W")
                             .font(.system(size: 13, weight: .bold, design: .monospaced))
-                            .foregroundStyle(PowerZone.zone(for: selected.power).color)
+                            .foregroundStyle(selectedPoint?.zoneColor ?? PowerZone.zone(for: selected.power).color)
                         Text(AppFormat.duration(Double(selected.elapsedSeconds)))
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.3))
                     }
                 } else {
-                    let maxPower = samples.map(\.power).max() ?? 0
-                    Text("Peak: \(maxPower)W")
+                    Text("Peak: \(peakPower)W")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.3))
                 }
@@ -56,13 +108,12 @@ struct RidePowerChart: View {
                         Canvas { context, size in
                             let rectWidth = max(1, size.width / CGFloat(normalizedSamples.count))
                             for pt in normalizedSamples {
-                                let zoneColor = PowerZone.zone(for: pt.power).color
                                 let xPos = pt.x * size.width
                                 let yPos = pt.y * size.height
                                 let rect = CGRect(x: xPos, y: yPos, width: rectWidth, height: size.height - yPos)
                                 context.fill(
                                     Path(rect),
-                                    with: .color(zoneColor.opacity(0.25))
+                                    with: .color(pt.zoneColor.opacity(0.25))
                                 )
                             }
                         }
@@ -88,22 +139,21 @@ struct RidePowerChart: View {
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
-                                    let fraction = value.location.x / width
-                                    let index = Int(fraction * CGFloat(max(samples.count - 1, 1)))
-                                    selectedSample = samples[safe: index]
+                                    guard !samples.isEmpty, width > 0 else { return }
+                                    let clampedX = min(max(value.location.x, 0), width)
+                                    let fraction = clampedX / width
+                                    let rawIndex = Int(fraction * CGFloat(max(samples.count - 1, 1)))
+                                    selectedIndex = min(max(rawIndex, 0), samples.count - 1)
                                 }
                                 .onEnded { _ in
-                                    selectedSample = nil
+                                    selectedIndex = nil
                                 }
                         )
 
                     // Selection indicator
-                    if let selected = selectedSample,
-                       let index = samples.firstIndex(where: { $0.id == selected.id }) {
-                        let fraction = CGFloat(index) / CGFloat(max(samples.count - 1, 1))
-                        let x = fraction * width
-                        let pt = normalizedSamples[safe: index]
-                        let y = (pt?.y ?? 0.5) * height
+                    if let selectedPoint {
+                        let x = selectedPoint.x * width
+                        let y = selectedPoint.y * height
 
                         Path { path in
                             path.move(to: CGPoint(x: x, y: 0))
@@ -112,7 +162,7 @@ struct RidePowerChart: View {
                         .stroke(Color.white.opacity(0.3), lineWidth: 1)
 
                         Circle()
-                            .fill(PowerZone.zone(for: selected.power).color)
+                            .fill(selectedPoint.zoneColor)
                             .frame(width: 8, height: 8)
                             .position(x: x, y: y)
                     }
@@ -122,6 +172,10 @@ struct RidePowerChart: View {
         }
         .padding(14)
         .cardStyle()
+        .onAppear(perform: rebuildChartData)
+        .onChange(of: chartCacheKey) { _, _ in
+            rebuildChartData()
+        }
     }
 }
 

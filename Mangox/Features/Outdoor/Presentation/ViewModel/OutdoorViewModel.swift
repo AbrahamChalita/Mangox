@@ -503,7 +503,10 @@ final class OutdoorViewModel {
             return true
         }
         if let error = navigationService.lastError {
-            presentRouteBuildErrorWithFallback(error)
+            presentRouteBuildErrorWithFallback(
+                message: error,
+                failureKind: navigationService.lastRouteFailureKind
+            )
         } else {
             presentRouteBuildError("No cycling route found.")
         }
@@ -526,7 +529,10 @@ final class OutdoorViewModel {
             return true
         }
         if let error = navigationService.lastError {
-            presentRouteBuildErrorWithFallback(error)
+            presentRouteBuildErrorWithFallback(
+                message: error,
+                failureKind: navigationService.lastRouteFailureKind
+            )
         } else {
             presentRouteBuildError("No cycling route found.")
         }
@@ -546,15 +552,11 @@ final class OutdoorViewModel {
         routeOfflineFallbackNotice = nil
     }
 
-    private func presentRouteBuildErrorWithFallback(_ message: String) {
-        let lower = message.lowercased()
-        let looksOffline = lower.contains("offline")
-            || lower.contains("network")
-            || lower.contains("internet")
-            || lower.contains("connect")
-            || lower.contains("timed out")
-
-        if looksOffline {
+    private func presentRouteBuildErrorWithFallback(
+        message: String,
+        failureKind: RouteCalculationFailureKind?
+    ) {
+        if failureKind == .offline {
             routeOfflineFallbackNotice =
                 "Offline: route guidance is unavailable right now. Recording continues locally."
             if routeService.hasRoute {

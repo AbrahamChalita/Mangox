@@ -151,6 +151,7 @@ private final class LocationManagerConcurrencyHandles: @unchecked Sendable {
     nonisolated(unsafe) var headingFlushTimer: Timer?
     nonisolated(unsafe) var gpsStaleMonitorTimer: Timer?
     nonisolated(unsafe) var pendingRecordedTrackFileHandle: FileHandle?
+    nonisolated(unsafe) var appLifecycleObservers: [NSObjectProtocol] = []
     nonisolated let pendingHeadingStore: PendingHeadingStore
 
     nonisolated init() {
@@ -516,6 +517,8 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
     private static let persistedSearchBiasLonKey = "LocationManager.persistedSearchBiasLon"
     private static let outdoorRideCheckpointKey = "LocationManager.outdoorRideCheckpoint.v1"
     private static let outdoorRideCheckpointFileName = "outdoor-ride-checkpoint-v2.json"
+    private static let rideTrackFilePrefix = "ride-"
+    private static let rideTrackFileExtension = "trk"
     private let checkpointFrozenChunkLimit = 8
     private let checkpointLiveTailLimit = 240
     private let checkpointPauseGapLimit = 30
@@ -540,6 +543,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
     private let motionResumeMinimumPauseSeconds: TimeInterval = 2.5
     private let weakGpsHorizontalAccuracyThreshold: Double = 28
     private let motionPauseSuppressionWindow: TimeInterval = 3
+    private var activeRideID: UUID?
 
     // MARK: - Init
 
@@ -547,12 +551,17 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         super.init()
         gpxDateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         loadPersistedSearchBiasFromStorage()
+        registerApplicationLifecycleObservers()
         // Create the manager up front so `authorizationStatus` reflects the system
         // setting on launch (previously stayed `.notDetermined` until Outdoor/Connection).
         setup()
     }
 
     deinit {
+        for observer in concurrencyHandles.appLifecycleObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        concurrencyHandles.appLifecycleObservers.removeAll()
         // `Timer` / `FileHandle` are not `Sendable`; wrap for `@Sendable` main-queue cleanup.
         let rideBox = UncheckedOptional<Timer>(concurrencyHandles.rideTimer)
         let gpsBox = UncheckedOptional<Timer>(concurrencyHandles.gpsStaleMonitorTimer)
@@ -591,7 +600,56 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
     }
 
     private func applyBackgroundLocationPolicy(to manager: CLLocationManager) {
-        manager.allowsBackgroundLocationUpdates = isRecording || outdoorLocationPreviewActive
+        let applicationState = UIApplication.shared.applicationState
+        let shouldAllowPreviewInBackground = outdoorLocationPreviewActive && applicationState == .active
+        manager.allowsBackgroundLocationUpdates = isRecording || shouldAllowPreviewInBackground
+    }
+
+    private func registerApplicationLifecycleObservers() {
+        let center = NotificationCenter.default
+
+        let didEnterBackground = center.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.handleApplicationStateTransition(isActive: false)
+            }
+        }
+
+        let didBecomeActive = center.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.handleApplicationStateTransition(isActive: true)
+            }
+        }
+
+        concurrencyHandles.appLifecycleObservers = [didEnterBackground, didBecomeActive]
+    }
+
+    private func handleApplicationStateTransition(isActive: Bool) {
+        guard let manager = clManager else { return }
+
+        applyBackgroundLocationPolicy(to: manager)
+
+        guard outdoorLocationPreviewActive, !isRecording else { return }
+
+        if isActive {
+            applyLocationSamplingPolicy()
+            manager.startUpdatingLocation()
+            startGpsStaleMonitoringIfNeeded()
+            applyHighFrequencySensorsPolicy()
+        } else {
+            stopGpsStaleMonitoring()
+            manager.stopUpdatingLocation()
+            applyHighFrequencySensorsPolicy()
+        }
     }
 
     private func shouldRunMotionFallbackMonitoring() -> Bool {
@@ -918,6 +976,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         signalConfidence = .searching
         isMotionFallbackActive = false
         resetRecordedTrackStorage()
+        activeRideID = UUID()
         prepareRecordedTrackStorage()
 
         rideStartDate = Date()
@@ -1241,18 +1300,15 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
 
     private func clearRideCheckpoint() {
         UserDefaults.standard.removeObject(forKey: Self.outdoorRideCheckpointKey)
+        removeRecordedTrackFileReferencedByCheckpointIfPresent()
         try? FileManager.default.removeItem(at: rideCheckpointFileURL())
+        pendingRecordedTrackPointsURL = nil
+        activeRideID = nil
         lastPersistedCheckpointAt = .distantPast
     }
 
     private func rideCheckpointFileURL() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        let dir = base.appendingPathComponent("Mangox", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: dir.path) {
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        return dir.appendingPathComponent(Self.outdoorRideCheckpointFileName)
+        applicationSupportMangoxDirectoryURL().appendingPathComponent(Self.outdoorRideCheckpointFileName)
     }
 
     /// Force a durable checkpoint write for scene/background transitions.
@@ -1323,14 +1379,17 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
             let url = URL(fileURLWithPath: path)
             if FileManager.default.fileExists(atPath: path) {
                 pendingRecordedTrackPointsURL = url
+                activeRideID = Self.rideID(fromTrackFileURL: url)
                 concurrencyHandles.pendingRecordedTrackFileHandle = try? FileHandle(forWritingTo: url)
                 concurrencyHandles.pendingRecordedTrackFileHandle?.seekToEndOfFile()
             } else {
                 pendingRecordedTrackPointsURL = nil
+                activeRideID = nil
                 concurrencyHandles.pendingRecordedTrackFileHandle = nil
             }
         } else {
             pendingRecordedTrackPointsURL = nil
+            activeRideID = nil
             concurrencyHandles.pendingRecordedTrackFileHandle = nil
         }
 
@@ -1401,15 +1460,69 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
             try? FileManager.default.removeItem(at: pendingRecordedTrackPointsURL)
         }
         pendingRecordedTrackPointsURL = nil
+        activeRideID = nil
     }
 
     private func prepareRecordedTrackStorage() {
-        let fileURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mangox-ride-\(UUID().uuidString)")
-            .appendingPathExtension("trk")
+        let rideID = activeRideID ?? UUID()
+        activeRideID = rideID
+        let fileURL = rideTrackDirectoryURL()
+            .appendingPathComponent(Self.trackFileName(for: rideID))
+            .appendingPathExtension(Self.rideTrackFileExtension)
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
         FileManager.default.createFile(atPath: fileURL.path, contents: Data())
         pendingRecordedTrackPointsURL = fileURL
         concurrencyHandles.pendingRecordedTrackFileHandle = try? FileHandle(forWritingTo: fileURL)
+    }
+
+    private func applicationSupportMangoxDirectoryURL() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("Mangox", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
+    }
+
+    private func rideTrackDirectoryURL() -> URL {
+        let dir = applicationSupportMangoxDirectoryURL().appendingPathComponent("Rides", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
+    }
+
+    private func removeRecordedTrackFileReferencedByCheckpointIfPresent() {
+        let fileURL = rideCheckpointFileURL()
+        guard let data = try? Data(contentsOf: fileURL) else { return }
+
+        if let envelope = try? JSONDecoder().decode(PersistedRideCheckpointEnvelope.self, from: data) {
+            removeRecordedTrackFile(atPath: envelope.checkpoint.recordedTrackPath)
+            return
+        }
+
+        if let legacy = try? JSONDecoder().decode(OutdoorRideCheckpoint.self, from: data) {
+            removeRecordedTrackFile(atPath: legacy.recordedTrackPath)
+        }
+    }
+
+    private func removeRecordedTrackFile(atPath path: String?) {
+        guard let path else { return }
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: path))
+    }
+
+    private static func trackFileName(for rideID: UUID) -> String {
+        "\(rideTrackFilePrefix)\(rideID.uuidString)"
+    }
+
+    private static func rideID(fromTrackFileURL url: URL) -> UUID? {
+        let stem = url.deletingPathExtension().lastPathComponent
+        guard stem.hasPrefix(rideTrackFilePrefix) else { return nil }
+        let idString = String(stem.dropFirst(rideTrackFilePrefix.count))
+        return UUID(uuidString: idString)
     }
 
     private func appendRecordedTrackPoint(_ location: CLLocation) {

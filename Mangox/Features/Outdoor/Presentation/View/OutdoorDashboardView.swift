@@ -43,14 +43,40 @@ struct OutdoorDashboardView: View {
 
     @State private var renderedBreadcrumbChunks: [RenderedBreadcrumbChunk] = []
     @State private var renderedLiveTail: [CLLocationCoordinate2D] = []
-    @State private var renderedCompletedRoutePolylines: [[CLLocationCoordinate2D]] = []
-    @State private var renderedRemainingRoutePolylines: [[CLLocationCoordinate2D]] = []
-    @State private var renderedLookaheadPolylines: [[CLLocationCoordinate2D]] = []
+    @State private var renderedCompletedRoutePolylines: [RenderedRoutePolyline] = []
+    @State private var renderedRemainingRoutePolylines: [RenderedRoutePolyline] = []
+    @State private var renderedLookaheadPolylines: [RenderedRoutePolyline] = []
 
     private struct RenderedBreadcrumbChunk: Identifiable {
         let id: UUID
         let coords: [CLLocationCoordinate2D]
         let avgSpeed: Double
+    }
+
+    private struct RenderedRoutePolyline: Identifiable {
+        let id: Int
+        let coords: [CLLocationCoordinate2D]
+    }
+
+    private struct IdentifiedCoordinate: Identifiable {
+        let id: Int
+        let coordinate: CLLocationCoordinate2D
+    }
+
+    private struct RenderedWaypoint: Identifiable {
+        let id: Int
+        let labelIndex: Int
+        let coordinate: CLLocationCoordinate2D
+    }
+
+    private struct CoordinateKey: Hashable {
+        let lat: UInt64
+        let lon: UInt64
+
+        init(_ coordinate: CLLocationCoordinate2D) {
+            lat = coordinate.latitude.bitPattern
+            lon = coordinate.longitude.bitPattern
+        }
     }
 
     private var mapRenderBudgetBucket: Int {
@@ -142,6 +168,64 @@ struct OutdoorDashboardView: View {
         }
     }
 
+    private func coordinateIdentity(_ coordinate: CLLocationCoordinate2D, occurrence: Int = 0) -> Int {
+        var hasher = Hasher()
+        hasher.combine(coordinate.latitude.bitPattern)
+        hasher.combine(coordinate.longitude.bitPattern)
+        hasher.combine(occurrence)
+        return hasher.finalize()
+    }
+
+    private func polylineIdentity(_ polyline: [CLLocationCoordinate2D]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(polyline.count)
+        if let first = polyline.first {
+            hasher.combine(first.latitude.bitPattern)
+            hasher.combine(first.longitude.bitPattern)
+        }
+        if polyline.count > 2 {
+            let mid = polyline[polyline.count / 2]
+            hasher.combine(mid.latitude.bitPattern)
+            hasher.combine(mid.longitude.bitPattern)
+        }
+        if let last = polyline.last {
+            hasher.combine(last.latitude.bitPattern)
+            hasher.combine(last.longitude.bitPattern)
+        }
+        return hasher.finalize()
+    }
+
+    private func identifiedCoordinates(_ coordinates: [CLLocationCoordinate2D]) -> [IdentifiedCoordinate] {
+        var occurrenceByCoordinate: [CoordinateKey: Int] = [:]
+        return coordinates.map { coordinate in
+            let key = CoordinateKey(coordinate)
+            let occurrence = occurrenceByCoordinate[key, default: 0]
+            occurrenceByCoordinate[key] = occurrence + 1
+            return IdentifiedCoordinate(
+                id: coordinateIdentity(coordinate, occurrence: occurrence),
+                coordinate: coordinate
+            )
+        }
+    }
+
+    private var renderedPauseGapCoordinates: [IdentifiedCoordinate] {
+        identifiedCoordinates(ls.pauseGapCoordinates)
+    }
+
+    private var renderedWaypoints: [RenderedWaypoint] {
+        var occurrenceByCoordinate: [CoordinateKey: Int] = [:]
+        return viewModel.mapWaypoints.enumerated().map { index, coordinate in
+            let key = CoordinateKey(coordinate)
+            let occurrence = occurrenceByCoordinate[key, default: 0]
+            occurrenceByCoordinate[key] = occurrence + 1
+            return RenderedWaypoint(
+                id: coordinateIdentity(coordinate, occurrence: occurrence),
+                labelIndex: index + 1,
+                coordinate: coordinate
+            )
+        }
+    }
+
     private var shouldUseMapFollowUpdates: Bool {
         guard scenePhase == .active else { return false }
         guard outdoorMapReady else { return false }
@@ -184,14 +268,23 @@ struct OutdoorDashboardView: View {
             renderedLookaheadPolylines = []
             return
         }
-        renderedCompletedRoutePolylines = ns.completedRoutePolylines.map {
-            $0.sanitizedForMapPolyline(maxPoints: routePolylinePointBudget)
+        renderedCompletedRoutePolylines = ns.completedRoutePolylines.map { polyline in
+            RenderedRoutePolyline(
+                id: polylineIdentity(polyline),
+                coords: polyline.sanitizedForMapPolyline(maxPoints: routePolylinePointBudget)
+            )
         }
-        renderedRemainingRoutePolylines = ns.remainingRoutePolylines.map {
-            $0.sanitizedForMapPolyline(maxPoints: routePolylinePointBudget)
+        renderedRemainingRoutePolylines = ns.remainingRoutePolylines.map { polyline in
+            RenderedRoutePolyline(
+                id: polylineIdentity(polyline),
+                coords: polyline.sanitizedForMapPolyline(maxPoints: routePolylinePointBudget)
+            )
         }
-        renderedLookaheadPolylines = ns.lookaheadPolylines.map {
-            $0.sanitizedForMapPolyline(maxPoints: max(90, routePolylinePointBudget - 40))
+        renderedLookaheadPolylines = ns.lookaheadPolylines.map { polyline in
+            RenderedRoutePolyline(
+                id: polylineIdentity(polyline),
+                coords: polyline.sanitizedForMapPolyline(maxPoints: max(90, routePolylinePointBudget - 40))
+            )
         }
     }
 
@@ -274,9 +367,9 @@ struct OutdoorDashboardView: View {
     // MARK: - Body
 
     var body: some View {
-        let root = AnyView(outdoorDashboardRootZStack)
-        let withObservers = outdoorDashboardAttachObservers(root)
-        return outdoorDashboardAttachChrome(withObservers)
+        outdoorDashboardAttachChrome(
+            outdoorDashboardAttachObservers(outdoorDashboardRootZStack)
+        )
     }
 
     private var outdoorDashboardRootZStack: some View {
@@ -343,50 +436,48 @@ struct OutdoorDashboardView: View {
         }
     }
 
-    private func outdoorDashboardAttachObservers(_ root: AnyView) -> AnyView {
-        AnyView(
-            root
-                .animation(MangoxMotion.standard, value: viewModel.showDestinationSearch)
-                .onAppear(perform: handleViewAppear)
-                .task { await runOutdoorMapPrewarmTask() }
-                .onChange(of: viewModel.setupMode) { _, mode in
-                    handleSetupModeChange(mode)
-                }
-                .onChange(of: viewModel.showSetupPhase) { _, committed in
-                    handleSetupPhaseChange(committed)
-                }
-                .onChange(of: viewModel.showDestinationSearch) { _, isOpen in
-                    handleDestinationSearchChange(isOpen)
-                }
-                .onDisappear(perform: handleViewDisappear)
-                .onChange(of: scenePhase) { _, phase in
-                    handleScenePhaseChange(phase)
-                }
-                .onChange(of: mapCameraService.isFollowingUser) { _, isFollowing in
-                    handleFollowStateChange(isFollowing)
-                }
-                .onChange(of: viewModel.showMapInCompact) { _, _ in updateMapFollowActivation() }
-                .onChange(of: hSizeClass) { _, _ in updateMapFollowActivation() }
-                .onChange(of: outdoorMapReady) { _, _ in updateMapFollowActivation() }
-                .onChange(of: mapRenderBudgetBucket) { _, _ in refreshMapDerivedOverlays() }
-                .onChange(of: breadcrumbRenderFingerprint) { _, _ in refreshBreadcrumbRenderCache() }
-                .onChange(of: routeRenderFingerprint) { _, _ in refreshRouteRenderCache() }
-                .task(id: ls.isAuthorized) {
-                    await runOutdoorLoadingBypassTask()
-                }
-                .onChange(of: ls.currentLocation) { _, location in
-                    handleCurrentLocationChange(location)
-                }
-                .onChange(of: ls.newLapJustCompleted) { _, didCompleteLap in
-                    handleLapCompletionChange(didCompleteLap)
-                }
-                .onChange(of: ls.authorizationStatus) { _, status in
-                    handleAuthorizationStatusChange(status)
-                }
-        )
+    private func outdoorDashboardAttachObservers<Content: View>(_ root: Content) -> some View {
+        root
+            .animation(MangoxMotion.standard, value: viewModel.showDestinationSearch)
+            .onAppear(perform: handleViewAppear)
+            .task { await runOutdoorMapPrewarmTask() }
+            .onChange(of: viewModel.setupMode) { _, mode in
+                handleSetupModeChange(mode)
+            }
+            .onChange(of: viewModel.showSetupPhase) { _, committed in
+                handleSetupPhaseChange(committed)
+            }
+            .onChange(of: viewModel.showDestinationSearch) { _, isOpen in
+                handleDestinationSearchChange(isOpen)
+            }
+            .onDisappear(perform: handleViewDisappear)
+            .onChange(of: scenePhase) { _, phase in
+                handleScenePhaseChange(phase)
+            }
+            .onChange(of: mapCameraService.isFollowingUser) { _, isFollowing in
+                handleFollowStateChange(isFollowing)
+            }
+            .onChange(of: viewModel.showMapInCompact) { _, _ in updateMapFollowActivation() }
+            .onChange(of: hSizeClass) { _, _ in updateMapFollowActivation() }
+            .onChange(of: outdoorMapReady) { _, _ in updateMapFollowActivation() }
+            .onChange(of: mapRenderBudgetBucket) { _, _ in refreshMapDerivedOverlays() }
+            .onChange(of: breadcrumbRenderFingerprint) { _, _ in refreshBreadcrumbRenderCache() }
+            .onChange(of: routeRenderFingerprint) { _, _ in refreshRouteRenderCache() }
+            .task(id: ls.isAuthorized) {
+                await runOutdoorLoadingBypassTask()
+            }
+            .onChange(of: ls.currentLocation) { _, location in
+                handleCurrentLocationChange(location)
+            }
+            .onChange(of: ls.newLapJustCompleted) { _, didCompleteLap in
+                handleLapCompletionChange(didCompleteLap)
+            }
+            .onChange(of: ls.authorizationStatus) { _, status in
+                handleAuthorizationStatusChange(status)
+            }
     }
 
-    private func outdoorDashboardAttachChrome(_ root: AnyView) -> some View {
+    private func outdoorDashboardAttachChrome<Content: View>(_ root: Content) -> some View {
         root
             .sheet(
                 isPresented: binding(\.showRouteSheet),
@@ -2224,26 +2315,23 @@ struct OutdoorDashboardView: View {
             }
 
             // Route overlay — traversed (grey) vs remaining (yellow)
-            ForEach(renderedCompletedRoutePolylines.indices, id: \.self) { i in
-                let done = renderedCompletedRoutePolylines[i]
-                if done.count > 1 {
-                    MapPolyline(coordinates: done)
+            ForEach(renderedCompletedRoutePolylines) { done in
+                if done.coords.count > 1 {
+                    MapPolyline(coordinates: done.coords)
                         .stroke(Color.white.opacity(0.35), lineWidth: routeLineWidth)
                 }
             }
-            ForEach(renderedRemainingRoutePolylines.indices, id: \.self) { i in
-                let left = renderedRemainingRoutePolylines[i]
-                if left.count > 1 {
-                    MapPolyline(coordinates: left)
+            ForEach(renderedRemainingRoutePolylines) { left in
+                if left.coords.count > 1 {
+                    MapPolyline(coordinates: left.coords)
                         .stroke(AppColor.yellow, lineWidth: routeLineWidth)
                 }
             }
 
             // Lookahead ghost — dashed white, 300m ahead on remaining route
-            ForEach(renderedLookaheadPolylines.indices, id: \.self) { i in
-                let lookahead = renderedLookaheadPolylines[i]
-                if lookahead.count > 1 {
-                    MapPolyline(coordinates: lookahead)
+            ForEach(renderedLookaheadPolylines) { lookahead in
+                if lookahead.coords.count > 1 {
+                    MapPolyline(coordinates: lookahead.coords)
                         .stroke(
                             Color.white.opacity(0.45),
                             style: StrokeStyle(lineWidth: max(2, routeLineWidth - 1), dash: [8, 6])
@@ -2262,9 +2350,8 @@ struct OutdoorDashboardView: View {
             }
 
             // Pause gap markers
-            ForEach(ls.pauseGapCoordinates.indices, id: \.self) { i in
-                let coord = ls.pauseGapCoordinates[i]
-                Annotation("", coordinate: coord) {
+            ForEach(renderedPauseGapCoordinates) { coordinate in
+                Annotation("", coordinate: coordinate.coordinate) {
                     Circle()
                         .fill(AppColor.yellow.opacity(0.85))
                         .frame(width: 10, height: 10)
@@ -2307,8 +2394,8 @@ struct OutdoorDashboardView: View {
             }
 
             // User-placed waypoints
-            ForEach(Array(viewModel.mapWaypoints.enumerated()), id: \.offset) { index, coord in
-                Annotation("", coordinate: coord) {
+            ForEach(renderedWaypoints) { waypoint in
+                Annotation("", coordinate: waypoint.coordinate) {
                     VStack(spacing: 2) {
                         ZStack {
                             Circle()
@@ -2318,7 +2405,7 @@ struct OutdoorDashboardView: View {
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(.white)
                         }
-                        Text("WP\(index + 1)")
+                        Text("WP\(waypoint.labelIndex)")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 4)

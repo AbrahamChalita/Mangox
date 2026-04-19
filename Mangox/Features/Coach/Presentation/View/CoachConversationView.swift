@@ -32,6 +32,7 @@ struct CoachConversationView: View {
     @State private var scrollPosition = ScrollPosition()
     @State private var shouldAutoScrollToBottom = true
     @State private var scrollToMessageID: UUID?
+    @State private var lastStreamScrollAt: Date = .distantPast
 
     private static let planBuilderSeed =
         "I want to build a structured training plan for an event. Ask me about my goal, target date, weekly training hours, and experience, then outline next steps."
@@ -45,8 +46,8 @@ struct CoachConversationView: View {
         }
     }()
 
-    private var latestAssistantIndex: Int? {
-        coachViewModel.messages.lastIndex { $0.role == .assistant }
+    private var latestAssistantMessageID: UUID? {
+        coachViewModel.messages.last { $0.role == .assistant }?.id
     }
 
     private static func bubbleMaxWidth(containerWidth: CGFloat) -> CGFloat {
@@ -56,8 +57,12 @@ struct CoachConversationView: View {
         return min(580, max(120, w - horizontalPadding))
     }
 
+    private var transcriptHasContent: Bool {
+        !coachViewModel.messages.isEmpty || coachViewModel.isLoading
+    }
+
     private var transcriptContentAlignment: Alignment {
-        coachViewModel.messages.isEmpty && !coachViewModel.isLoading ? .center : .bottom
+        transcriptHasContent ? .bottom : .center
     }
 
     private var startersLoading: Bool {
@@ -81,7 +86,11 @@ struct CoachConversationView: View {
                         key: CoachChatColumnWidthKey.self, value: proxy.size.width)
                 }
             }
-            .onPreferenceChange(CoachChatColumnWidthKey.self) { chatColumnWidth = $0 }
+            .onPreferenceChange(CoachChatColumnWidthKey.self) { newValue in
+                let clampedWidth = max(newValue, 64)
+                guard abs(clampedWidth - chatColumnWidth) > 0.5 else { return }
+                chatColumnWidth = clampedWidth
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 inputBar
             }
@@ -126,13 +135,14 @@ struct CoachConversationView: View {
 
                 Spacer(minLength: 0)
 
-                HStack(spacing: 2) {
+                HStack(spacing: 8) {
                     Button {
                         showConversationsList = true
                     } label: {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.system(size: 17, weight: .medium))
-                            .frame(width: 44, height: 44)
+                            .frame(width: 40, height: 40)
+                            .mangoxSurface(.frostedInteractive, shape: .circle)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -144,7 +154,8 @@ struct CoachConversationView: View {
                     } label: {
                         Image(systemName: "calendar.badge.plus")
                             .font(.system(size: 17, weight: .medium))
-                            .frame(width: 44, height: 44)
+                            .frame(width: 40, height: 40)
+                            .mangoxSurface(.frostedInteractive, shape: .circle)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -157,7 +168,8 @@ struct CoachConversationView: View {
                     } label: {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 17, weight: .medium))
-                            .frame(width: 44, height: 44)
+                            .frame(width: 40, height: 40)
+                            .mangoxSurface(.frostedInteractive, shape: .circle)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -206,34 +218,36 @@ struct CoachConversationView: View {
 
     private var metricsStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                metricCapsule(
-                    icon: "bolt.fill", label: "FTP", value: "\(PowerZone.ftp)W",
-                    color: AppColor.yellow)
-                metricCapsule(
-                    icon: "heart.fill", label: "Max HR", value: "\(HeartRateZone.maxHR)",
-                    color: AppColor.heartRate)
-                if !coachViewModel.isPro {
-                    if coachViewModel.bypassesDailyLimit {
-                        metricCapsule(
-                            icon: "person.fill.checkmark",
-                            label: "Coach",
-                            value: "Staff",
-                            color: AppColor.mango.opacity(0.85)
-                        )
-                    } else {
-                        let left = coachViewModel.remainingFreeMessages(isPro: coachViewModel.isPro)
-                        metricCapsule(
-                            icon: "bubble.left.fill",
-                            label: "Today",
-                            value: "\(left) left",
-                            color: left > 0 ? .white.opacity(0.45) : AppColor.red
-                        )
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    metricCapsule(
+                        icon: "bolt.fill", label: "FTP", value: "\(PowerZone.ftp)W",
+                        color: AppColor.yellow)
+                    metricCapsule(
+                        icon: "heart.fill", label: "Max HR", value: "\(HeartRateZone.maxHR)",
+                        color: AppColor.heartRate)
+                    if !coachViewModel.isPro {
+                        if coachViewModel.bypassesDailyLimit {
+                            metricCapsule(
+                                icon: "person.fill.checkmark",
+                                label: "Coach",
+                                value: "Staff",
+                                color: AppColor.mango.opacity(0.85)
+                            )
+                        } else {
+                            let left = coachViewModel.remainingFreeMessages(isPro: coachViewModel.isPro)
+                            metricCapsule(
+                                icon: "bubble.left.fill",
+                                label: "Today",
+                                value: "\(left) left",
+                                color: left > 0 ? .white.opacity(0.45) : AppColor.red
+                            )
+                        }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
         }
         .overlay(alignment: .bottom) {
             Divider().opacity(0.15)
@@ -272,15 +286,23 @@ struct CoachConversationView: View {
                 } else {
                     // `VStack` avoids LazyVStack deferring layout until scroll (blank transcript until user drags).
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(coachViewModel.messages.enumerated()), id: \.element.id) {
-                            index, message in
+                        ForEach(coachViewModel.messages) { message in
                             CoachMessageRow(
                                 message: message,
                                 isLatestAssistant: message.role == .assistant
-                                    && (latestAssistantIndex.map { $0 == index } ?? false),
+                                    && message.id == latestAssistantMessageID,
                                 bubbleMaxWidth: maxW,
                                 suggestionsInteractive: !coachViewModel.isLoading,
-                                onRetry: { send("Try again") },
+                                onRetry: {
+                                    // Re-run the prior user prompt verbatim instead of
+                                    // sending the literal string "Try again", which the
+                                    // model treated as a fresh (often confusing) turn.
+                                    HapticManager.shared.coachMessageSent()
+                                    Task { @MainActor in
+                                        await coachViewModel.retryLastUserMessage(
+                                            isPro: coachViewModel.isPro)
+                                    }
+                                },
                                 onSuggestedAction: handleSuggestedAction,
                                 onFollowUpBatchComplete: { send($0) }
                             )
@@ -312,6 +334,13 @@ struct CoachConversationView: View {
                 maxWidth: .infinity,
                 minHeight: max(transcriptViewportHeight, 0),
                 alignment: transcriptContentAlignment
+            )
+            // Smooth the one-time .center → .bottom shift when the user sends
+            // their first message; without this the empty-state collapses with a
+            // visible jump.
+            .animation(
+                accessibilityReduceMotion ? nil : .smooth(duration: 0.32),
+                value: transcriptHasContent
             )
         }
         .background {
@@ -359,6 +388,17 @@ struct CoachConversationView: View {
             }
         }
         .onChange(of: coachViewModel.isLoading) { _, _ in
+            scrollTranscriptToBottom()
+        }
+        // Throttled scroll-to-bottom while the streaming draft grows. Without this
+        // the visible bottom edge falls off-screen mid-reply for users on fast
+        // networks; ticking every ~220ms keeps the latest text in view without
+        // animating against the user's manual scroll-up gesture.
+        .onChange(of: coachViewModel.streamDraftText) { _, newValue in
+            guard shouldAutoScrollToBottom, !newValue.isEmpty else { return }
+            let now = Date()
+            guard now.timeIntervalSince(lastStreamScrollAt) > 0.22 else { return }
+            lastStreamScrollAt = now
             scrollTranscriptToBottom()
         }
         .onChange(of: coachViewModel.generatingPlan) { _, g in
@@ -561,37 +601,60 @@ struct CoachConversationView: View {
 
 struct CoachStreamingSection: View {
     @Environment(CoachViewModel.self) private var coachViewModel
-    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     var body: some View {
         if coachViewModel.isLoading {
-            Group {
-                if !coachViewModel.streamDraftText.isEmpty {
-                    CoachStreamingBubble(
-                        text: coachViewModel.streamDraftText,
-                        style: .cloud
-                    )
-                    .id("streaming")
-                } else if coachViewModel.streamIsThinking {
-                    CoachStreamStatusRow(
-                        text: "Reasoning…",
-                        style: .cloud
-                    )
-                    .id("thinking")
-                } else if let status = coachViewModel.streamStatusText, !status.isEmpty {
-                    CoachStreamStatusRow(
-                        text: status,
-                        style: .cloud
-                    )
-                        .id("status")
-                } else {
-                    CoachTypingRow(style: .cloud)
-                        .id("typing")
-                }
-            }
-            .contentTransition(.interpolate)
-            .animation(accessibilityReduceMotion ? .none : MangoxMotion.entrance, value: coachViewModel.isLoading)
+            // ONE persistent bubble for the entire pending turn. Internal state
+            // (typing dots → status → reasoning → streaming text) swaps inside the
+            // same shell so the row never resizes or re-flows. This eliminates the
+            // "thinking bubble flicker" and guarantees a placeholder is visible
+            // immediately on the very first message — the bubble shell mounts as
+            // soon as `isLoading` flips, before any stream events arrive.
+            CoachPendingReplyBubble(
+                streamingText: coachViewModel.streamDraftText,
+                statusText: coachViewModel.streamStatusText,
+                isThinking: coachViewModel.streamIsThinking,
+                style: .cloud
+            )
+            .id("pending-bubble")
         }
+    }
+}
+
+private struct CoachErrorBanner: View {
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.red.opacity(0.85))
+                .padding(.top, 1)
+            Text(message)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.78))
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                onDismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss error")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.red.opacity(0.10))
+        .overlay(alignment: .top) { Divider().opacity(0.18) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Error: \(message)")
     }
 }
 
@@ -608,12 +671,6 @@ struct CoachInputBarWrapper: View {
     @State private var inputText = ""
     @FocusState private var inputFocused: Bool
 
-    private var canSendFromKeyboard: Bool {
-        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty && !coachViewModel.isLoading
-            && !coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro)
-    }
-
     var body: some View {
         InputBarView(
             navigationPath: $navigationPath,
@@ -623,42 +680,21 @@ struct CoachInputBarWrapper: View {
             inputFocused: _inputFocused,
             showComposerLimitBanner: showComposerLimitBanner,
             sendAction: { text in
+                let wasFocused = inputFocused
                 sendAction(text)
                 inputText = ""
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(80))
+                // Keep the keyboard up across sends without an arbitrary sleep —
+                // SwiftUI sometimes drops focus when the parent reflows after send.
+                if wasFocused {
                     inputFocused = true
                 }
             }
         )
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Button {
-                    if let s = UIPasteboard.general.string {
-                        inputText += s
-                    }
-                } label: {
-                    Image(systemName: "doc.on.clipboard")
-                }
-                .accessibilityLabel("Paste from clipboard")
-
-                Spacer()
-
-                Button("Send") {
-                    guard canSendFromKeyboard else { return }
-                    let t = inputText
-                    sendAction(t)
-                    inputText = ""
-                }
-                .font(.system(size: 17, weight: .semibold))
-                .disabled(!canSendFromKeyboard)
-                .accessibilityLabel("Send message")
-
-                Button("Done") { inputFocused = false }
-                    .font(.system(size: 17, weight: .semibold))
-                    .accessibilityLabel("Dismiss keyboard")
-            }
-        }
+        // Removed `ToolbarItemGroup(placement: .keyboard)`. The system toolbar adds
+        // ~44pt above the keyboard that the ScrollView's safeAreaInset doesn't
+        // account for, so the last bubble could hide under it. Send is already
+        // inline; long-press on the TextField still surfaces Paste; interactive
+        // drag dismisses the keyboard.
         .onChange(of: inputFocused) { _, focused in
             onFocusChanged(focused)
         }
@@ -734,6 +770,18 @@ struct InputBarView: View {
                 )
             }
 
+            if let errorMessage = coachViewModel.error, !errorMessage.isEmpty {
+                CoachErrorBanner(
+                    message: errorMessage,
+                    onDismiss: { coachViewModel.dismissError() }
+                )
+                .transition(
+                    accessibilityReduceMotion
+                        ? .opacity
+                        : .move(edge: .bottom).combined(with: .opacity)
+                )
+            }
+
             GlassEffectContainer(spacing: 12) {
                 HStack(alignment: .bottom, spacing: 10) {
                     TextField(
@@ -746,6 +794,9 @@ struct InputBarView: View {
                     .foregroundStyle(.white)
                     .tint(AppColor.mango)
                     .textInputAutocapitalization(.sentences)
+                    .autocorrectionDisabled(false)
+                    .keyboardType(.default)
+                    .textContentType(.none)
                     .lineLimit(1...6)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 11)
@@ -773,6 +824,20 @@ struct InputBarView: View {
         }
     }
 
+    private var sendButtonHint: String {
+        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) {
+            return "Daily message limit reached. Upgrade to Pro to continue."
+        }
+        if coachViewModel.isLoading {
+            return "Coach is replying. Wait for the response to finish."
+        }
+        if trimmed.isEmpty {
+            return "Type a message to enable send."
+        }
+        return ""
+    }
+
     private var sendButton: some View {
         let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let canSend =
@@ -795,11 +860,7 @@ struct InputBarView: View {
         .buttonStyle(MangoxPressStyle())
         .disabled(!canSend)
         .accessibilityLabel(coachViewModel.isLoading ? "Sending message" : "Send message")
-        .accessibilityHintIf(
-            !canSend && coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro)
-                ? "Daily message limit reached. Upgrade to Pro to continue."
-                : ""
-        )
+        .accessibilityHintIf(sendButtonHint)
         .animation(
             accessibilityReduceMotion ? .easeInOut(duration: 0.12) : .smooth(duration: 0.22),
             value: canSend

@@ -39,6 +39,12 @@ enum NavigationMode: Equatable {
     case turnByTurn
 }
 
+nonisolated enum RouteCalculationFailureKind: Equatable {
+    case offline
+    case noRoute
+    case unknown
+}
+
 /// Provides route calculation, turn-by-turn navigation, and off-course detection.
 ///
 /// Uses Apple's MKDirections API for cycling-specific routing.
@@ -106,6 +112,7 @@ final class NavigationService {
 
     /// Last error from route calculation.
     var lastError: String?
+    var lastRouteFailureKind: RouteCalculationFailureKind?
 
     // MARK: - Private
 
@@ -149,6 +156,7 @@ final class NavigationService {
     func calculateRoute(from origin: CLLocationCoordinate2D, to mapItem: MKMapItem) async {
         isCalculating = true
         lastError = nil
+        lastRouteFailureKind = nil
 
         let request = MKDirections.Request()
         request.source = MKMapItem(
@@ -165,6 +173,7 @@ final class NavigationService {
 
             guard let route = response.routes.first else {
                 lastError = "No cycling route found."
+                lastRouteFailureKind = .noRoute
                 isCalculating = false
                 return
             }
@@ -202,7 +211,16 @@ final class NavigationService {
             logger.info("Route calculated: \(route.distance)m, \(self.allRouteSteps.count) steps")
 
         } catch {
-            lastError = "Route calculation failed: \(error.localizedDescription)"
+            let failureKind = Self.classifyRouteCalculationError(error)
+            lastRouteFailureKind = failureKind
+            switch failureKind {
+            case .offline:
+                lastError = "Offline right now. Check your connection and try again."
+            case .noRoute:
+                lastError = "No cycling route found."
+            case .unknown:
+                lastError = "Route calculation failed: \(error.localizedDescription)"
+            }
             isCalculating = false
             logger.error("Route calculation failed: \(error.localizedDescription)")
         }
@@ -259,7 +277,42 @@ final class NavigationService {
         previousGPXHintDistance = .greatestFiniteMagnitude
         lastRouteProgressSegmentIndex = 0
         routeSegmentBreakIndices = []
+        lastRouteFailureKind = nil
     }
+
+    nonisolated static func classifyRouteCalculationError(_ error: Error) -> RouteCalculationFailureKind {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain, Self.offlineURLCodes.contains(nsError.code) {
+            return .offline
+        }
+
+        if nsError.domain == MKError.errorDomain,
+            nsError.code >= 0,
+            let mkCode = MKError.Code(rawValue: UInt(nsError.code))
+        {
+            switch mkCode {
+            case .serverFailure:
+                return .offline
+            case .directionsNotFound, .placemarkNotFound:
+                return .noRoute
+            default:
+                break
+            }
+        }
+
+        return .unknown
+    }
+
+    nonisolated private static let offlineURLCodes: Set<Int> = [
+        NSURLErrorNotConnectedToInternet,
+        NSURLErrorNetworkConnectionLost,
+        NSURLErrorTimedOut,
+        NSURLErrorCannotFindHost,
+        NSURLErrorCannotConnectToHost,
+        NSURLErrorDNSLookupFailed,
+        NSURLErrorDataNotAllowed,
+        NSURLErrorInternationalRoamingOff
+    ]
 
     // MARK: - Live Update
 
