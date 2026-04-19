@@ -152,9 +152,18 @@ final class HomeViewModel {
         let timeZone = TimeZone.current
         let locale = Locale.current
         let aggregator = trainingAggregator
-        let dto = await Task.detached(priority: .utility) {
-            aggregator(slices, now, timeZone, locale)
-        }.value
+        let dto = await withTaskGroup(
+            of: HomeTrainingCacheDTO?.self,
+            returning: HomeTrainingCacheDTO?.self
+        ) { group in
+            group.addTask(priority: .utility) {
+                guard !Task.isCancelled else { return nil }
+                return aggregator(slices, now, timeZone, locale)
+            }
+            return await group.next() ?? nil
+        }
+        guard let dto else { return }
+        guard !Task.isCancelled else { return }
         guard generation == trainingCacheGeneration else { return }
         apply(dto)
     }

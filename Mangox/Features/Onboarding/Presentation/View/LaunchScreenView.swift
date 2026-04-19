@@ -21,6 +21,8 @@ struct LaunchScreenView: View {
     @State private var wordmarkScale: Double = 0.88
     @State private var dotsVisible: Bool = false
     @State private var exitPhase: Bool = false   // true = exit animation running
+    @State private var dotsRevealTask: Task<Void, Never>?
+    @State private var exitPhaseTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -56,7 +58,10 @@ struct LaunchScreenView: View {
                 wordmarkScale = 1.0
             }
             // Step 2: dots appear after wordmark settles
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            dotsRevealTask?.cancel()
+            dotsRevealTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                guard !Task.isCancelled else { return }
                 dotsVisible = true
             }
         }
@@ -66,11 +71,18 @@ struct LaunchScreenView: View {
             guard !newValue else { return }
             // Dots fade out first (handled by their own opacity animation above).
             // Wordmark lifts and fades, then the background fades — staggered.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            exitPhaseTask?.cancel()
+            exitPhaseTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled else { return }
                 withAnimation(.easeIn(duration: 0.35)) {
                     exitPhase = true
                 }
             }
+        }
+        .onDisappear {
+            dotsRevealTask?.cancel()
+            exitPhaseTask?.cancel()
         }
     }
 }

@@ -121,9 +121,20 @@ final class PersonalRecords: PersonalRecordsServiceProtocol {
     func load(from workouts: [Workout]) async {
         isLoaded = false
         let cached = self.cachedMMPs
-        let prs = await Task.detached(priority: .utility) {
-            Self.computeAllTimePRsIncremental(from: workouts, cachedMMPs: cached)
-        }.value
+        let prs = await withTaskGroup(
+            of: (entries: [PREntry], updatedCache: [UUID: WorkoutMMP])?.self,
+            returning: (entries: [PREntry], updatedCache: [UUID: WorkoutMMP])?.self
+        ) { group in
+            group.addTask(priority: .utility) {
+                guard !Task.isCancelled else { return nil }
+                return Self.computeAllTimePRsIncremental(from: workouts, cachedMMPs: cached)
+            }
+            return await group.next() ?? nil
+        }
+        guard let prs else {
+            isLoaded = true
+            return
+        }
         allTimePRs = prs.entries
         cachedMMPs = prs.updatedCache
         isLoaded = true

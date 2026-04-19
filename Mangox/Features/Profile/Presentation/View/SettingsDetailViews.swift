@@ -1974,7 +1974,8 @@ struct RiderProfileSettingsView: View {
         .onAppear {
             birthYearDraftReady = false
             applyBirthYearDraftFromPreferences()
-            DispatchQueue.main.async {
+            Task { @MainActor in
+                await Task.yield()
                 birthYearDraftReady = true
             }
         }

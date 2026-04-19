@@ -35,6 +35,12 @@ struct TrainingPlanView: View {
         return d
     }()
 
+    private static let dayLabelFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE"
+        return formatter
+    }()
+
     @Query(Self.recentWorkoutsForPlanDescriptor) private var recentWorkoutsForPlan: [Workout]
 
     private let plan: TrainingPlan
@@ -582,9 +588,7 @@ struct TrainingPlanView: View {
 
     private func dynamicDayLabel(for day: PlanDay, calendarDate: Date?) -> String {
         guard let calendarDate else { return day.dayLabel }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEE" // Short weekday, e.g. Mon, Tue, Wed
-        return formatter.string(from: calendarDate)
+        return Self.dayLabelFormatter.string(from: calendarDate)
     }
 
     // MARK: - Day Card

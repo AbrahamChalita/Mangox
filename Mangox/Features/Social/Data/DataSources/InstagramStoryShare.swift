@@ -72,18 +72,22 @@ enum InstagramStoryShare {
 
     /// JPEG/PNG compression is CPU-heavy; offload so ``UIPasteboard`` + Instagram handoff stay smooth on the main actor.
     static func encodeBackgroundImageDataAsync(_ image: UIImage) async -> Data? {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: Self.encodeBackgroundImageData(image))
+        await withTaskGroup(of: Data?.self, returning: Data?.self) { group in
+            group.addTask(priority: .userInitiated) {
+                guard !Task.isCancelled else { return nil }
+                return Self.encodeBackgroundImageData(image)
             }
+            return await group.next() ?? nil
         }
     }
 
     static func encodeStickerImageDataAsync(_ image: UIImage) async -> Data? {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: Self.encodeStickerImageData(image))
+        await withTaskGroup(of: Data?.self, returning: Data?.self) { group in
+            group.addTask(priority: .userInitiated) {
+                guard !Task.isCancelled else { return nil }
+                return Self.encodeStickerImageData(image)
             }
+            return await group.next() ?? nil
         }
     }
 
@@ -178,7 +182,8 @@ enum InstagramStoryShare {
         }
 
         // Defer `open` one run-loop turn so the pasteboard commit is visible to Instagram when it foregrounds.
-        DispatchQueue.main.async {
+        Task { @MainActor in
+            await Task.yield()
             UIApplication.shared.open(storiesURL, options: [:], completionHandler: nil)
         }
         return true

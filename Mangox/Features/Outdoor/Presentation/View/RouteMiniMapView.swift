@@ -31,14 +31,10 @@ struct RouteMiniMapView: View {
 
             if routeService.hasRoute {
                 Map(position: $cameraPosition) {
-                    // Cache sanitized coordinates — polylines only change when route loads
-                    let segments = routeService.polylineSegments
+                    let segments = routeService.sanitizedPolylineSegments
                     ForEach(segments.indices, id: \.self) { i in
-                        let coordinates = segments[i].sanitizedForMapPolyline()
-                        if coordinates.count > 1 {
-                            MapPolyline(coordinates: coordinates)
-                                .stroke(AppColor.mango, lineWidth: 4)
-                        }
+                        MapPolyline(coordinates: segments[i])
+                            .stroke(AppColor.mango, lineWidth: 4)
                     }
 
                     if let riderCoordinate {
@@ -80,6 +76,9 @@ struct RouteMiniMapView: View {
         )
         .onAppear(perform: updateCamera)
         .onChange(of: routeService.points.count) { _, _ in
+            updateCamera()
+        }
+        .onChange(of: routeService.totalDistance) { _, _ in
             updateCamera()
         }
     }

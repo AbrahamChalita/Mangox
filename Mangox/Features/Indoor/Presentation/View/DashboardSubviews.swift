@@ -5,12 +5,40 @@
 /// SwiftUI uses value equality to skip re-rendering a subtree whose inputs
 /// haven't changed — the key mechanism for reducing 4 Hz BLE re-renders.
 
+import Foundation
 import SwiftData
 import SwiftUI
 
 #if canImport(UIKit)
     import UIKit
 #endif
+
+private enum DashboardNumberFormat {
+    private static let percent0Formatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.locale = .current
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 0
+        return formatter
+    }()
+    private static let percent1Formatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.locale = .current
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 1
+        formatter.maximumFractionDigits = 1
+        return formatter
+    }()
+
+    static func percent0(_ value: Double) -> String {
+        "\(percent0Formatter.string(from: NSNumber(value: value)) ?? "\(value)")%"
+    }
+
+    static func percent1(_ value: Double) -> String {
+        "\(percent1Formatter.string(from: NSNumber(value: value)) ?? "\(value)")%"
+    }
+}
 
 // MARK: - Goal Progress Pill
 
@@ -692,15 +720,13 @@ struct CollapsibleLivePerformanceBar: View {
         }
 
         func updateUIView(_ uiView: UIView, context: Context) {
-            DispatchQueue.main.async {
-                var superview: UIView? = uiView.superview
-                while let s = superview {
-                    if let scroll = s as? UIScrollView {
-                        scroll.delaysContentTouches = false
-                        return
-                    }
-                    superview = s.superview
+            var superview: UIView? = uiView.superview
+            while let s = superview {
+                if let scroll = s as? UIScrollView {
+                    scroll.delaysContentTouches = false
+                    return
                 }
+                superview = s.superview
             }
         }
     }
@@ -834,7 +860,7 @@ struct TrainerControlCard: View {
                         Image(systemName: grade >= 0 ? "arrow.up.right" : "arrow.down.right")
                             .font(.system(size: condensed ? 11 : 12, weight: .bold))
                             .foregroundStyle(gradeColor(for: grade))
-                        Text(String(format: "%.1f%%", grade))
+                        Text(DashboardNumberFormat.percent1(grade))
                             .font(
                                 .system(
                                     size: condensed ? 18 : 22, weight: .bold, design: .monospaced)
@@ -1410,7 +1436,7 @@ struct GuidedSessionCard: View {
         HStack(spacing: 4) {
             Image(systemName: "target")
                 .font(.caption2)
-            Text(String(format: "%.0f%% in zone", session.stepInZonePercent))
+            Text("\(DashboardNumberFormat.percent0(session.stepInZonePercent)) in zone")
                 .font(.caption.weight(.medium))
         }
         .foregroundStyle(.white.opacity(0.55))
@@ -1420,7 +1446,7 @@ struct GuidedSessionCard: View {
         HStack(spacing: 3) {
             Image(systemName: "mountain.2.fill")
                 .font(.caption2)
-            Text(String(format: "%.1f%%", grade))
+            Text(DashboardNumberFormat.percent1(grade))
                 .font(.caption.weight(.bold))
         }
         .foregroundStyle(gradeColor(for: grade))
@@ -1441,7 +1467,7 @@ struct GuidedSessionCard: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                Text(String(format: "%.0f%%", session.totalInZonePercent))
+                Text(DashboardNumberFormat.percent0(session.totalInZonePercent))
                     .font(.system(size: 16, weight: .bold, design: .monospaced))
                     .foregroundStyle(AppColor.success)
                 Text("in zone")
@@ -1537,10 +1563,10 @@ struct GuidedSessionCard: View {
             ) {
                 guidedStatPill(
                     label: "OVERALL",
-                    value: String(format: "%.0f%%", session.overallProgress * 100))
+                    value: DashboardNumberFormat.percent0(session.overallProgress * 100))
                 guidedStatPill(
                     label: "IN ZONE",
-                    value: String(format: "%.0f%%", session.totalInZonePercent))
+                    value: DashboardNumberFormat.percent0(session.totalInZonePercent))
                 guidedStatPill(
                     label: "ELAPSED",
                     value: GuidedSessionManager.formatCountdown(session.elapsedSeconds))

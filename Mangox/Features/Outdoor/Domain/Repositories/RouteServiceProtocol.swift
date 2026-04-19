@@ -20,6 +20,7 @@ protocol RouteServiceProtocol: AnyObject {
 
     // MARK: - Map Display
     var polylineSegments: [[CLLocationCoordinate2D]] { get }
+    var sanitizedPolylineSegments: [[CLLocationCoordinate2D]] { get }
     var cameraRegion: MKCoordinateRegion? { get }
 
     // MARK: - Methods

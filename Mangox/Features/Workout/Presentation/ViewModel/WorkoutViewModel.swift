@@ -82,6 +82,9 @@ struct WorkoutPreparedSummaryData {
     let sortedLaps: [LapSplit]
     let zoneBuckets: [ZoneBucket]
     let hrZoneBuckets: [HRZoneBucket]
+    let powerCounts: [Int: Int]
+    let heartRateCounts: [Int: Int]
+    let totalHeartRateSamples: Int
 }
 
 enum WorkoutSummaryNavigationAction {
@@ -672,36 +675,62 @@ final class WorkoutViewModel {
 
         let sortedSamplesData = await workoutPersistenceRepository.fetchSortedSamples(
             forWorkoutID: workoutID)
-        let (powerCounts, heartRateCounts, hrCount) = await Task.detached(
-            priority: .userInitiated
-        ) {
-            var powerCounts = [Int: Int]()
-            var heartRateCounts = [Int: Int]()
-            var hrCount = 0
+        let previousPrepared = preparedSummaryData
+        let incrementalBase = incrementalAggregationBase(
+            previous: previousPrepared,
+            incomingSamples: sortedSamplesData,
+            signature: signature
+        )
+        let appendedSamples: ArraySlice<WorkoutSampleData> = {
+            if let base = incrementalBase {
+                return sortedSamplesData.dropFirst(base.baseSampleCount)
+            }
+            return ArraySlice(sortedSamplesData)
+        }()
+        let (powerCounts, heartRateCounts, hrCount) = await withTaskGroup(
+            of: ([Int: Int], [Int: Int], Int).self,
+            returning: ([Int: Int], [Int: Int], Int).self
+        ) { group in
+            group.addTask(priority: .userInitiated) {
+                var powerCounts = incrementalBase?.powerCounts ?? [:]
+                var heartRateCounts = incrementalBase?.heartRateCounts ?? [:]
+                var hrCount = incrementalBase?.heartRateSamples ?? 0
 
-            for sample in sortedSamplesData {
-                powerCounts[
-                    SummaryZoneAggregation.powerZoneId(forWatts: sample.power, ftp: ftp),
-                    default: 0
-                ] += 1
+                for (index, sample) in appendedSamples.enumerated() {
+                    if index.isMultiple(of: 256), Task.isCancelled {
+                        return (
+                            incrementalBase?.powerCounts ?? [:],
+                            incrementalBase?.heartRateCounts ?? [:],
+                            incrementalBase?.heartRateSamples ?? 0
+                        )
+                    }
 
-                if sample.heartRate > 0 {
-                    heartRateCounts[
-                        SummaryZoneAggregation.heartRateZoneId(
-                            forBpm: sample.heartRate,
-                            maxHR: hrMax,
-                            restingHR: hrResting,
-                            usesKarvonen: hrUsesKarvonen
-                        ),
+                    powerCounts[
+                        SummaryZoneAggregation.powerZoneId(forWatts: sample.power, ftp: ftp),
                         default: 0
                     ] += 1
-                    hrCount += 1
+
+                    if sample.heartRate > 0 {
+                        heartRateCounts[
+                            SummaryZoneAggregation.heartRateZoneId(
+                                forBpm: sample.heartRate,
+                                maxHR: hrMax,
+                                restingHR: hrResting,
+                                usesKarvonen: hrUsesKarvonen
+                            ),
+                            default: 0
+                        ] += 1
+                        hrCount += 1
+                    }
                 }
+
+                return (powerCounts, heartRateCounts, hrCount)
             }
 
-            return (powerCounts, heartRateCounts, hrCount)
-        }.value
+            return await group.next() ?? ([:], [:], 0)
+        }
 
+        guard !Task.isCancelled else { return }
         guard pendingSummarySignature == signature else { return }
 
         let totalSamples = max(sortedSamplesData.count, 1)
@@ -729,8 +758,47 @@ final class WorkoutViewModel {
             sortedSamples: sortedSamplesData,
             sortedLaps: sortedLaps,
             zoneBuckets: zoneBuckets,
-            hrZoneBuckets: hrZoneBuckets
+            hrZoneBuckets: hrZoneBuckets,
+            powerCounts: powerCounts,
+            heartRateCounts: heartRateCounts,
+            totalHeartRateSamples: hrCount
         )
         isSummaryDataReady = true
+    }
+
+    private struct IncrementalAggregationBase {
+        let baseSampleCount: Int
+        let powerCounts: [Int: Int]
+        let heartRateCounts: [Int: Int]
+        let heartRateSamples: Int
+    }
+
+    private func incrementalAggregationBase(
+        previous: WorkoutPreparedSummaryData?,
+        incomingSamples: [WorkoutSampleData],
+        signature: SummaryDataSignature
+    ) -> IncrementalAggregationBase? {
+        guard let previous else { return nil }
+        guard previous.signature.sampleCount <= signature.sampleCount else { return nil }
+        guard previous.signature.lapCount == signature.lapCount else { return nil }
+        guard previous.signature.lastSampleElapsed <= signature.lastSampleElapsed else { return nil }
+        guard previous.signature.workoutStatus == signature.workoutStatus else { return nil }
+
+        let baseCount = previous.sortedSamples.count
+        guard baseCount > 0, baseCount <= incomingSamples.count else { return nil }
+
+        // Ensure data is append-only before reusing previous zone counts.
+        for index in 0..<baseCount {
+            if previous.sortedSamples[index].elapsedSeconds != incomingSamples[index].elapsedSeconds {
+                return nil
+            }
+        }
+
+        return IncrementalAggregationBase(
+            baseSampleCount: baseCount,
+            powerCounts: previous.powerCounts,
+            heartRateCounts: previous.heartRateCounts,
+            heartRateSamples: previous.totalHeartRateSamples
+        )
     }
 }

@@ -136,7 +136,8 @@ struct OnboardingView: View {
     private func syncWelcomeAppearance() {
         viewModel.syncWelcomeAppearance(reduceMotion: reduceMotion)
         if !reduceMotion, viewModel.currentStep == 0 {
-            DispatchQueue.main.async {
+            Task { @MainActor in
+                await Task.yield()
                 withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) {
                     viewModel.welcomeAppeared = true
                 }
@@ -147,7 +148,8 @@ struct OnboardingView: View {
     private func triggerFinishCelebrationIfNeeded() {
         viewModel.triggerFinishCelebrationIfNeeded(reduceMotion: reduceMotion)
         guard !reduceMotion else { return }
-        DispatchQueue.main.async {
+        Task { @MainActor in
+            await Task.yield()
             withAnimation(.spring(response: 0.5, dampingFraction: 0.68)) {
                 viewModel.finishCelebration = true
             }

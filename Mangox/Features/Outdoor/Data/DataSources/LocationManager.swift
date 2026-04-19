@@ -568,7 +568,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         let headingBox = UncheckedOptional<Timer>(concurrencyHandles.headingFlushTimer)
         let fileBox = UncheckedOptional<FileHandle>(
             concurrencyHandles.pendingRecordedTrackFileHandle)
-        DispatchQueue.main.async {
+        Task { @MainActor in
             rideBox.value?.invalidate()
             gpsBox.value?.invalidate()
             headingBox.value?.invalidate()

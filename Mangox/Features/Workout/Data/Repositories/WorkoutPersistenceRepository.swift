@@ -134,23 +134,37 @@ final class WorkoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol {
 
     func fetchSortedSamples(forWorkoutID id: PersistentIdentifier) async -> [WorkoutSampleData] {
         let container = modelContainer
-        return await Task.detached(priority: .userInitiated) {
-            let bgContext = ModelContext(container)
-            guard let bgWorkout = bgContext.model(for: id) as? Workout else {
-                return [WorkoutSampleData]()
+        return await withTaskGroup(
+            of: [WorkoutSampleData]?.self,
+            returning: [WorkoutSampleData]?.self
+        ) { group in
+            group.addTask(priority: .userInitiated) {
+                guard !Task.isCancelled else { return nil }
+                let bgContext = ModelContext(container)
+                guard let bgWorkout = bgContext.model(for: id) as? Workout else {
+                    return []
+                }
+                var sortedSamples = bgWorkout.samples
+                sortedSamples.sort { $0.elapsedSeconds < $1.elapsedSeconds }
+                var projectedSamples: [WorkoutSampleData] = []
+                projectedSamples.reserveCapacity(sortedSamples.count)
+                for sample in sortedSamples {
+                    if Task.isCancelled { return nil }
+                    projectedSamples.append(
+                        WorkoutSampleData(
+                            timestamp: sample.timestamp,
+                            elapsedSeconds: sample.elapsedSeconds,
+                            power: sample.power,
+                            cadence: sample.cadence,
+                            speed: sample.speed,
+                            heartRate: sample.heartRate
+                        )
+                    )
+                }
+                return projectedSamples
             }
-            let sortedSamples = bgWorkout.samples.sorted { $0.elapsedSeconds < $1.elapsedSeconds }
-            return sortedSamples.map { sample in
-                WorkoutSampleData(
-                    timestamp: sample.timestamp,
-                    elapsedSeconds: sample.elapsedSeconds,
-                    power: sample.power,
-                    cadence: sample.cadence,
-                    speed: sample.speed,
-                    heartRate: sample.heartRate
-                )
-            }
-        }.value
+            return await group.next() ?? nil
+        } ?? []
     }
 
     // MARK: - Private helpers

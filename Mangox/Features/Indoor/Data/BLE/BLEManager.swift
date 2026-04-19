@@ -955,17 +955,16 @@ extension BLEManager: CBCentralManagerDelegate {
                 guard let self else { return }
                 self.bluetoothState = state
                 if state == .poweredOn {
-                    // Second async hop: lets `sensorLiveRouteScope()` run so we only auto-reconnect on ride surfaces.
-                    DispatchQueue.main.async { [weak self] in
-                        MainActor.assumeIsolated {
-                            guard let self else { return }
-                            guard TrainerSensorLiveObservationGate.isLiveRouteActive else { return }
-                            if !self.trainerConnectionState.isConnected
-                                || !self.hrConnectionState.isConnected
-                                || !self.cscConnectionState.isConnected
-                            {
-                                self.reconnectOrScan()
-                            }
+                    // Yield one cycle so `sensorLiveRouteScope()` can set gate state before reconnect.
+                    Task { @MainActor [weak self] in
+                        await Task.yield()
+                        guard let self else { return }
+                        guard TrainerSensorLiveObservationGate.isLiveRouteActive else { return }
+                        if !self.trainerConnectionState.isConnected
+                            || !self.hrConnectionState.isConnected
+                            || !self.cscConnectionState.isConnected
+                        {
+                            self.reconnectOrScan()
                         }
                     }
                 } else {

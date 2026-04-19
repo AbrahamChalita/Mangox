@@ -86,7 +86,7 @@ struct WeekSummary: Identifiable {
 /// - ATL (Acute Training Load)   = 7-day  exponential moving average of daily TSS
 /// - TSB (Training Stress Balance) = CTL − ATL
 ///
-/// All heavy work runs off the main actor via Task.detached.
+/// All heavy work runs off the main actor via structured background tasks.
 @Observable
 @MainActor
 final class FitnessTracker: FitnessTrackerProtocol {
@@ -183,11 +183,23 @@ final class FitnessTracker: FitnessTrackerProtocol {
             )
         }
 
-        let result = await Task.detached(priority: .utility) { [ctlAlpha = Self.ctlAlpha,
-                                                                  atlAlpha = Self.atlAlpha,
-                                                                  ctlDays = Self.ctlDays] in
-            Self.buildHistory(workouts: snapshots, ctlAlpha: ctlAlpha, atlAlpha: atlAlpha, ctlDays: ctlDays)
-        }.value
+        let result = await withTaskGroup(
+            of: ComputeResult?.self,
+            returning: ComputeResult?.self
+        ) { group in
+            group.addTask(priority: .utility) { [ctlAlpha = Self.ctlAlpha,
+                                                 atlAlpha = Self.atlAlpha,
+                                                 ctlDays = Self.ctlDays] in
+                guard !Task.isCancelled else { return nil }
+                return Self.buildHistory(
+                    workouts: snapshots,
+                    ctlAlpha: ctlAlpha,
+                    atlAlpha: atlAlpha,
+                    ctlDays: ctlDays
+                )
+            }
+            return await group.next() ?? nil
+        } ?? ComputeResult(days: [], weeks: [])
 
         history = result.days
         weeklyHistory = result.weeks

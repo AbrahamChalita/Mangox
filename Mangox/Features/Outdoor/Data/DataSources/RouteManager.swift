@@ -11,6 +11,9 @@ final class RouteManager: RouteServiceProtocol {
     var segmentBreakIndices: [Int] = []
     var totalDistance: CLLocationDistance = 0
     private var cachedElevationProfilePoints: [(distance: Double, elevation: Double)]?
+    private var currentRouteHash: Int = 0
+    private var cachedPolylineSegmentsByHash: [Int: [[CLLocationCoordinate2D]]] = [:]
+    private var cachedSanitizedPolylineSegmentsByHash: [Int: [[CLLocationCoordinate2D]]] = [:]
 
     var hasRoute: Bool {
         points.count > 1
@@ -39,6 +42,9 @@ final class RouteManager: RouteServiceProtocol {
 
     /// Route split into GPX track segments so map previews do not draw straight bridges across gaps.
     var polylineSegments: [[CLLocationCoordinate2D]] {
+        if let cached = cachedPolylineSegmentsByHash[currentRouteHash] {
+            return cached
+        }
         guard !points.isEmpty else { return [] }
         var segments: [[CLLocationCoordinate2D]] = []
         var current: [CLLocationCoordinate2D] = [points[0]]
@@ -57,7 +63,21 @@ final class RouteManager: RouteServiceProtocol {
         if current.count > 1 {
             segments.append(current)
         }
+        cachedPolylineSegmentsByHash[currentRouteHash] = segments
         return segments
+    }
+
+    /// Sanitized polyline segments for map rendering. Memoized by route hash so
+    /// view recreation does not re-sanitize unchanged GPX routes.
+    var sanitizedPolylineSegments: [[CLLocationCoordinate2D]] {
+        if let cached = cachedSanitizedPolylineSegmentsByHash[currentRouteHash] {
+            return cached
+        }
+        let sanitized = polylineSegments
+            .map { $0.sanitizedForMapPolyline() }
+            .filter { $0.count > 1 }
+        cachedSanitizedPolylineSegmentsByHash[currentRouteHash] = sanitized
+        return sanitized
     }
 
     /// Whether the route has elevation data available.
@@ -72,6 +92,9 @@ final class RouteManager: RouteServiceProtocol {
         segmentBreakIndices = []
         totalDistance = 0
         cachedElevationProfilePoints = nil
+        currentRouteHash = 0
+        cachedPolylineSegmentsByHash.removeAll(keepingCapacity: true)
+        cachedSanitizedPolylineSegmentsByHash.removeAll(keepingCapacity: true)
     }
 
     /// Loads and parses GPX off the main thread to keep the UI responsive.
@@ -94,6 +117,10 @@ final class RouteManager: RouteServiceProtocol {
         totalDistance = Self.computeDistance(for: points, segmentBreakIndices: segmentBreakIndices)
         routeName = parsed.routeName ?? defaultName
         cachedElevationProfilePoints = nil
+        currentRouteHash = Self.routeHash(points: points, segmentBreakIndices: segmentBreakIndices)
+        // Keep only active route memoization to avoid unbounded growth.
+        cachedPolylineSegmentsByHash = [:]
+        cachedSanitizedPolylineSegmentsByHash = [:]
     }
 
     private static func parseGPXTrackData(data: Data, defaultName: String) throws -> (points: [CLLocationCoordinate2D], elevations: [Double?], routeName: String?, segmentBreakIndices: [Int]) {
@@ -242,6 +269,36 @@ final class RouteManager: RouteServiceProtocol {
             distance += points[index - 1].distanceTo(points[index])
         }
         return distance
+    }
+
+    private static func routeHash(
+        points: [CLLocationCoordinate2D],
+        segmentBreakIndices: [Int]
+    ) -> Int {
+        var hasher = Hasher()
+        hasher.combine(points.count)
+        hasher.combine(segmentBreakIndices.count)
+        if let first = points.first {
+            hasher.combine(first.latitude.bitPattern)
+            hasher.combine(first.longitude.bitPattern)
+        }
+        if let last = points.last {
+            hasher.combine(last.latitude.bitPattern)
+            hasher.combine(last.longitude.bitPattern)
+        }
+        if !segmentBreakIndices.isEmpty {
+            hasher.combine(segmentBreakIndices[0])
+            hasher.combine(segmentBreakIndices[segmentBreakIndices.count - 1])
+        }
+        hasher.combine(totalDistanceQuantized(points: points, segmentBreakIndices: segmentBreakIndices))
+        return hasher.finalize()
+    }
+
+    private static func totalDistanceQuantized(
+        points: [CLLocationCoordinate2D],
+        segmentBreakIndices: [Int]
+    ) -> Int {
+        Int(computeDistance(for: points, segmentBreakIndices: segmentBreakIndices).rounded())
     }
 }
 

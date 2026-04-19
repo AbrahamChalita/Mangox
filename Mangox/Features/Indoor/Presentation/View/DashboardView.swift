@@ -36,6 +36,22 @@ struct DashboardView: View {
 
     /// Whole-km toast + haptic when crossing each multiple (e.g. 5 → 5 km, 10 km, …).
     private static let indoorDistanceMilestoneIntervalKm = 5
+    private static let goalValue0Formatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.locale = .current
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 0
+        formatter.numberStyle = .decimal
+        return formatter
+    }()
+    private static let goalValue2Formatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.locale = .current
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.numberStyle = .decimal
+        return formatter
+    }()
 
     init(
         navigationPath: Binding<NavigationPath>,
@@ -983,27 +999,32 @@ struct DashboardView: View {
     private func goalCurrentValue(for goal: RideGoal) -> String {
         switch goal.kind {
         case .distance:
-            return String(format: "%.2f", workoutManager.activeDistance / 1000.0)
+            return Self.formatGoalNumber(workoutManager.activeDistance / 1000.0, decimals: 2)
         case .duration:
-            return String(format: "%.0f", Double(workoutManager.elapsedSeconds) / 60.0)
+            return String(Int((Double(workoutManager.elapsedSeconds) / 60.0).rounded()))
         case .kilojoules:
-            return String(format: "%.0f", workoutManager.kilojoules)
+            return Self.formatGoalNumber(workoutManager.kilojoules, decimals: 0)
         case .tss:
-            return String(format: "%.0f", workoutManager.liveTSS)
+            return Self.formatGoalNumber(workoutManager.liveTSS, decimals: 0)
         }
     }
 
     private func goalTargetValue(for goal: RideGoal) -> String {
         switch goal.kind {
         case .distance:
-            return String(format: "%.2f", goal.target)
+            return Self.formatGoalNumber(goal.target, decimals: 2)
         case .duration:
-            return String(format: "%.0f", goal.target)
+            return Self.formatGoalNumber(goal.target, decimals: 0)
         case .kilojoules:
-            return String(format: "%.0f", goal.target)
+            return Self.formatGoalNumber(goal.target, decimals: 0)
         case .tss:
-            return String(format: "%.0f", goal.target)
+            return Self.formatGoalNumber(goal.target, decimals: 0)
         }
+    }
+
+    private static func formatGoalNumber(_ value: Double, decimals: Int) -> String {
+        let formatter = (decimals == 0) ? goalValue0Formatter : goalValue2Formatter
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
     // MARK: - Cadence Warning

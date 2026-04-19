@@ -56,10 +56,11 @@ final class HapticManager {
 
     /// Double-tap for distance milestones (every N km on the indoor dashboard).
     func milestone() {
-        let gen = UIImpactFeedbackGenerator(style: .medium)
-        gen.impactOccurred()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
-            gen.impactOccurred(intensity: 0.55)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(140))
+            guard !Task.isCancelled else { return }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.55)
         }
     }
 
