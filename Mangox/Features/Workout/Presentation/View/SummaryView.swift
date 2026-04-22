@@ -172,8 +172,30 @@ struct SummaryView: View {
             } else {
                 workoutNotFound
             }
+
+            if viewModel.showDeleteConfirmation {
+                MangoxConfirmOverlay(
+                    title: "Delete Ride?",
+                    message:
+                        "This ride and all recorded data will be permanently removed. If this was a training plan workout, it will be un-marked as completed.",
+                    onDismiss: { viewModel.dismissDeleteConfirmation() }
+                ) {
+                    MangoxConfirmDualButtonRow(
+                        cancelTitle: "Cancel",
+                        confirmTitle: "Delete",
+                        trailingStyle: .destructive,
+                        onCancel: { viewModel.dismissDeleteConfirmation() },
+                        onConfirm: {
+                            viewModel.dismissDeleteConfirmation()
+                            deleteWorkout()
+                        }
+                    )
+                }
+                .zIndex(400)
+                .transition(.opacity)
+            }
         }
-        .navigationTitle("Ride Summary")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if viewModel.isStravaConfigured {
@@ -252,14 +274,6 @@ struct SummaryView: View {
             if let workout {
                 stravaSheet(for: workout)
             }
-        }
-        .alert("Delete Ride?", isPresented: binding(\.showDeleteConfirmation)) {
-            Button("Delete", role: .destructive) { deleteWorkout() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "This ride and all recorded data will be permanently removed. If this was a training plan workout, it will be un-marked as completed."
-            )
         }
         .alert(
             "Error",
@@ -747,7 +761,8 @@ private struct SummaryContentView: View {
             }
         }
         .padding(14)
-        .mangoxSurface(.frosted, shape: .rounded(16))
+        .background(AppColor.bg1)
+        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
     }
 
     private func appleHealthSyncWarningBanner(message: String) -> some View {
@@ -768,10 +783,9 @@ private struct SummaryContentView: View {
         }
         .padding(14)
         .background(Color.orange.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityIdentifier("summary.health.warning")
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            Rectangle()
                 .strokeBorder(Color.orange.opacity(0.25), lineWidth: 1)
         )
     }
@@ -1013,7 +1027,8 @@ private struct SummaryContentView: View {
             }
         }
         .padding(isWide ? 16 : 12)
-        .cardStyle(cornerRadius: isWide ? 20 : 16)
+        .background(AppColor.bg2)
+        .overlay(Rectangle().stroke(dominantZone.color.opacity(0.22), lineWidth: 1))
         .sensoryFeedback(.selection, trigger: rpeRating)
         .animation(.snappy, value: rpeRating)
         .onChange(of: rpeRating) { _, newValue in
@@ -1151,18 +1166,14 @@ private struct SummaryOverviewPanel: View {
         VStack(alignment: .leading, spacing: isWide ? 16 : 13) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("RIDE SUMMARY")
-                    .font(.system(size: isWide ? 10 : 9, weight: .heavy))
-                    .foregroundStyle(.white.opacity(0.42))
-                    .tracking(1.3)
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.mango)
+                    .tracking(1.4)
                 Spacer(minLength: 0)
                 Text(layout.timeLine)
-                    .font(.system(size: isWide ? 14 : 12, design: .monospaced))
+                    .font(MangoxFont.caption.value)
                     .foregroundStyle(.white.opacity(0.38))
             }
-
-            Text(layout.dateLine)
-                .font(.system(size: isWide ? 16 : 13, weight: .medium))
-                .foregroundStyle(.white.opacity(0.72))
 
             if let durationMetric {
                 SummaryOverviewMetric(
@@ -1190,8 +1201,8 @@ private struct SummaryOverviewPanel: View {
                             .foregroundStyle(badge.color)
                             .padding(.horizontal, isWide ? 12 : 10)
                             .padding(.vertical, isWide ? 6 : 5)
-                            .background(badge.color.opacity(0.1))
-                            .clipShape(Capsule())
+                            .background(AppColor.bg1)
+                            .overlay(Rectangle().strokeBorder(badge.color.opacity(0.35), lineWidth: 1))
                         }
                     }
                 }
@@ -1227,21 +1238,8 @@ private struct SummaryOverviewPanel: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(isWide ? 20 : 14)
-        .background(
-            // Subtle accent wash sits *over* the glass so the dominant zone
-            // still tints the panel — glass alone would read flat.
-            LinearGradient(
-                colors: [
-                    accent.opacity(0.10),
-                    Color.clear,
-                    accent.opacity(0.04),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: isWide ? 20 : 16, style: .continuous)
-        )
-        .mangoxSurface(.frosted, shape: .rounded(isWide ? 20 : 16))
+        .background(AppColor.bg2)
+        .overlay(Rectangle().stroke(accent.opacity(0.22), lineWidth: 1))
     }
 }
 
@@ -1262,88 +1260,49 @@ private struct SummaryOverviewMetric: View {
             if style == .hero {
                 VStack(alignment: .leading, spacing: isWide ? 8 : 6) {
                     Text(metric.label.uppercased())
-                        .font(.system(size: isWide ? 10 : 9, weight: .heavy))
+                        .mangoxFont(.label)
                         .foregroundStyle(accent.opacity(0.78))
-                        .tracking(1.0)
+                        .tracking(1.4)
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text(metric.value)
-                            .font(
-                                .system(
-                                    size: isWide ? 58 : 46,
-                                    weight: .heavy,
-                                    design: .monospaced
-                                )
-                            )
+                            .font(MangoxFont.heroValue.value)
                             .foregroundStyle(.white.opacity(0.96))
                             .lineLimit(1)
                             .minimumScaleFactor(0.55)
                         if !metric.unit.isEmpty {
                             Text(metric.unit)
-                                .font(.system(size: isWide ? 16 : 13, design: .monospaced))
+                                .font(MangoxFont.caption.value)
                                 .foregroundStyle(.white.opacity(0.52))
                         }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(isWide ? 16 : 12)
-                .background(
-                    LinearGradient(
-                        colors: [accent.opacity(0.13), Color.white.opacity(0.03)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .clipShape(RoundedRectangle(cornerRadius: isWide ? 16 : 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: isWide ? 16 : 14, style: .continuous)
-                        .strokeBorder(accent.opacity(0.25), lineWidth: 1)
-                )
+                .background(AppColor.bg1)
+                .overlay(Rectangle().stroke(accent.opacity(0.3), lineWidth: 1))
             } else {
                 VStack(alignment: .leading, spacing: isWide ? 5 : 4) {
-                    Capsule()
-                        .fill(accent.opacity(0.92))
-                        .frame(width: isWide ? 32 : 24, height: 3)
                     Text(metric.label.uppercased())
-                        .font(.system(size: isWide ? 10 : 9, weight: .heavy))
+                        .mangoxFont(.label)
                         .foregroundStyle(accent.opacity(0.82))
-                        .tracking(0.9)
+                        .tracking(1.2)
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text(metric.value)
-                            .font(
-                                .system(
-                                    size: isWide ? 24 : 20,
-                                    weight: .bold,
-                                    design: .monospaced
-                                )
-                            )
+                            .font(MangoxFont.value.value)
                             .foregroundStyle(.white.opacity(0.95))
                             .lineLimit(1)
                             .minimumScaleFactor(0.65)
                         if !metric.unit.isEmpty {
                             Text(metric.unit)
-                                .font(.system(size: isWide ? 12 : 10, design: .monospaced))
+                                .font(MangoxFont.caption.value)
                                 .foregroundStyle(accent.opacity(0.7))
                         }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(isWide ? 12 : 10)
-                .background(
-                    LinearGradient(
-                        colors: [
-                            accent.opacity(0.2),
-                            accent.opacity(0.09),
-                            Color.white.opacity(0.03),
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .clipShape(RoundedRectangle(cornerRadius: isWide ? 12 : 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: isWide ? 12 : 10, style: .continuous)
-                        .strokeBorder(accent.opacity(0.35), lineWidth: 1)
-                )
+                .background(AppColor.bg1)
+                .overlay(Rectangle().stroke(accent.opacity(0.25), lineWidth: 1))
             }
         }
         .accessibilityIdentifier(metric.accessibilityIdentifier)
@@ -1385,7 +1344,7 @@ private struct SummaryAnalysisDisclosure<Content: View>: View {
 
             if isExpanded {
                 Divider()
-                    .overlay(Color.white.opacity(AppOpacity.divider))
+                    .overlay(AppColor.hair)
                     .padding(.horizontal, contentPadding)
                     .padding(.bottom, 12)
 
@@ -1397,7 +1356,8 @@ private struct SummaryAnalysisDisclosure<Content: View>: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .cardStyle(cornerRadius: 16)
+        .background(AppColor.bg2)
+        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
         .sensoryFeedback(.impact(weight: .light), trigger: isExpanded)
     }
 }
@@ -1483,9 +1443,8 @@ private struct SummaryInvalidBanner: View {
         }
         .padding(isWide ? 16 : 12)
         .background(AppColor.orange.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            Rectangle()
                 .strokeBorder(AppColor.orange.opacity(0.25), lineWidth: 1)
         )
     }
@@ -1503,16 +1462,16 @@ private struct SummarySectionHeader: View {
         HStack(spacing: isWide ? 8 : 6) {
             Image(systemName: icon)
                 .font(.system(size: isWide ? 12 : 10))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(AppColor.mango.opacity(0.9))
             Text(title)
-                .font(.system(size: isWide ? 11 : 10, weight: .heavy))
-                .foregroundStyle(.white.opacity(0.35))
-                .tracking(1.5)
+                .mangoxFont(.label)
+                .foregroundStyle(AppColor.fg3)
+                .tracking(1.4)
         }
     }
 }
 
-// MARK: - Metric Card Container (Glassmorphic)
+// MARK: - Metric Card Container
 
 private struct SummaryMetricCard<Content: View>: View {
     let title: String
@@ -1529,7 +1488,8 @@ private struct SummaryMetricCard<Content: View>: View {
         }
         .padding(isWide ? 20 : 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .cardStyle(cornerRadius: isWide ? 20 : 16)
+        .background(AppColor.bg2)
+        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
     }
 }
 

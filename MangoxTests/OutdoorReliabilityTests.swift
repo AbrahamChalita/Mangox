@@ -57,10 +57,10 @@ struct OutdoorReliabilityTests {
         #expect(NavigationService.classifyRouteCalculationError(URLError(.notConnectedToInternet)) == .offline)
         #expect(NavigationService.classifyRouteCalculationError(URLError(.networkConnectionLost)) == .offline)
 
-        let mkNetwork = NSError(domain: MKError.errorDomain, code: MKError.Code.serverFailure.rawValue)
+        let mkNetwork = NSError(domain: MKError.errorDomain, code: Int(MKError.Code.serverFailure.rawValue))
         #expect(NavigationService.classifyRouteCalculationError(mkNetwork) == .offline)
 
-        let noDirections = NSError(domain: MKError.errorDomain, code: MKError.Code.directionsNotFound.rawValue)
+        let noDirections = NSError(domain: MKError.errorDomain, code: Int(MKError.Code.directionsNotFound.rawValue))
         #expect(NavigationService.classifyRouteCalculationError(noDirections) == .noRoute)
     }
 }

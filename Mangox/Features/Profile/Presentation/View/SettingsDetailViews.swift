@@ -31,19 +31,16 @@ struct AICoachSettingsView: View {
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(ChatProviderKind.mangoxBackend.displayName)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.95))
+                                .settingsPrimary()
                             Text("Always on")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.42))
+                                .settingsFootnoteMuted()
                         }
 
                         Spacer()
                     }
 
                     Text(ChatProviderKind.mangoxBackend.detail)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .settingsFootnote()
                         .fixedSize(horizontal: false, vertical: true)
                         .lineSpacing(2)
 
@@ -51,8 +48,8 @@ struct AICoachSettingsView: View {
                         HStack(spacing: 6) {
                             ForEach(ChatProviderKind.mangoxBackend.capabilities.badges, id: \.self) { badge in
                                 Text(badge)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(AppColor.mango.opacity(0.9))
+                                    .font(MangoxFont.label.value)
+                                    .foregroundStyle(AppColor.mango)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
                                     .background(AppColor.mango.opacity(0.1))
@@ -87,8 +84,8 @@ struct AICoachSettingsView: View {
                         syncDraftsFromAppStorage()
                     } label: {
                         Text("Reset to Defaults")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.black.opacity(0.8))
+                            .font(MangoxFont.callout.value)
+                            .foregroundStyle(AppColor.bg0)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
                             .background(AppColor.mango)
@@ -97,8 +94,7 @@ struct AICoachSettingsView: View {
                     .buttonStyle(.plain)
 
                     Text("Changes apply to the next message you send.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .settingsFootnoteMuted()
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -135,8 +131,8 @@ struct AICoachSettingsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.7))
+                .font(MangoxFont.caption.value)
+                .foregroundStyle(AppColor.fg2)
 
             Group {
                 if secure {
@@ -150,13 +146,17 @@ struct AICoachSettingsView: View {
             .autocorrectionDisabled()
             .textContentType(textContentType)
             .keyboardType(keyboard)
-            .font(.system(size: 14))
-            .foregroundStyle(.white.opacity(0.9))
+            .mangoxFont(.body)
+            .foregroundStyle(AppColor.fg1)
             .accessibilityLabel(title)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(Color.white.opacity(0.06))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(AppColor.bg3)
+            .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.overlay.rawValue), style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.overlay.rawValue), style: .continuous)
+                    .strokeBorder(AppColor.hair2, lineWidth: 1)
+            )
         }
     }
 }
@@ -176,99 +176,116 @@ struct PowerZonesSettingsView: View {
     var body: some View {
         FTPRefreshScope {
             SettingsSubviewShell(title: "Power & Zones") {
-                // FTP hero
+                // FTP hero — 2×2 action grid so buttons never squeeze on narrow phones
                 settingsSubCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Functional Threshold Power")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.4))
-                            .tracking(0.5)
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Threshold power")
+                            .mangoxFont(.caption)
+                            .foregroundStyle(AppColor.mango)
 
-                        HStack(alignment: .center) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                    Text("\(ftpDraft)")
-                                        .font(.system(size: 40, weight: .bold, design: .monospaced))
-                                        .foregroundStyle(.white)
-                                    Text("W")
-                                        .font(.system(size: 20, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.4))
-                                }
-                                if hasFTPChanges {
-                                    Text("Saved: \(PowerZone.ftp) W")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.white.opacity(0.28))
-                                }
+                        Text("Functional Threshold Power")
+                            .font(MangoxFont.title.value)
+                            .foregroundStyle(AppColor.fg1)
+
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                Text("\(ftpDraft)")
+                                    .font(MangoxFont.largeValue.value)
+                                    .monospacedDigit()
+                                    .foregroundStyle(AppColor.fg0)
+                                Text("W")
+                                    .font(MangoxFont.bodyBold.value)
+                                    .foregroundStyle(AppColor.fg3)
                             }
                             Spacer(minLength: 8)
                             Stepper("", value: $ftpDraft, in: 100...500, step: 5)
                                 .labelsHidden()
+                                .tint(AppColor.mango)
                         }
 
-                        HStack(spacing: 8) {
+                        if hasFTPChanges {
+                            Text("Saved on device: \(PowerZone.ftp) W")
+                                .settingsFootnoteMuted()
+                        }
+
+                        LazyVGrid(
+                            columns: [
+                                GridItem(.flexible(), spacing: 8),
+                                GridItem(.flexible(), spacing: 8),
+                            ],
+                            spacing: 8
+                        ) {
                             Button {
                                 PowerZone.setFTP(ftpDraft)
                                 FitnessSettingsSnapshotRecorder.recordFromCurrentSettings(
                                     source: "ftp_settings")
                             } label: {
                                 Text("Apply")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.black)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
+                                    .font(MangoxFont.callout.value)
+                                    .foregroundStyle(AppColor.bg0)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 11)
                                     .background(
                                         hasFTPChanges
-                                            ? AppColor.success : AppColor.success.opacity(0.3)
+                                            ? AppColor.success : AppColor.success.opacity(0.35)
                                     )
-                                    .clipShape(Capsule())
+                                    .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous))
                             }
                             .disabled(!hasFTPChanges)
 
                             NavigationLink(value: AppRoute.ftpSetup) {
-                                HStack(spacing: 4) {
+                                HStack(spacing: 6) {
                                     Image(systemName: "bolt.heart.fill")
-                                        .font(.system(size: 11))
-                                    Text("Take Test")
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .font(.system(size: 12, weight: .semibold))
+                                    Text("Take test")
+                                        .font(MangoxFont.callout.value)
                                 }
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(AppColor.orange)
-                                .clipShape(Capsule())
+                                .foregroundStyle(AppColor.bg0)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                                .background(AppColor.mango)
+                                .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous))
                             }
 
                             Button {
                                 showFTPHistory = true
                             } label: {
-                                HStack(spacing: 4) {
+                                HStack(spacing: 6) {
                                     Image(systemName: "clock.arrow.circlepath")
-                                        .font(.system(size: 11))
+                                        .font(.system(size: 12, weight: .semibold))
                                     Text("History")
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .font(MangoxFont.callout.value)
                                 }
-                                .foregroundStyle(.white.opacity(0.7))
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(Color.white.opacity(0.06))
-                                .clipShape(Capsule())
+                                .foregroundStyle(AppColor.fg1)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                                .background(AppColor.bg2)
+                                .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous)
+                                        .strokeBorder(AppColor.hair2, lineWidth: 1)
+                                )
                             }
                             .buttonStyle(.plain)
 
                             NavigationLink {
                                 FitnessThresholdTimelineView()
                             } label: {
-                                HStack(spacing: 4) {
+                                HStack(spacing: 6) {
                                     Image(systemName: "list.bullet.rectangle")
-                                        .font(.system(size: 11))
+                                        .font(.system(size: 12, weight: .semibold))
                                     Text("Log")
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .font(MangoxFont.callout.value)
                                 }
-                                .foregroundStyle(.white.opacity(0.7))
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(Color.white.opacity(0.06))
-                                .clipShape(Capsule())
+                                .foregroundStyle(AppColor.fg1)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                                .background(AppColor.bg2)
+                                .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous)
+                                        .strokeBorder(AppColor.hair2, lineWidth: 1)
+                                )
                             }
                             .buttonStyle(.plain)
                         }
@@ -286,13 +303,11 @@ struct PowerZonesSettingsView: View {
                                     .frame(width: 4, height: 32)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text("Z\(zone.id) \(zone.name)")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.85))
+                                        .settingsSecondary()
                                     Text(
                                         "\(zone.wattRange.lowerBound)–\(zone.wattRange.upperBound) W"
                                     )
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(.white.opacity(0.38))
+                                    .settingsMonoCaption()
                                 }
                                 Spacer()
                                 Text(
@@ -300,8 +315,7 @@ struct PowerZonesSettingsView: View {
                                         ? ">\(Int(zone.pctLow * 100))%"
                                         : "\(Int(zone.pctLow * 100))–\(Int(zone.pctHigh * 100))%"
                                 )
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.28))
+                                .settingsMonoCaption()
                             }
                         }
                     }
@@ -312,13 +326,11 @@ struct PowerZonesSettingsView: View {
                 settingsSubCard {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Indoor power readout")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.9))
+                            .settingsPrimary()
                         Text(
                             "Smoothing applied to the live power number and zone indicator. Recorded samples and NP are always per-second averages."
                         )
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.38))
+                        .settingsFootnoteMuted()
                         Picker("Indoor main power", selection: $prefs.indoorPowerHeroMode) {
                             ForEach(IndoorPowerHeroMode.allCases, id: \.self) {
                                 Text($0.label).tag($0)
@@ -391,8 +403,7 @@ struct HeartRateSettingsView: View {
 
                 if HeartRateZone.hasRestingHR {
                     Text("HR zones use Karvonen (heart rate reserve) method.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.25))
+                        .settingsMicro()
                         .padding(.top, 4)
                 }
             }
@@ -405,8 +416,7 @@ struct HeartRateSettingsView: View {
                                 .font(.system(size: 14))
                                 .foregroundStyle(AppColor.whoop)
                             Text(viewModel.whoopConnected ? "WHOOP connected" : "WHOOP not connected")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.75))
+                                .settingsSecondary()
                         }
                         if viewModel.whoopConnected {
                             Toggle(isOn: Binding(
@@ -415,13 +425,11 @@ struct HeartRateSettingsView: View {
                             )) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Use WHOOP for max & resting HR")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.85))
+                                        .settingsSecondary()
                                     Text(
                                         "Max HR from WHOOP body profile; resting HR from latest recovery. Skipped if you set manual overrides below. Turn off to prefer Apple Health when both are available."
                                     )
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.white.opacity(0.34))
+                                    .settingsMicro()
                                     .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
@@ -438,14 +446,13 @@ struct HeartRateSettingsView: View {
                                 WhoopSettingsView(viewModel: viewModel)
                             } label: {
                                 Label("Open WHOOP details", systemImage: "chevron.right.circle")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(MangoxFont.caption.value)
                                     .foregroundStyle(AppColor.whoop)
                             }
                             .buttonStyle(.plain)
                         } else {
                             Text("Connect WHOOP in Connections to sync baselines.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.35))
+                                .settingsFootnoteMuted()
                         }
                     }
                 }
@@ -460,19 +467,17 @@ struct HeartRateSettingsView: View {
                                 .font(.system(size: 13))
                                 .foregroundStyle(AppColor.heartRate)
                             Text("Apple Health")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.7))
+                                .settingsSecondary()
                         }
                         Text(
                             "Enable Apple Health to sync max and resting heart rate from Apple Watch or other Health-connected devices."
                         )
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.38))
+                        .settingsFootnoteMuted()
                         Button {
                             Task { await viewModel.requestHealthKitAuthorization() }
                         } label: {
                             Text("Enable Apple Health")
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(MangoxFont.callout.value)
                                 .foregroundStyle(AppColor.success)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
@@ -490,8 +495,8 @@ struct HeartRateSettingsView: View {
                                 .font(.system(size: 14))
                                 .foregroundStyle(AppColor.success)
                             Text("Apple Health connected")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.65))
+                                .font(MangoxFont.callout.value)
+                                .foregroundStyle(AppColor.fg2)
                         }
                         Toggle(isOn: Binding(
                             get: { viewModel.healthKitSyncWorkoutsToAppleHealth },
@@ -504,11 +509,9 @@ struct HeartRateSettingsView: View {
                         )) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Save rides to Apple Health")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.85))
+                                    .settingsSecondary()
                                 Text("Counts toward Activity rings. Skips duplicates if a matching workout already exists.")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.white.opacity(0.35))
+                                    .settingsMicro()
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
@@ -517,8 +520,7 @@ struct HeartRateSettingsView: View {
                         Text(
                             "Plan to calendar (.ics) options live in Data, Privacy & Alerts. Ride file export (FIT/GPX) is on Ride Summary; Zwift (.zwo) import is in Indoor Ride Setup."
                         )
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.28))
+                        .settingsMicro()
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 2)
                     }
@@ -530,8 +532,8 @@ struct HeartRateSettingsView: View {
                     FitnessThresholdTimelineView()
                 } label: {
                     Label("FTP + heart rate change log", systemImage: "list.bullet.rectangle")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .font(MangoxFont.body.value)
+                        .foregroundStyle(AppColor.fg1)
                 }
             }
 
@@ -542,39 +544,46 @@ struct HeartRateSettingsView: View {
                     Text(
                         "Enter values below to override what's synced from Health. Leave a field empty to use the Health or estimated value."
                     )
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.35))
+                        .settingsFootnoteMuted()
 
                     HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Max HR")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.35))
+                                .settingsMicro()
                             TextField("100–240", text: $manualMaxHRInput)
                                 .keyboardType(.numberPad)
                                 .autocorrectionDisabled()
                                 .accessibilityLabel("Max heart rate")
-                                .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.9))
+                                .mangoxFont(.compactValue)
+                                .monospacedDigit()
+                                .foregroundStyle(AppColor.fg1)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 9)
-                                .background(Color.white.opacity(0.04))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .background(AppColor.bg3)
+                                .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.badge.rawValue), style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.badge.rawValue), style: .continuous)
+                                        .strokeBorder(AppColor.hair2, lineWidth: 1)
+                                )
                         }
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Resting HR")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.35))
+                                .settingsMicro()
                             TextField("30–120", text: $manualRestingHRInput)
                                 .keyboardType(.numberPad)
                                 .autocorrectionDisabled()
                                 .accessibilityLabel("Resting heart rate")
-                                .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.9))
+                                .mangoxFont(.compactValue)
+                                .monospacedDigit()
+                                .foregroundStyle(AppColor.fg1)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 9)
-                                .background(Color.white.opacity(0.04))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .background(AppColor.bg3)
+                                .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.badge.rawValue), style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.badge.rawValue), style: .continuous)
+                                        .strokeBorder(AppColor.hair2, lineWidth: 1)
+                                )
                         }
                     }
 
@@ -583,8 +592,8 @@ struct HeartRateSettingsView: View {
                             applyOverrides()
                         } label: {
                             Text("Apply")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.black)
+                                .font(MangoxFont.callout.value)
+                                .foregroundStyle(AppColor.bg0)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
                                 .background(
@@ -598,8 +607,8 @@ struct HeartRateSettingsView: View {
                             clearOverrides()
                         } label: {
                             Text("Use Health / Defaults")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.65))
+                                .font(MangoxFont.callout.value)
+                                .foregroundStyle(AppColor.fg2)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
                                 .background(Color.white.opacity(0.06))
@@ -610,8 +619,7 @@ struct HeartRateSettingsView: View {
 
                     if let statusMessage {
                         Text(statusMessage)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .settingsFootnoteMuted()
                     }
                 }
             }
@@ -640,22 +648,23 @@ struct HeartRateSettingsView: View {
     private func hrMetric(label: String, value: String, unit: String, source: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 9, weight: .regular))
-                .foregroundStyle(.white.opacity(0.35))
+                .font(MangoxFont.micro.value)
+                .foregroundStyle(AppColor.fg3)
                 .tracking(1)
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(value)
-                    .font(.system(size: 22, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
+                    .font(MangoxFont.value.value)
+                    .monospacedDigit()
+                    .foregroundStyle(AppColor.fg0)
                 if !unit.isEmpty {
                     Text(unit)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .font(MangoxFont.caption.value)
+                        .foregroundStyle(AppColor.fg3)
                 }
             }
             Text(source)
-                .font(.system(size: 9))
-                .foregroundStyle(.white.opacity(0.22))
+                .font(MangoxFont.micro.value)
+                .foregroundStyle(AppColor.fg4)
         }
     }
 
@@ -722,8 +731,7 @@ struct StravaSettingsView: View {
                             .foregroundStyle(AppColor.strava)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Strava")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.9))
+                                .settingsPrimary()
                             HStack(spacing: 5) {
                                 Circle()
                                     .fill(
@@ -732,10 +740,10 @@ struct StravaSettingsView: View {
                                     )
                                     .frame(width: 6, height: 6)
                                 Text(viewModel.stravaConnected ? "Connected" : "Not connected")
-                                    .font(.system(size: 12))
+                                    .font(MangoxFont.caption.value)
                                     .foregroundStyle(
                                         viewModel.stravaConnected
-                                            ? AppColor.success : .white.opacity(0.35))
+                                            ? AppColor.success : AppColor.fg3)
                             }
                         }
                         Spacer()
@@ -743,8 +751,7 @@ struct StravaSettingsView: View {
 
                     if !viewModel.stravaIsConfigured {
                         Text("Strava credentials are not set up in this build.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.32))
+                            .settingsFootnoteMuted()
                     } else {
                         Button {
                             if viewModel.stravaConnected { disconnect() } else { connect() }
@@ -759,9 +766,9 @@ struct StravaSettingsView: View {
                                     viewModel.stravaConnected
                                         ? "Disconnect Strava" : "Connect Strava"
                                 )
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(MangoxFont.callout.value)
                             }
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AppColor.fg0)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 9)
                             .background(AppColor.strava.opacity(0.22))
@@ -775,19 +782,17 @@ struct StravaSettingsView: View {
                         Text(
                             "Connecting allows Mangox to auto-upload rides. Ride upload details are managed per-activity in the summary screen."
                         )
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .settingsFootnoteMuted()
                     }
 
                     if let statusMessage {
                         Text(statusMessage)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .settingsFootnoteMuted()
                     }
                     if let err = viewModel.stravaLastError, !err.isEmpty {
                         Text(err)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color.orange.opacity(0.8))
+                            .font(MangoxFont.caption.value)
+                            .foregroundStyle(AppColor.orange)
                     }
                 }
             }
@@ -829,8 +834,7 @@ struct WhoopSettingsView: View {
                             .foregroundStyle(AppColor.whoop)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("WHOOP")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.9))
+                                .settingsPrimary()
                             HStack(spacing: 5) {
                                 Circle()
                                     .fill(
@@ -839,10 +843,10 @@ struct WhoopSettingsView: View {
                                     )
                                     .frame(width: 6, height: 6)
                                 Text(viewModel.whoopConnected ? "Connected" : "Not connected")
-                                    .font(.system(size: 12))
+                                    .font(MangoxFont.caption.value)
                                     .foregroundStyle(
                                         viewModel.whoopConnected
-                                            ? AppColor.success : .white.opacity(0.35))
+                                            ? AppColor.success : AppColor.fg3)
                             }
                         }
                         Spacer()
@@ -850,8 +854,7 @@ struct WhoopSettingsView: View {
 
                     if !viewModel.whoopIsConfigured {
                         Text("WHOOP credentials are not set up in this build.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.32))
+                            .settingsFootnoteMuted()
                     } else {
                         if viewModel.whoopConnected {
                             VStack(alignment: .leading, spacing: 6) {
@@ -862,23 +865,20 @@ struct WhoopSettingsView: View {
                                             score
                                         )
                                     )
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.85))
+                                    .font(MangoxFont.callout.value)
+                                    .foregroundStyle(AppColor.fg1)
                                 }
                                 if let rhr = viewModel.whoopLatestRecoveryRestingHR {
                                     Text("Resting HR (recovery): \(rhr) bpm")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.white.opacity(0.38))
+                                        .settingsFootnoteMuted()
                                 }
                                 if let hrv = viewModel.whoopLatestRecoveryHRV {
                                     Text("HRV (RMSSD): \(hrv) ms")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.white.opacity(0.38))
+                                        .settingsFootnoteMuted()
                                 }
                                 if let maxHR = viewModel.whoopLatestMaxHeartRateFromProfile {
                                     Text("Max HR (WHOOP profile): \(maxHR) bpm")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.white.opacity(0.38))
+                                        .settingsFootnoteMuted()
                                 }
                             }
                             .padding(.bottom, 4)
@@ -889,13 +889,11 @@ struct WhoopSettingsView: View {
                             )) {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("Sync max & resting HR into zones")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.88))
+                                        .settingsSecondary()
                                     Text(
                                         "Writes WHOOP profile max HR and recovery resting HR into Mangox heart-rate zones when you don't use manual overrides. You can also manage this in Settings > Heart Rate."
                                     )
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.white.opacity(0.32))
+                                    .settingsMicro()
                                     .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
@@ -913,9 +911,9 @@ struct WhoopSettingsView: View {
                                     Image(systemName: "arrow.clockwise")
                                         .font(.system(size: 13))
                                     Text("Refresh WHOOP data")
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .font(MangoxFont.callout.value)
                                 }
-                                .foregroundStyle(.white.opacity(0.9))
+                                .foregroundStyle(AppColor.fg0)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 9)
                                 .background(AppColor.whoop.opacity(0.18))
@@ -946,9 +944,9 @@ struct WhoopSettingsView: View {
                                     viewModel.whoopConnected
                                         ? "Disconnect WHOOP" : "Connect WHOOP"
                                 )
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(MangoxFont.callout.value)
                             }
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AppColor.fg0)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 9)
                             .background(AppColor.whoop.opacity(0.22))
@@ -962,27 +960,25 @@ struct WhoopSettingsView: View {
                         Text(
                             "Read-only: recovery, sleep, workouts, and strain context from WHOOP. Mangox cannot upload activities to WHOOP via their API - turn on \"Save rides to Apple Health\" in Heart Rate settings if you want WHOOP to import indoor rides through Apple Health."
                         )
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .settingsFootnoteMuted()
                         .fixedSize(horizontal: false, vertical: true)
 
                         Text(
                             "VO₂ max is not available from WHOOP's developer API. Enable Apple Health in Mangox to show VO₂ from Apple Watch or other Health sources."
                         )
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.26))
+                        .font(MangoxFont.micro.value)
+                        .foregroundStyle(AppColor.fg4)
                         .fixedSize(horizontal: false, vertical: true)
                     }
 
                     if let statusMessage {
                         Text(statusMessage)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .settingsFootnoteMuted()
                     }
                     if let err = viewModel.whoopLastError, !err.isEmpty {
                         Text(err)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color.orange.opacity(0.8))
+                            .font(MangoxFont.caption.value)
+                            .foregroundStyle(AppColor.orange)
                     }
                 }
             }
@@ -1050,13 +1046,11 @@ struct IndoorTrainerSettingsView: View {
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Speed source")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .settingsPrimary()
                     Text(
                         "Trainer-reported uses your trainer's internal model. Computed derives speed from power using physics."
                     )
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.38))
+                        .settingsFootnoteMuted()
                     Picker("Speed source", selection: $prefs.indoorSpeedSource) {
                         ForEach(IndoorSpeedSource.allCases, id: \.self) {
                             Text($0.label).tag($0)
@@ -1092,16 +1086,16 @@ struct IndoorTrainerSettingsView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Text("Aerodynamic drag (CdA)")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.9))
+                                    
+                        .settingsPrimary()
                                 Spacer()
                                 Text(String(format: "%.2f m²", prefs.riderCda))
-                                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(AppColor.mango)
+                                    .font(MangoxFont.compactValue.value)
+                                .monospacedDigit()
+                                .foregroundStyle(AppColor.mango)
                             }
                             Text("Drops ≈ 0.28 · Hoods ≈ 0.32 · Upright ≈ 0.35")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.35))
+                        .settingsFootnoteMuted()
                             Slider(
                                 value: $prefs.riderCda,
                                 in: RidePreferences.cdaRange, step: 0.01
@@ -1111,8 +1105,8 @@ struct IndoorTrainerSettingsView: View {
                             Text(
                                 "At 200W on a flat road, your virtual speed will be \(speedPreviewText)."
                             )
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.35))
+                            
+                        .settingsFootnoteMuted()
                         }
                     }
                 }
@@ -1144,12 +1138,12 @@ struct IndoorTrainerSettingsView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(label)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                        .settingsPrimary()
                 Spacer()
                 Text(value)
-                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(AppColor.mango)
+                    .font(MangoxFont.compactValue.value)
+                                .monospacedDigit()
+                                .foregroundStyle(AppColor.mango)
             }
             slider()
         }
@@ -1166,11 +1160,9 @@ struct OutdoorRideSettingsView: View {
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("GPS auto-lap")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .settingsPrimary()
                     Text("Outdoor rides are split automatically by distance along your path.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.38))
+                        .settingsFootnoteMuted()
                     Picker("Interval", selection: $prefs.outdoorAutoLapIntervalMeters) {
                         Text("Off").tag(0.0)
                         Text("500 m").tag(500.0)
@@ -1209,18 +1201,17 @@ struct OutdoorRideSettingsView: View {
                     Text(
                         "When you export GPX from Ride Summary, trim the start and end of the GPS track so home, work, or parking stays off the shared file. FIT and TCX exports are unchanged."
                     )
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.38))
+                        .settingsFootnoteMuted()
                     .fixedSize(horizontal: false, vertical: true)
 
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Text("Trim start")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.85))
+                        .settingsSecondary()
                             Spacer()
                             Text("\(Int(prefs.gpxPrivacyTrimStartMeters)) m")
-                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .font(MangoxFont.compactValue.value)
+                                .monospacedDigit()
                                 .foregroundStyle(AppColor.mango)
                         }
                         Slider(value: $prefs.gpxPrivacyTrimStartMeters, in: 0...2000, step: 50)
@@ -1230,11 +1221,11 @@ struct OutdoorRideSettingsView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Text("Trim end")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.85))
+                        .settingsSecondary()
                             Spacer()
                             Text("\(Int(prefs.gpxPrivacyTrimEndMeters)) m")
-                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .font(MangoxFont.compactValue.value)
+                                .monospacedDigit()
                                 .foregroundStyle(AppColor.mango)
                         }
                         Slider(value: $prefs.gpxPrivacyTrimEndMeters, in: 0...2000, step: 50)
@@ -1247,13 +1238,12 @@ struct OutdoorRideSettingsView: View {
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Speed sensor wheel size")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .settingsPrimary()
                     Text(
                         "Rolling circumference for Bluetooth speed/cadence sensors. Match your tire size (printed on the sidewall)."
                     )
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.38))
+                    
+                        .settingsFootnoteMuted()
                     Slider(
                         value: $prefs.cscWheelCircumferenceMeters,
                         in: RidePreferences.cscWheelCircumferenceRange, step: 0.001
@@ -1265,8 +1255,9 @@ struct OutdoorRideSettingsView: View {
                             .foregroundStyle(.white.opacity(0.45))
                         Spacer()
                         Text("\(Int(prefs.cscWheelCircumferenceMeters * 1000)) mm")
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(AppColor.mango)
+                            .font(MangoxFont.compactValue.value)
+                                .monospacedDigit()
+                                .foregroundStyle(AppColor.mango)
                     }
                 }
             }
@@ -1310,8 +1301,8 @@ struct AudioHapticsSettingsView: View {
                         Divider().background(Color.white.opacity(0.06))
                         HStack {
                             Text("Threshold")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.white.opacity(0.6))
+                                .font(MangoxFont.body.value)
+                                .foregroundStyle(AppColor.fg2)
                             Spacer()
                             Stepper(
                                 "\(prefs.lowCadenceThreshold) rpm",
@@ -1340,14 +1331,14 @@ struct AudioHapticsSettingsView: View {
                         Divider().background(Color.white.opacity(0.06))
                         HStack {
                             Text("Tip categories")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.white.opacity(0.6))
+                                .font(MangoxFont.body.value)
+                                .foregroundStyle(AppColor.fg2)
                             Spacer()
                             Button {
                                 prefs.applyRideTipsEssentialsPreset()
                             } label: {
                                 Text("Use Essentials")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(MangoxFont.caption.value)
                                     .foregroundStyle(AppColor.mango)
                             }
                             .buttonStyle(.plain)
@@ -1380,8 +1371,8 @@ struct AudioHapticsSettingsView: View {
                         Divider().background(Color.white.opacity(0.06))
                         HStack {
                             Text("How often")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.white.opacity(0.6))
+                                .font(MangoxFont.body.value)
+                                .foregroundStyle(AppColor.fg2)
                             Spacer()
                             Picker("", selection: $prefs.rideTipsSpacing) {
                                 ForEach(RideNudgeSpacing.allCases, id: \.self) { s in
@@ -1418,11 +1409,11 @@ struct MangoxProSettingsView: View {
                         .font(.system(size: 44))
                         .foregroundStyle(AppColor.success)
                     Text("Mangox Pro is active")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .font(MangoxFont.title.value)
+                        .foregroundStyle(AppColor.fg1)
                     Text(statusDetail)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .font(MangoxFont.body.value)
+                        .foregroundStyle(AppColor.fg3)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1437,13 +1428,11 @@ struct MangoxProSettingsView: View {
                             .foregroundStyle(AppColor.mango)
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Development unlock")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.9))
+                        .settingsPrimary()
                             Text(
                                 "Pro is enabled on this debug build (scheme env or UserDefaults). App Store billing is unchanged."
                             )
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.4))
+                            .settingsFootnote()
                             .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -1458,8 +1447,7 @@ struct MangoxProSettingsView: View {
                     } label: {
                         HStack {
                             Text("Manage in App Store")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.9))
+                        .settingsPrimary()
                             Spacer()
                             Image(systemName: "arrow.up.right")
                                 .font(.system(size: 12, weight: .semibold))
@@ -1516,11 +1504,9 @@ struct MangoxProSettingsView: View {
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.88))
+                    .settingsPrimary()
                 Text(subtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.38))
+                    .settingsFootnoteMuted()
             }
             Spacer(minLength: 0)
         }
@@ -1539,36 +1525,43 @@ struct GearSettingsView: View {
                     Text(
                         "Labels for your own reference. Strava bike/gear is still chosen when you upload from Ride Summary."
                     )
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.38))
+                        .settingsFootnoteMuted()
                     .fixedSize(horizontal: false, vertical: true)
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Outdoor bike")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.35))
+                        .settingsMicro()
                         TextField("e.g. Road / Race bike", text: $prefs.primaryOutdoorBikeName)
                             .textFieldStyle(.plain)
                             .accessibilityLabel("Outdoor bike label")
+                            .mangoxFont(.body)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
-                            .background(Color.white.opacity(0.05))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .foregroundStyle(.white.opacity(0.9))
+                            .background(AppColor.bg3)
+                            .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.overlay.rawValue), style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.overlay.rawValue), style: .continuous)
+                                    .strokeBorder(AppColor.hair2, lineWidth: 1)
+                            )
+                            .foregroundStyle(AppColor.fg1)
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Indoor / trainer")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.35))
+                        .settingsMicro()
                         TextField("e.g. Wahoo KICKR", text: $prefs.primaryIndoorBikeName)
                             .textFieldStyle(.plain)
                             .accessibilityLabel("Indoor trainer label")
+                            .mangoxFont(.body)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
-                            .background(Color.white.opacity(0.05))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .foregroundStyle(.white.opacity(0.9))
+                            .background(AppColor.bg3)
+                            .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.overlay.rawValue), style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.overlay.rawValue), style: .continuous)
+                                    .strokeBorder(AppColor.hair2, lineWidth: 1)
+                            )
+                            .foregroundStyle(AppColor.fg1)
                     }
                 }
             }
@@ -1617,8 +1610,7 @@ struct DataPrivacyNotificationsHubView: View {
                     Text(
                         "Ride files: Ride Summary > Share for FIT, GPX, or TCX."
                     )
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.35))
+                        .settingsFootnoteMuted()
                     .fixedSize(horizontal: false, vertical: true)
 
                     Button {
@@ -1627,12 +1619,12 @@ struct DataPrivacyNotificationsHubView: View {
                         }
                     } label: {
                         Text("Open iOS Settings for Mangox")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(MangoxFont.callout.value)
                             .foregroundStyle(AppColor.mango)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
                             .background(AppColor.mango.opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue))
                     }
                     .buttonStyle(.plain)
                 }
@@ -1644,14 +1636,14 @@ struct DataPrivacyNotificationsHubView: View {
                     Text(
                         "From your active plan, open the menu and choose Export Calendar (.ics), then import into Apple Calendar, Google Calendar, or Outlook."
                     )
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.4))
+                    
+                        .settingsFootnoteMuted()
                     .fixedSize(horizontal: false, vertical: true)
 
                     HStack {
                         Text("Default workout start (local hour)")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.55))
+                            
+                        .settingsFootnote()
                         Spacer()
                         Stepper(
                             value: $icsStartHour,
@@ -1659,8 +1651,9 @@ struct DataPrivacyNotificationsHubView: View {
                             step: 1
                         ) {
                             Text(String(format: "%02d:00", icsStartHour))
-                                .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.85))
+                                .font(MangoxFont.compactValue.value)
+                                .monospacedDigit()
+                                .foregroundStyle(AppColor.fg1)
                                 .frame(minWidth: 52, alignment: .trailing)
                         }
                         .onChange(of: icsStartHour) { _, v in
@@ -1670,8 +1663,7 @@ struct DataPrivacyNotificationsHubView: View {
 
                     Toggle(isOn: $icsValarm) {
                         Text("15-minute reminder before each timed workout")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.6))
+                        .settingsFootnote()
                     }
                     .tint(AppColor.mango)
                     .onChange(of: icsValarm) { _, v in
@@ -1688,12 +1680,11 @@ struct DataPrivacyNotificationsHubView: View {
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(authStatusColor)
                         Text("Notifications permission: \(authStatusText)")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.6))
+                            
+                        .settingsSecondary()
                     }
                     Text("Turn on reminders to get evening previews, missed-key nudges, and FTP test prompts.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.34))
+                        .settingsMicro()
                         .fixedSize(horizontal: false, vertical: true)
 
                     Toggle(isOn: Binding(
@@ -1709,11 +1700,9 @@ struct DataPrivacyNotificationsHubView: View {
                     )) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Scheduled training reminders")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.85))
+                        .settingsSecondary()
                             Text("Master switch for evening previews, missed-key nudges, and FTP reminders.")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.32))
+                        .settingsMicro()
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -1722,11 +1711,9 @@ struct DataPrivacyNotificationsHubView: View {
                     Toggle(isOn: $notifyTomorrow) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Evening preview for tomorrow")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.85))
+                        .settingsSecondary()
                             Text("One reminder with your next plan day after you leave the app.")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.32))
+                        .settingsMicro()
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -1744,8 +1731,8 @@ struct DataPrivacyNotificationsHubView: View {
                             in: 0...23,
                             step: 1
                         )
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .mangoxFont(.caption)
+                        .foregroundStyle(AppColor.fg2)
                         .disabled(!MangoxFeatureFlags.allowsTrainingNotifications)
                         .opacity(MangoxFeatureFlags.allowsTrainingNotifications ? 1 : 0.45)
                         .onChange(of: notifyHour) { _, v in
@@ -1756,11 +1743,9 @@ struct DataPrivacyNotificationsHubView: View {
                     Toggle(isOn: $notifyMissed) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Missed key workout")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.85))
+                        .settingsSecondary()
                             Text("When you open the app after a priority day was missed.")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.32))
+                        .settingsMicro()
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -1774,11 +1759,9 @@ struct DataPrivacyNotificationsHubView: View {
                     Toggle(isOn: $notifyFtp) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("FTP test reminder")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.85))
+                        .settingsSecondary()
                             Text("Nudge if no FTP test in about 90 days.")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.32))
+                        .settingsMicro()
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -1793,8 +1776,8 @@ struct DataPrivacyNotificationsHubView: View {
                         TrainingNotificationsScheduler.requestAuthorizationIfNeeded()
                     } label: {
                         Text("Request notification permission")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.7))
+                            .font(MangoxFont.caption.value)
+                            .foregroundStyle(AppColor.fg2)
                     }
                     .buttonStyle(.plain)
 
@@ -1805,7 +1788,7 @@ struct DataPrivacyNotificationsHubView: View {
                             }
                         } label: {
                             Text("Open iOS notification settings")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(MangoxFont.caption.value)
                                 .foregroundStyle(AppColor.mango)
                         }
                         .buttonStyle(.plain)
@@ -1819,18 +1802,17 @@ struct DataPrivacyNotificationsHubView: View {
                     Text(
                         "Download JSON with ride summaries (no per-second samples) and your threshold change log."
                     )
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.38))
+                    
+                        .settingsFootnoteMuted()
                     .fixedSize(horizontal: false, vertical: true)
 
                     Text("Extended export adds sample counts, max power, elevation, and completion status per ride.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.32))
+                        .settingsMicro()
                         .fixedSize(horizontal: false, vertical: true)
 
                     if let exportError {
                         Text(exportError)
-                            .font(.system(size: 11))
+                            .font(MangoxFont.caption.value)
                             .foregroundStyle(AppColor.orange)
                     }
 
@@ -1844,12 +1826,12 @@ struct DataPrivacyNotificationsHubView: View {
                         }
                     } label: {
                         Text("Export JSON...")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.black)
+                            .font(MangoxFont.callout.value)
+                                .foregroundStyle(AppColor.bg0)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
                             .background(AppColor.success)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue))
                     }
                     .buttonStyle(.plain)
 
@@ -1863,12 +1845,11 @@ struct DataPrivacyNotificationsHubView: View {
                         }
                     } label: {
                         Text("Export extended JSON...")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.85))
+                        .settingsSecondary()
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
                             .background(Color.white.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue))
                     }
                     .buttonStyle(.plain)
                 }
@@ -1885,12 +1866,11 @@ struct DataPrivacyNotificationsHubView: View {
     private func rowStatus(title: String, value: String, ok: Bool) -> some View {
         HStack {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.85))
+                .settingsSecondary()
             Spacer()
             Text(value)
-                .font(.system(size: 12))
-                .foregroundStyle(ok ? AppColor.success : .white.opacity(0.35))
+                .font(MangoxFont.caption.value)
+                .foregroundStyle(ok ? AppColor.success : AppColor.fg3)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
         }
@@ -1946,28 +1926,100 @@ struct RiderProfileSettingsView: View {
     @State private var birthYearDraftReady = false
     /// When birth year is unset, the wheel still shows a default year — do not persist until the rider moves it.
     @State private var userDidEditBirthYearPicker = false
+    @State private var isWeightMasked = true
 
     var body: some View {
         SettingsSubviewShell(title: "Rider Profile") {
-            settingsSubSectionLabel("Identity")
             settingsSubCard {
-                VStack(alignment: .leading, spacing: MangoxSpacing.lg.rawValue) {
-                    riderDisplayNameSection
-                    riderProfilePhotoSection
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("Identity")
+                        .mangoxFont(.caption)
+                        .foregroundStyle(AppColor.mango)
+
+                    HStack(alignment: .top, spacing: 16) {
+                        riderAvatarPreview
+                            .frame(width: 88, height: 88)
+                            .clipShape(Circle())
+                            .overlay(Circle().strokeBorder(AppColor.hair2, lineWidth: 1))
+                            .id(riderProfileAvatarToken)
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Display name")
+                                .font(MangoxFont.label.value)
+                                .foregroundStyle(AppColor.fg3)
+                                .tracking(1.2)
+                                .textCase(.uppercase)
+
+                            TextField("Your name", text: $prefs.riderDisplayName)
+                                .textContentType(.name)
+                                .textInputAutocapitalization(.words)
+                                .autocorrectionDisabled()
+                                .mangoxFont(.bodyBold)
+                                .foregroundStyle(AppColor.fg1)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 11)
+                                .background(AppColor.bg3)
+                                .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous)
+                                        .strokeBorder(AppColor.hair2, lineWidth: 1)
+                                )
+
+                            HStack(spacing: 8) {
+                                PhotosPicker(selection: $riderProfilePhotoItem, matching: .images) {
+                                    Label("Photo", systemImage: "photo")
+                                        .font(MangoxFont.callout.value)
+                                        .foregroundStyle(AppColor.bg0)
+                                        .labelStyle(.titleAndIcon)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 10)
+                                        .background(AppColor.mango)
+                                        .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous))
+                                }
+                                .buttonStyle(MangoxPressStyle())
+
+                                if RiderProfileAvatarStore.hasLocalAvatar {
+                                    Button {
+                                        RiderProfileAvatarStore.clearLocalAvatar()
+                                        riderProfileAvatarToken = UUID()
+                                    } label: {
+                                        Text("Remove")
+                                            .font(MangoxFont.callout.value)
+                                            .foregroundStyle(AppColor.fg2)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 10)
+                                            .background(AppColor.bg2)
+                                            .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous)
+                                                    .strokeBorder(AppColor.hair2, lineWidth: 1)
+                                            )
+                                    }
+                                    .buttonStyle(MangoxPressStyle())
+                                }
+                            }
+                        }
+                    }
+
+                    Text("Shown on Home, ride summaries, and share cards. Strava can still override when you connect.")
+                        .settingsFootnoteMuted()
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
-            settingsSubSectionLabel("Training context")
             settingsSubCard {
-                VStack(alignment: .leading, spacing: MangoxSpacing.lg.rawValue) {
-                    riderWeightSection
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("Body & age")
+                        .mangoxFont(.caption)
+                        .foregroundStyle(AppColor.mango)
+
+                    riderWeightBlock
 
                     Rectangle()
-                        .fill(Color.white.opacity(AppOpacity.divider))
+                        .fill(AppColor.hair)
                         .frame(height: 1)
-                        .padding(.vertical, MangoxSpacing.xs.rawValue)
 
-                    riderBirthDateSection
+                    riderBirthBlock
                 }
             }
         }
@@ -2003,101 +2055,6 @@ struct RiderProfileSettingsView: View {
         }
     }
 
-    // MARK: - Identity
-
-    private var riderDisplayNameSection: some View {
-        HStack(alignment: .top, spacing: MangoxSpacing.md.rawValue) {
-            MangoxIconBadge(systemName: "person.text.rectangle", color: AppColor.mango)
-            VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
-                Text("DISPLAY NAME")
-                    .mangoxFont(.label)
-                    .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
-                    .tracking(1.1)
-                TextField("Your name", text: $prefs.riderDisplayName)
-                    .textContentType(.name)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-                    .mangoxFont(.bodyBold)
-                    .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
-                    .padding(.horizontal, MangoxSpacing.md.rawValue)
-                    .padding(.vertical, MangoxSpacing.sm.rawValue + 2)
-                    .background(Color.white.opacity(AppOpacity.pillBg))
-                    .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous)
-                            .strokeBorder(Color.white.opacity(AppOpacity.divider), lineWidth: 1)
-                    )
-                Text("Shown in Home, Settings, ride summaries, and story cards. Strava is optional.")
-                    .mangoxFont(.caption)
-                    .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    private var riderProfilePhotoSection: some View {
-        HStack(alignment: .center, spacing: MangoxSpacing.lg.rawValue) {
-            riderAvatarPreview
-                .frame(width: 72, height: 72)
-                .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous)
-                        .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
-                )
-                .id(riderProfileAvatarToken)
-
-            VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
-                Text("PROFILE PHOTO")
-                    .mangoxFont(.label)
-                    .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
-                    .tracking(1.1)
-                Text(
-                    RiderProfileAvatarStore.hasLocalAvatar
-                        ? "Using a photo saved on this device."
-                        : "Optional. Shown in Settings when you do not use a Strava profile image."
-                )
-                .mangoxFont(.caption)
-                .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                .fixedSize(horizontal: false, vertical: true)
-
-                HStack(spacing: MangoxSpacing.sm.rawValue) {
-                    PhotosPicker(selection: $riderProfilePhotoItem, matching: .images) {
-                        Label("Choose photo", systemImage: "photo")
-                            .mangoxFont(.callout)
-                            .foregroundStyle(.black)
-                            .labelStyle(.titleAndIcon)
-                            .padding(.horizontal, MangoxSpacing.md.rawValue)
-                            .padding(.vertical, MangoxSpacing.sm.rawValue)
-                            .background(AppColor.mango)
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(MangoxPressStyle())
-
-                    if RiderProfileAvatarStore.hasLocalAvatar {
-                        Button {
-                            RiderProfileAvatarStore.clearLocalAvatar()
-                            riderProfileAvatarToken = UUID()
-                        } label: {
-                            Text("Remove")
-                                .mangoxFont(.callout)
-                                .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
-                                .padding(.horizontal, MangoxSpacing.md.rawValue)
-                                .padding(.vertical, MangoxSpacing.sm.rawValue)
-                                .background(Color.white.opacity(AppOpacity.pillBg))
-                                .clipShape(Capsule())
-                                .overlay(
-                                    Capsule()
-                                        .strokeBorder(Color.white.opacity(AppOpacity.divider), lineWidth: 1)
-                                )
-                        }
-                        .buttonStyle(MangoxPressStyle())
-                    }
-                }
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
     @ViewBuilder
     private var riderAvatarPreview: some View {
         if let img = RiderProfileAvatarStore.loadLocalAvatar() {
@@ -2106,108 +2063,123 @@ struct RiderProfileSettingsView: View {
                 .scaledToFill()
         } else {
             ZStack {
-                Color.white.opacity(AppOpacity.pillBg)
-                Image(systemName: "person.crop.rectangle")
-                    .font(.system(size: 28, weight: .medium))
-                    .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                AppColor.bg3
+                Image(systemName: "person.fill")
+                    .font(.system(size: 32, weight: .regular))
+                    .foregroundStyle(AppColor.fg3)
             }
         }
     }
 
-    // MARK: - Weight
+    private var riderWeightBlock: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Body weight")
+                    .font(MangoxFont.label.value)
+                    .foregroundStyle(AppColor.fg3)
+                    .tracking(1.2)
+                    .textCase(.uppercase)
+                Spacer()
+                Button {
+                    isWeightMasked.toggle()
+                } label: {
+                    Image(systemName: isWeightMasked ? "eye.slash" : "eye")
+                        .font(.system(size: 14))
+                        .foregroundStyle(AppColor.fg3)
+                }
+                .buttonStyle(.plain)
+            }
 
-    private var riderWeightSection: some View {
-        HStack(alignment: .top, spacing: MangoxSpacing.md.rawValue) {
-            MangoxIconBadge(systemName: "scalemass.fill", color: AppColor.mango)
-            VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
-                Text("WEIGHT")
-                    .mangoxFont(.label)
-                    .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
-                    .tracking(1.1)
-                Text("\(weightDisplayString) \(prefs.isImperial ? "lb" : "kg")")
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(weightDisplayString)
                     .font(MangoxFont.largeValue.value)
-                    .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
-
-                Slider(value: weightBinding, in: weightRange, step: weightStep)
-                    .tint(AppColor.mango)
-
-                HStack {
-                    Text("\(Int(weightRange.lowerBound)) \(prefs.isImperial ? "lb" : "kg")")
-                    Spacer()
-                    Text("\(Int(weightRange.upperBound)) \(prefs.isImperial ? "lb" : "kg")")
-                }
-                .mangoxFont(.caption)
-                .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-
-                if PowerZone.ftp > 0 {
-                    let wkg = Double(PowerZone.ftp) / prefs.riderWeightKg
-                    Text(String(format: "%.2f W/kg at %d W FTP", wkg, PowerZone.ftp))
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(AppColor.mango.opacity(0.9))
-                }
-
-                Text("Also used for indoor speed when speed is computed from power.")
-                    .mangoxFont(.caption)
-                    .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                    .fixedSize(horizontal: false, vertical: true)
+                    .monospacedDigit()
+                    .foregroundStyle(AppColor.fg0)
+                Text(prefs.isImperial ? "lb" : "kg")
+                    .font(MangoxFont.bodyBold.value)
+                    .foregroundStyle(AppColor.fg3)
             }
+
+            Slider(value: weightBinding, in: weightRange, step: weightStep)
+                .tint(AppColor.mango)
+
+            HStack {
+                Text("\(Int(weightRange.lowerBound)) \(prefs.isImperial ? "lb" : "kg")")
+                Spacer()
+                Text("\(Int(weightRange.upperBound)) \(prefs.isImperial ? "lb" : "kg")")
+            }
+            .font(MangoxFont.caption.value)
+            .foregroundStyle(AppColor.fg3)
+
+            if PowerZone.ftp > 0 {
+                Text(
+                    String(
+                        format: "%.2f W/kg · %d W FTP",
+                        Double(PowerZone.ftp) / prefs.riderWeightKg,
+                        PowerZone.ftp
+                    )
+                )
+                .font(MangoxFont.caption.value)
+                .monospacedDigit()
+                .foregroundStyle(AppColor.mango)
+            }
+
+            Text("Used for W/kg, coaching context, and indoor speed from power.")
+                .settingsFootnoteMuted()
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    // MARK: - Birth date
+    private var riderBirthBlock: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Birth year")
+                .font(MangoxFont.label.value)
+                .foregroundStyle(AppColor.fg3)
+                .tracking(1.2)
+                .textCase(.uppercase)
 
-    private var riderBirthDateSection: some View {
-        HStack(alignment: .top, spacing: MangoxSpacing.md.rawValue) {
-            MangoxIconBadge(systemName: "calendar", color: AppColor.blue)
-            VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
-                Text("BIRTH YEAR")
-                    .mangoxFont(.label)
-                    .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
-                    .tracking(1.1)
-                Text(birthDateSummary)
-                    .font(MangoxFont.compactValue.value)
-                    .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+            Text(birthDateSummary)
+                .font(MangoxFont.compactValue.value)
+                .foregroundStyle(AppColor.fg1)
 
-                Picker("Birth year", selection: $draftBirthYear) {
-                    ForEach(birthYearPickerValues, id: \.self) { y in
-                        Text(String(y)).tag(y)
-                    }
+            Picker("Birth year", selection: $draftBirthYear) {
+                ForEach(birthYearPickerValues, id: \.self) { y in
+                    Text(String(y)).tag(y)
                 }
-                .labelsHidden()
-                .pickerStyle(.wheel)
-                .tint(AppColor.blue)
-                .frame(maxWidth: .infinity)
-                .frame(height: 148)
-                .clipped()
-                .background(Color.white.opacity(AppOpacity.pillBg))
-                .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous)
-                        .strokeBorder(Color.white.opacity(AppOpacity.divider), lineWidth: 1)
-                )
+            }
+            .labelsHidden()
+            .pickerStyle(.wheel)
+            .tint(AppColor.cadence)
+            .frame(maxWidth: .infinity)
+            .frame(height: 148)
+            .clipped()
+            .background(AppColor.bg2)
+            .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous)
+                    .strokeBorder(AppColor.hair2, lineWidth: 1)
+            )
 
-                HStack(alignment: .top, spacing: MangoxSpacing.md.rawValue) {
-                    Text("Helps the AI coach tailor recovery and intensity. Only the year is stored.")
-                        .mangoxFont(.caption)
-                        .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: MangoxSpacing.sm.rawValue)
-                    if prefs.riderBirthYear != nil {
-                        Button {
-                            userDidEditBirthYearPicker = false
-                            prefs.riderBirthYear = nil
-                            applyBirthYearDraftFromPreferences()
-                        } label: {
-                            Text("Clear")
-                                .mangoxFont(.callout)
-                                .foregroundStyle(AppColor.blue.opacity(0.95))
-                                .padding(.horizontal, MangoxSpacing.md.rawValue)
-                                .padding(.vertical, MangoxSpacing.sm.rawValue)
-                                .background(AppColor.blue.opacity(0.14))
-                                .clipShape(Capsule())
-                        }
-                        .buttonStyle(MangoxPressStyle())
+            HStack(alignment: .top, spacing: 12) {
+                Text("Helps the AI coach tailor recovery and intensity. Only the year is stored.")
+                    .settingsFootnoteMuted()
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                if prefs.riderBirthYear != nil {
+                    Button {
+                        userDidEditBirthYearPicker = false
+                        prefs.riderBirthYear = nil
+                        applyBirthYearDraftFromPreferences()
+                    } label: {
+                        Text("Clear")
+                            .font(MangoxFont.callout.value)
+                            .foregroundStyle(AppColor.cadence)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(AppColor.cadence.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous))
                     }
+                    .buttonStyle(MangoxPressStyle())
                 }
             }
         }
@@ -2249,7 +2221,10 @@ struct RiderProfileSettingsView: View {
     // MARK: - Weight helpers (metric / imperial)
 
     private var weightDisplayString: String {
-        prefs.isImperial
+        if isWeightMasked {
+            return "***"
+        }
+        return prefs.isImperial
             ? String(format: "%.0f", prefs.riderWeightKg * 2.20462)
             : String(format: "%.0f", prefs.riderWeightKg)
     }

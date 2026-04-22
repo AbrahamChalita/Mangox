@@ -3,6 +3,7 @@ import SwiftUI
 // MARK: - Route Illustration (Dashed Path)
 
 struct RouteIllustration: View {
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var phase: CGFloat = 0
 
     var body: some View {
@@ -34,7 +35,7 @@ struct RouteIllustration: View {
                 context.stroke(
                     path,
                     with: .color(
-                        Color(red: 107 / 255, green: 127 / 255, blue: 212 / 255).opacity(0.08)),
+                        AppColor.blue.opacity(0.08)),
                     style: StrokeStyle(lineWidth: 12, lineCap: .round)
                 )
 
@@ -42,7 +43,7 @@ struct RouteIllustration: View {
                 context.stroke(
                     path,
                     with: .color(
-                        Color(red: 107 / 255, green: 127 / 255, blue: 212 / 255).opacity(0.25)),
+                        AppColor.blue.opacity(0.25)),
                     style: StrokeStyle(
                         lineWidth: 2, lineCap: .round, dash: [6, 8], dashPhase: phase)
                 )
@@ -59,11 +60,26 @@ struct RouteIllustration: View {
                     context.fill(
                         Circle().path(in: rect),
                         with: .color(
-                            Color(red: 107 / 255, green: 127 / 255, blue: 212 / 255).opacity(0.4)))
+                            AppColor.blue.opacity(0.4)))
                 }
             }
         }
         .onAppear {
+            guard !accessibilityReduceMotion else {
+                phase = 0
+                return
+            }
+            phase = 0
+            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                phase = 28
+            }
+        }
+        .onChange(of: accessibilityReduceMotion) { _, reduceMotion in
+            guard !reduceMotion else {
+                phase = 0
+                return
+            }
+            phase = 0
             withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
                 phase = 28
             }

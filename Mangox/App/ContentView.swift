@@ -116,7 +116,13 @@ struct ContentView: View {
                     }
                 }
             }
+            .tint(AppColor.mango)
+            .toolbarBackground(AppColor.bg0, for: .tabBar)
+            .toolbarBackground(.visible, for: .tabBar)
+            .toolbarColorScheme(.dark, for: .tabBar)
+            .mangoxGridBackground(opacity: 0.7)
         }
+        .background(AppColor.bg0.ignoresSafeArea())
         .overlay {
             RideFABView(showFloatingButton: showFloatingButton) { route in
                 selectedTab = 0
@@ -166,13 +172,14 @@ struct ContentView: View {
 
     private func runSecondaryTabPrewarmTask() async {
         if launchOverlayVisible {
-            try? await Task.sleep(for: .milliseconds(80))
-            prewarmSecondaryTabRoots = true
+            prewarmSecondaryTabRoots = false
         } else if prewarmSecondaryTabRoots {
             try? await Task.sleep(for: .milliseconds(400))
             prewarmSecondaryTabRoots = false
         } else {
-            try? await Task.sleep(for: .milliseconds(150))
+            // Keep secondary-root prewarm off the launch critical path. Mount it only
+            // after the shell is visible so Coach/Settings setup does not compete with first render.
+            try? await Task.sleep(for: .milliseconds(650))
             prewarmSecondaryTabRoots = true
             try? await Task.sleep(for: .milliseconds(500))
             prewarmSecondaryTabRoots = false

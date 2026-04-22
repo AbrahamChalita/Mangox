@@ -8,10 +8,14 @@ struct MangoxIconBadge: View {
 
     var body: some View {
         Image(systemName: systemName)
-            .font(.system(size: size * 0.46, weight: .medium))
+            .font(.system(size: size * 0.42, weight: .medium))
             .foregroundStyle(color)
             .frame(width: size, height: size)
-            .background(AppColor.tint(for: color))
+            .background(AppColor.bg3)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(color.opacity(0.38), lineWidth: 1)
+            )
     }
 }

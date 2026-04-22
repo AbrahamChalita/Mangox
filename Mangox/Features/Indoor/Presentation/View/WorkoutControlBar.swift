@@ -2,6 +2,7 @@ import SwiftUI
 
 struct WorkoutControlBar: View {
     let state: RecordingState
+    @Binding var isScreenLocked: Bool
     let onStart: () -> Void
     let onPause: () -> Void
     let onResume: () -> Void
@@ -15,23 +16,101 @@ struct WorkoutControlBar: View {
         GlassEffectContainer(spacing: 12) {
             switch state {
             case .idle:
-                actionButton("START", icon: "play.fill", color: AppColor.mango, action: onStart)
+                HStack(spacing: 24) {
+                    Spacer()
+                    heroCircleButton(
+                        icon: "play.fill",
+                        color: AppColor.mango,
+                        accessibilityLabel: String(localized: "indoor.workout.start_accessibility"),
+                        action: onStart
+                    )
+                    Spacer()
+                }
 
             case .recording:
-                recordingControls
+                HStack(spacing: 24) {
+                    HStack(spacing: 12) {
+                        smallCircleButton(
+                            icon: "lock.fill",
+                            tint: isScreenLocked ? AppColor.mango : AppColor.fg3,
+                            accessibilityLabel: isScreenLocked ? "Screen unlocked" : "Screen locked",
+                            action: { isScreenLocked.toggle() }
+                        )
+                        if showLap {
+                            smallCircleButton(
+                                icon: "flag.fill",
+                                tint: AppColor.blue,
+                                accessibilityLabel: String(localized: "indoor.workout.lap_accessibility"),
+                                action: onLap
+                            )
+                        }
+                    }
+                    Spacer()
+                    heroCircleButton(
+                        icon: "pause.fill",
+                        color: AppColor.yellow,
+                        accessibilityLabel: String(localized: "indoor.workout.pause_accessibility"),
+                        action: onPause
+                    )
+                    Spacer()
+                    smallCircleButton(
+                        icon: "stop.fill",
+                        tint: AppColor.red,
+                        accessibilityLabel: String(localized: "indoor.workout.end_accessibility"),
+                        action: { showEndConfirmation = true }
+                    )
+                }
 
             case .paused:
-                if dynamicTypeSize.isAccessibilitySize {
-                    stackedPausedControls
-                } else {
-                    HStack(spacing: 12) {
-                        actionButton("RESUME", icon: "play.fill", color: AppColor.mango, action: onResume)
-                        endButton
-                    }
+                HStack(spacing: 24) {
+                    smallCircleButton(
+                        icon: "lock.fill",
+                        tint: isScreenLocked ? AppColor.mango : AppColor.fg3,
+                        accessibilityLabel: isScreenLocked ? "Screen unlocked" : "Screen locked",
+                        action: { isScreenLocked.toggle() }
+                    )
+                    Spacer()
+                    heroCircleButton(
+                        icon: "play.fill",
+                        color: AppColor.mango,
+                        accessibilityLabel: String(localized: "indoor.workout.resume_accessibility"),
+                        action: onResume
+                    )
+                    Spacer()
+                    smallCircleButton(
+                        icon: "stop.fill",
+                        tint: AppColor.red,
+                        accessibilityLabel: String(localized: "indoor.workout.end_accessibility"),
+                        action: { showEndConfirmation = true }
+                    )
                 }
 
             case .autoPaused:
-                autoPausedControls
+                VStack(spacing: 12) {
+                    autoPausedStatus
+                    HStack(spacing: 24) {
+                        smallCircleButton(
+                            icon: "lock.fill",
+                            tint: isScreenLocked ? AppColor.mango : AppColor.fg3,
+                            accessibilityLabel: isScreenLocked ? "Screen unlocked" : "Screen locked",
+                            action: { isScreenLocked.toggle() }
+                        )
+                        Spacer()
+                        heroCircleButton(
+                            icon: "play.fill",
+                            color: AppColor.mango,
+                            accessibilityLabel: String(localized: "indoor.workout.resume_accessibility"),
+                            action: onResume
+                        )
+                        Spacer()
+                        smallCircleButton(
+                            icon: "stop.fill",
+                            tint: AppColor.red,
+                            accessibilityLabel: String(localized: "indoor.workout.end_accessibility"),
+                            action: { showEndConfirmation = true }
+                        )
+                    }
+                }
 
             case .finished:
                 EmptyView()
@@ -39,60 +118,26 @@ struct WorkoutControlBar: View {
         }
     }
 
-    private var recordingControls: some View {
-        VStack(spacing: 12) {
-            actionButton(
-                "PAUSE",
-                icon: "pause.fill",
-                color: Color(red: 240/255, green: 195/255, blue: 78/255),
-                action: onPause
-            )
-
-            if showLap {
-                HStack(spacing: 12) {
-                    actionButton(
-                        "LAP",
-                        icon: "flag.fill",
-                        color: Color(red: 107/255, green: 127/255, blue: 212/255),
-                        action: onLap
-                    )
-                    endButton
-                }
-            } else {
-                endButton
-            }
-        }
-    }
-
-    private var stackedPausedControls: some View {
-        VStack(spacing: 12) {
-            actionButton("RESUME", icon: "play.fill", color: AppColor.mango, action: onResume)
-            endButton
-        }
-    }
-
-    private var autoPausedControls: some View {
-        VStack(spacing: 12) {
-            autoPausedStatus
-            HStack(spacing: 12) {
-                actionButton("RESUME", icon: "play.fill", color: AppColor.mango, action: onResume)
-                endButton
-            }
-        }
-    }
-
     private var autoPausedStatus: some View {
-        HStack(spacing: 6) {
-            ProgressView()
-                .tint(AppColor.yellow.opacity(0.6))
-                .scaleEffect(0.7)
-            Text("AUTO-PAUSED")
-                .mangoxFont(.caption)
-                .foregroundStyle(AppColor.yellow)
-                .tracking(1)
+        VStack(spacing: 5) {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .tint(AppColor.yellow.opacity(0.6))
+                    .scaleEffect(0.7)
+                Text("AUTO-PAUSED")
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.yellow)
+                    .tracking(1)
+            }
+            Text(String(localized: "indoor.workout.auto_pause_detail"))
+                .mangoxFont(.micro)
+                .foregroundStyle(AppColor.fg3)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
+        .padding(.horizontal, 10)
         .background(AppColor.wash(for: AppColor.yellow))
         .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue))
         .overlay(
@@ -101,35 +146,42 @@ struct WorkoutControlBar: View {
         )
     }
 
-    private func actionButton(_ label: String, icon: String, color: Color, action: @escaping () -> Void) -> some View {
+    private func heroCircleButton(
+        icon: String,
+        color: Color,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 12))
-                Text(label)
-                    .mangoxFont(.callout)
-                    .tracking(0.5)
-            }
-            .mangoxButtonChrome(.primary, tint: color)
-            .contentShape(Rectangle())
+            Image(systemName: icon)
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 72, height: 72)
+                .background(color, in: Circle())
+                .shadow(color: color.opacity(0.4), radius: 8, x: 0, y: 4)
         }
-        .buttonStyle(MangoxPressStyle())
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
     }
 
-    private var endButton: some View {
-        Button {
-            showEndConfirmation = true
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "stop.fill")
-                    .font(.system(size: 10))
-                Text("END")
-                    .mangoxFont(.callout)
-                    .tracking(0.5)
-            }
-            .padding(.horizontal, 20)
-            .mangoxButtonChrome(.destructive)
+    private func smallCircleButton(
+        icon: String,
+        tint: Color,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 56, height: 56)
+                .background(AppColor.bg2, in: Circle())
+                .overlay(
+                    Circle()
+                        .strokeBorder(tint.opacity(0.4), lineWidth: 1.5)
+                )
         }
-        .buttonStyle(MangoxPressStyle())
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
     }
 }

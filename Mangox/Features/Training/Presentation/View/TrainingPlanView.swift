@@ -43,6 +43,8 @@ struct TrainingPlanView: View {
 
     @Query(Self.recentWorkoutsForPlanDescriptor) private var recentWorkoutsForPlan: [Workout]
 
+    @State private var expandedDayIDs: Set<String> = []
+
     private let plan: TrainingPlan
 
     init(
@@ -55,11 +57,6 @@ struct TrainingPlanView: View {
         self._viewModel = State(initialValue: viewModel)
     }
 
-    private let accentGreen = AppColor.success
-    private let accentYellow = AppColor.yellow
-    private let accentOrange = AppColor.orange
-    private let accentRed = AppColor.red
-    private let accentBlue = AppColor.blue
     private let bg = AppColor.bg
 
     private let isAIPlan = true
@@ -119,13 +116,7 @@ struct TrainingPlanView: View {
 
                 VStack(spacing: 0) {
                     header
-                        .padding(.bottom, viewModel.showsWhoopBanner ? 2 : 4)
-
-                    if viewModel.showsWhoopBanner {
-                        whoopPlanBanner
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 8)
-                    }
+                        .padding(.bottom, 4)
 
                     if progress == nil {
                         noPlanActiveView
@@ -180,42 +171,10 @@ struct TrainingPlanView: View {
         }
     }
 
-    // MARK: - WHOOP
-
-    private var whoopPlanBanner: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: "waveform.path.ecg")
-                    .foregroundStyle(AppColor.whoop)
-                if let pct = viewModel.whoopRecoveryScore {
-                    Text(String(format: "Recovery %.0f%%", pct))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(viewModel.whoopReadinessAccentColor)
-                } else {
-                    Text("WHOOP linked")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.85))
-                }
-                Spacer()
-            }
-            Text(viewModel.whoopReadinessHint)
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.42))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(12)
-        .background(AppColor.whoop.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(AppColor.whoop.opacity(0.28), lineWidth: 1)
-        )
-    }
-
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             Button {
                 navigationPath.removeLast()
             } label: {
@@ -224,14 +183,19 @@ struct TrainingPlanView: View {
                     .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
                     .frame(width: 32, height: 32)
             }
+            .background(AppColor.bg1)
+            .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Training")
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+                Text("PLAN · W\(viewModel.selectedWeek) / W\(plan.totalWeeks)")
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.fg3)
+                    .tracking(1.4)
+
                 Text(plan.eventName)
-                    .font(.caption)
-                    .foregroundStyle(accentYellow.opacity(0.9))
+                    .font(MangoxFont.title.value)
+                    .foregroundStyle(AppColor.fg0)
+                    .lineLimit(1)
             }
 
             Spacer()
@@ -273,44 +237,53 @@ struct TrainingPlanView: View {
                 Spacer().frame(height: 30)
 
                 // Event card
-                VStack(spacing: 14) {
-                    HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: MangoxSpacing.md.rawValue) {
+                    HStack(spacing: MangoxSpacing.sm.rawValue) {
                         Image(systemName: "flag.checkered")
-                            .font(.system(size: 16))
-                            .foregroundStyle(accentYellow)
-                        Text(plan.eventName)
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundStyle(.white)
+                            .font(.system(size: 14))
+                            .foregroundStyle(AppColor.yellow)
+                        Text("EVENT")
+                            .mangoxFont(.label)
+                            .tracking(1.4)
+                            .foregroundStyle(AppColor.yellow)
                     }
+                    Text(plan.eventName)
+                        .mangoxFont(.title)
+                        .foregroundStyle(AppColor.fg0)
 
-                    HStack(spacing: 16) {
+                    Rectangle().fill(AppColor.hair).frame(height: 1)
+
+                    HStack(spacing: MangoxSpacing.md.rawValue) {
                         eventStat(icon: "map", label: "Distance", value: plan.distance)
                         eventStat(icon: "mountain.2", label: "Elevation", value: plan.elevation)
                         eventStat(icon: "calendar", label: "Date", value: plan.eventDate)
                     }
 
-                    HStack(spacing: 16) {
+                    HStack(spacing: MangoxSpacing.md.rawValue) {
                         eventStat(icon: "mappin.and.ellipse", label: "Location", value: plan.location)
                         eventStat(icon: "clock", label: "Weeks", value: "\(plan.totalWeeks)")
                     }
                 }
-                .padding(18)
-                .background(Color.white.opacity(0.03))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .strokeBorder(accentYellow.opacity(0.2), lineWidth: 1)
-                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(MangoxSpacing.lg.rawValue)
+                .background(AppColor.bg2)
+                .overlay(Rectangle().stroke(AppColor.yellow.opacity(0.2), lineWidth: 1))
 
                 // Description
                 Text(plan.description)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 20)
+                    .mangoxFont(.body)
+                    .foregroundStyle(AppColor.fg2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Requirements
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
+                    Text("REQUIREMENTS")
+                        .mangoxFont(.label)
+                        .tracking(1.4)
+                        .foregroundStyle(AppColor.fg3)
+                        .padding(.bottom, MangoxSpacing.xs.rawValue)
+
                     requirementRow(icon: "bicycle", text: "Smart trainer (ThinkRider Pro XX)", met: true)
                     requirementRow(icon: "laptopcomputer", text: "MyWhoosh or similar app", met: true)
                     requirementRow(
@@ -321,40 +294,41 @@ struct TrainingPlanView: View {
                     )
                     requirementRow(icon: "heart.fill", text: "Heart rate monitor (optional)", met: true)
                 }
-                .padding(16)
-                .background(Color.white.opacity(0.03))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                )
+                .padding(MangoxSpacing.lg.rawValue)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppColor.bg2)
+                .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
 
                 // Start button
                 Button {
                     viewModel.showStartPlanSheet = true
                 } label: {
-                    HStack(spacing: 8) {
+                    HStack(spacing: MangoxSpacing.sm.rawValue) {
                         Image(systemName: "play.fill")
-                        Text("Start Training Plan")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("START TRAINING PLAN")
+                            .mangoxFont(.label)
+                            .tracking(1.6)
                     }
-                    .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(.black)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(accentGreen)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .padding(.vertical, MangoxSpacing.lg.rawValue)
+                    .background(AppColor.mango)
+                    .overlay(Rectangle().stroke(AppColor.mango, lineWidth: 1))
                 }
 
                 if viewModel.shouldShowUpgradeCTA {
                     Button {
                         viewModel.requestPaywall()
                     } label: {
-                        HStack(spacing: 8) {
+                        HStack(spacing: MangoxSpacing.sm.rawValue) {
                             Image(systemName: "crown.fill")
-                            Text("Upgrade to Pro")
+                                .font(.system(size: 11))
+                            Text("UPGRADE TO PRO")
+                                .mangoxFont(.label)
+                                .tracking(1.4)
                         }
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(AppColor.fg2)
                     }
                 }
 
@@ -367,114 +341,255 @@ struct TrainingPlanView: View {
     // MARK: - Plan Content
 
     private var planContent: some View {
-        VStack(spacing: 0) {
-            // Overall progress bar
-            overallProgressCard
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-
-            // Week selector
-            weekSelector
-                .padding(.top, 12)
-
-            // Week info header
-            if let week = currentWeek {
-                weekInfoHeader(week: week)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 10)
-            }
-
-            // Day cards
-            ScrollView {
+        ScrollView {
+            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                 if let week = currentWeek {
-                    LazyVStack(spacing: 10) {
-                        ForEach(week.days, id: \.id) { day in
-                            dayCard(day: day, week: week)
+                    mergedBlockHeader(week: week)
+                        .padding(.horizontal, MangoxSpacing.xl.rawValue)
+                        .padding(.top, MangoxSpacing.md.rawValue)
+                        .padding(.bottom, MangoxSpacing.md.rawValue)
+                }
+
+                Section {
+                    if let week = currentWeek {
+                        VStack(spacing: MangoxSpacing.sm.rawValue) {
+                            ForEach(week.days, id: \.id) { day in
+                                dayCard(day: day, week: week)
+                            }
                         }
+                        .padding(.horizontal, MangoxSpacing.xl.rawValue)
+                        .padding(.top, MangoxSpacing.md.rawValue)
+                        .padding(.bottom, MangoxSpacing.xl.rawValue)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
+                } header: {
+                    weekSelector
+                        .padding(.vertical, MangoxSpacing.sm.rawValue)
+                        .background(AppColor.bg0)
+                        .overlay(
+                            Rectangle()
+                                .fill(AppColor.hair)
+                                .frame(height: 1),
+                            alignment: .bottom
+                        )
+                        .overlay(
+                            Rectangle()
+                                .fill(AppColor.hair)
+                                .frame(height: 1),
+                            alignment: .top
+                        )
                 }
             }
         }
+        .scrollIndicators(.hidden)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Group {
+                if stickyCTAVisible, let today = todayDay {
+                    stickyTodayCTA(day: today)
+                        .padding(.horizontal, MangoxSpacing.xl.rawValue)
+                        .padding(.bottom, MangoxSpacing.md.rawValue)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: stickyCTAVisible)
+        }
+        .onAppear { seedExpansion() }
+        .onChange(of: viewModel.selectedWeek) { _, _ in seedExpansion() }
     }
 
-    // MARK: - Overall Progress Card
+    // MARK: - Merged Block Header
 
-    private var overallProgressCard: some View {
-        VStack(spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("PLAN PROGRESS")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.35))
-                        .tracking(1.5)
-
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text("\(Int(overallProgress * 100))")
-                            .font(.system(size: 24, weight: .bold, design: .monospaced))
-                            .foregroundStyle(.white)
-                        Text("%")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.white.opacity(0.4))
-                    }
-                }
-
+    @ViewBuilder
+    private func mergedBlockHeader(week: PlanWeek) -> some View {
+        let phase = phaseColor(week.phase)
+        VStack(alignment: .leading, spacing: MangoxSpacing.md.rawValue) {
+            HStack(alignment: .firstTextBaseline, spacing: MangoxSpacing.sm.rawValue) {
+                Text("\(week.phase.uppercased()) · W\(week.weekNumber) / W\(plan.totalWeeks)")
+                    .mangoxFont(.label)
+                    .tracking(1.4)
+                    .foregroundStyle(phase)
                 Spacer()
-
-                if let progress {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        HStack(spacing: 12) {
-                            miniStat(value: "\(progress.completedCount)", label: "Done", color: accentGreen)
-                            miniStat(value: "\(progress.skippedCount)", label: "Skip", color: accentOrange)
-                        }
-
-                        Text("FTP: \(progress.currentFTP)W")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.35))
-
-                        Text(
-                            "Adaptive ERG: \(Int((progress.adaptiveLoadMultiplier * 100).rounded()))% of plan targets"
-                        )
-                        .font(.system(size: 9))
-                        .foregroundStyle(.white.opacity(0.28))
-
-                        if abs(progress.adaptiveLoadMultiplier - 1.0) > 0.009 {
-                            Button {
-                                viewModel.resetAdaptiveLoadMultiplier(progress: progress)
-                            } label: {
-                                Text("Reset adaptive to 100%")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(AppColor.blue.opacity(0.9))
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.top, 2)
-                        }
-                    }
+                Text(week.formattedHours.uppercased())
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.fg1)
+                if week.tssTarget.lowerBound > 0 {
+                    Text("·")
+                        .mangoxFont(.caption)
+                        .foregroundStyle(AppColor.fg3)
+                    Text("TSS \(week.tssTarget.lowerBound)–\(week.tssTarget.upperBound)")
+                        .mangoxFont(.caption)
+                        .foregroundStyle(AppColor.fg2)
                 }
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: MangoxSpacing.md.rawValue) {
+                Text(week.title)
+                    .font(MangoxFont.title.value)
+                    .foregroundStyle(AppColor.fg0)
+                    .lineLimit(2)
+                Spacer()
+                Text("\(Int(overallProgress * 100))%")
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.fg1)
             }
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.white.opacity(0.06))
-                        .frame(height: 6)
-
-                    Capsule()
-                        .fill(accentGreen)
-                        .frame(width: max(0, geo.size.width * overallProgress), height: 6)
+                    Rectangle().fill(AppColor.hair2).frame(height: 2)
+                    Rectangle()
+                        .fill(AppColor.mango)
+                        .frame(width: max(0, geo.size.width * overallProgress), height: 2)
                         .animation(.easeInOut(duration: accessibilityReduceMotion ? 0 : 0.4), value: overallProgress)
                 }
             }
-            .frame(height: 6)
+            .frame(height: 2)
+
+            if let progress {
+                HStack(spacing: MangoxSpacing.lg.rawValue) {
+                    inlineStat(label: "DONE", value: "\(progress.completedCount)", color: AppColor.success)
+                    inlineStat(label: "SKIP", value: "\(progress.skippedCount)", color: AppColor.orange)
+                    inlineStat(label: "FTP", value: "\(progress.currentFTP)W", color: AppColor.mango)
+                    if viewModel.showsWhoopBanner, let pct = viewModel.whoopRecoveryScore {
+                        Spacer()
+                        whoopChip(pct: pct)
+                    } else {
+                        Spacer()
+                    }
+                }
+            }
+
+            if !week.focus.isEmpty {
+                Text(week.focus)
+                    .mangoxFont(.body)
+                    .foregroundStyle(AppColor.fg2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            let metaParts = [plan.distance, plan.elevation, plan.eventDate]
+                .filter { !$0.isEmpty }
+                .map { $0.uppercased() }
+            if !metaParts.isEmpty {
+                Text(metaParts.joined(separator: " · "))
+                    .mangoxFont(.micro)
+                    .tracking(1.0)
+                    .foregroundStyle(AppColor.fg3)
+                    .lineLimit(1)
+            }
         }
-        .padding(14)
-        .background(Color.white.opacity(0.03))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
-        )
+        .padding(MangoxSpacing.lg.rawValue)
+        .background(AppColor.bg2)
+        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+    }
+
+    private func inlineStat(label: String, value: String, color: Color) -> some View {
+        HStack(spacing: MangoxSpacing.xs.rawValue) {
+            Text(label)
+                .mangoxFont(.micro)
+                .tracking(1.0)
+                .foregroundStyle(color.opacity(0.85))
+            Text(value)
+                .mangoxFont(.caption)
+                .foregroundStyle(AppColor.fg1)
+                .lineLimit(1)
+        }
+    }
+
+    private func whoopChip(pct: Double) -> some View {
+        HStack(spacing: MangoxSpacing.xs.rawValue) {
+            Image(systemName: "waveform.path.ecg")
+                .font(MangoxFont.micro.value)
+                .foregroundStyle(AppColor.whoop)
+            Text(String(format: "WHOOP %.0f%%", pct))
+                .mangoxFont(.micro)
+                .tracking(1.0)
+                .foregroundStyle(viewModel.whoopReadinessAccentColor)
+        }
+        .padding(.horizontal, MangoxSpacing.sm.rawValue)
+        .padding(.vertical, 4)
+        .overlay(Rectangle().stroke(AppColor.whoop.opacity(0.32), lineWidth: 1))
+    }
+
+    // MARK: - Expansion state
+
+    private var todayDay: PlanDay? {
+        guard let todayID = todayDayID else { return nil }
+        return currentWeek?.days.first { $0.id == todayID }
+    }
+
+    private func seedExpansion() {
+        if let id = todayDayID, !expandedDayIDs.contains(id) {
+            expandedDayIDs.insert(id)
+        }
+    }
+
+    private func statusGlyph(for status: PlanDayStatus) -> (symbol: String, color: Color)? {
+        switch status {
+        case .completed: return ("checkmark", AppColor.success)
+        case .skipped: return ("minus", AppColor.fg3)
+        case .inProgress: return ("circle.fill", AppColor.mango)
+        case .upcoming: return nil
+        }
+    }
+
+    private func toggleExpanded(_ id: String) {
+        if expandedDayIDs.contains(id) {
+            expandedDayIDs.remove(id)
+        } else {
+            expandedDayIDs.insert(id)
+        }
+    }
+
+    // MARK: - Sticky CTA
+
+    private var stickyCTAVisible: Bool {
+        guard let today = todayDay else { return false }
+        let status = progress?.status(for: today.id) ?? .upcoming
+        guard status != .completed && status != .skipped else { return false }
+        switch today.dayType {
+        case .workout, .optionalWorkout, .commute, .ftpTest, .race:
+            return true
+        case .rest, .event:
+            return false
+        }
+    }
+
+    @ViewBuilder
+    private func stickyTodayCTA(day: PlanDay) -> some View {
+        HStack(spacing: MangoxSpacing.md.rawValue) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("TODAY")
+                    .mangoxFont(.micro)
+                    .tracking(1.2)
+                    .foregroundStyle(AppColor.mango)
+                Text(day.title)
+                    .mangoxFont(.bodyBold)
+                    .foregroundStyle(AppColor.fg0)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button {
+                switch day.dayType {
+                case .ftpTest: viewModel.requestFTPSetup()
+                default: viewModel.requestPlanWorkout(planID: plan.id, dayID: day.id)
+                }
+            } label: {
+                HStack(spacing: MangoxSpacing.xs.rawValue) {
+                    Image(systemName: day.dayType == .ftpTest ? "bolt.heart.fill" : "play.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(day.dayType == .ftpTest ? "FTP TEST" : "START RIDE")
+                        .mangoxFont(.label)
+                        .tracking(1.4)
+                }
+                .foregroundStyle(.black)
+                .padding(.horizontal, MangoxSpacing.lg.rawValue)
+                .padding(.vertical, MangoxSpacing.md.rawValue)
+                .background(AppColor.mango)
+                .overlay(Rectangle().stroke(AppColor.mango, lineWidth: 1))
+            }
+        }
+        .padding(.horizontal, MangoxSpacing.lg.rawValue)
+        .padding(.vertical, MangoxSpacing.md.rawValue)
+        .background(AppColor.bg1)
+        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
     }
 
     // MARK: - Week Selector
@@ -496,36 +611,33 @@ struct TrainingPlanView: View {
                                 }
                             }
                         } label: {
-                            VStack(spacing: 4) {
+                            VStack(spacing: 6) {
                                 Text("W\(week.weekNumber)")
-                                    .font(.system(size: 13, weight: isSelected ? .bold : .medium))
-                                    .foregroundStyle(isSelected ? .white : .white.opacity(0.5))
+                                    .mangoxFont(.caption)
+                                    .foregroundStyle(isSelected ? AppColor.fg0 : AppColor.fg2)
 
                                 Text(week.phase.prefix(4).uppercased())
-                                    .font(.system(size: 8, weight: .medium))
+                                    .mangoxFont(.micro)
                                     .foregroundStyle(phaseColor(week.phase).opacity(isSelected ? 0.9 : 0.5))
-                                    .tracking(0.5)
+                                    .tracking(0.8)
 
-                                // Mini progress bar
                                 GeometryReader { geo in
                                     ZStack(alignment: .leading) {
-                                        Capsule()
-                                            .fill(Color.white.opacity(0.08))
-                                        Capsule()
+                                        Rectangle()
+                                            .fill(AppColor.bg4)
+                                        Rectangle()
                                             .fill(phaseColor(week.phase))
                                             .frame(width: max(0, geo.size.width * weekProgress))
                                     }
                                 }
-                                .frame(height: 3)
-                                .clipShape(Capsule())
+                                .frame(height: 2)
                             }
-                            .frame(width: 50)
+                            .frame(width: 54)
                             .padding(.vertical, 8)
-                            .background(isSelected ? phaseColor(week.phase).opacity(0.12) : Color.white.opacity(0.02))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .background(isSelected ? AppColor.bg2 : AppColor.bg1)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .strokeBorder(
+                                Rectangle()
+                                    .stroke(
                                         isSelected ? phaseColor(week.phase).opacity(0.4) : Color.white.opacity(0.06),
                                         lineWidth: 1
                                     )
@@ -548,44 +660,6 @@ struct TrainingPlanView: View {
         }
     }
 
-    // MARK: - Week Info Header
-
-    private func weekInfoHeader(week: PlanWeek) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("WEEK \(week.weekNumber) · \(week.phase.uppercased())")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(phaseColor(week.phase).opacity(0.8))
-                        .tracking(1.5)
-
-                    Text(week.title)
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(week.formattedHours)
-                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.7))
-
-                    if week.tssTarget.lowerBound > 0 {
-                        Text("TSS \(week.tssTarget.lowerBound)–\(week.tssTarget.upperBound)")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.3))
-                    }
-                }
-            }
-
-            Text(week.focus)
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.4))
-        }
-    }
-
-
     private func dynamicDayLabel(for day: PlanDay, calendarDate: Date?) -> String {
         guard let calendarDate else { return day.dayLabel }
         return Self.dayLabelFormatter.string(from: calendarDate)
@@ -598,137 +672,262 @@ struct TrainingPlanView: View {
         let status = progress?.status(for: day.id) ?? .upcoming
         let isToday = todayDayID == day.id
         let calendarDate = progress?.calendarDate(for: day)
+        let isExpanded = isToday || expandedDayIDs.contains(day.id)
 
-        return VStack(alignment: .leading, spacing: 0) {
-            // Top row: day label, date, status
-            HStack(spacing: 8) {
-                // Day of week (computed from real start date if active)
-                Text(dynamicDayLabel(for: day, calendarDate: calendarDate).uppercased())
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .tracking(1)
-                    .frame(width: 32, alignment: .leading)
+        return Group {
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 0) {
+                    Button {
+                        if !isToday { toggleExpanded(day.id) }
+                    } label: {
+                        dayHeaderRow(day: day, status: status, isToday: isToday, calendarDate: calendarDate)
+                            .padding(.horizontal, MangoxSpacing.lg.rawValue)
+                            .padding(.top, MangoxSpacing.md.rawValue)
+                    }
+                    .buttonStyle(.plain)
 
-                if let calendarDate {
-                    Text(calendarDate, format: .dateTime.month(.abbreviated).day())
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.3))
+                    daySummaryRow(day: day, status: status)
+                        .padding(.horizontal, MangoxSpacing.lg.rawValue)
+                        .padding(.top, MangoxSpacing.sm.rawValue)
+
+                    if day.hasStructuredIntervals {
+                        dayWorkoutProfile(day: day)
+                            .padding(.horizontal, MangoxSpacing.lg.rawValue)
+                            .padding(.top, MangoxSpacing.md.rawValue)
+                    }
+
+                    if status == .completed, let w = matchingCompletedWorkout(dayID: day.id) {
+                        planDayPlannedVsActualMini(day: day, workout: w)
+                            .padding(.horizontal, MangoxSpacing.lg.rawValue)
+                            .padding(.top, MangoxSpacing.sm.rawValue)
+                    }
+
+                    if day.hasStructuredIntervals && status != .completed {
+                        intervalPreview(day: day)
+                            .padding(.horizontal, MangoxSpacing.lg.rawValue)
+                            .padding(.top, MangoxSpacing.sm.rawValue)
+                    }
+
+                    dayActions(day: day, status: status)
+                        .padding(.horizontal, MangoxSpacing.lg.rawValue)
+                        .padding(.top, MangoxSpacing.md.rawValue)
+                        .padding(.bottom, MangoxSpacing.md.rawValue)
                 }
-
-                if isToday {
-                    Text("TODAY")
-                        .font(.system(size: 8, weight: .heavy))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(accentYellow)
-                        .clipShape(Capsule())
+            } else {
+                Button {
+                    toggleExpanded(day.id)
+                } label: {
+                    dayCompactRow(day: day, status: status, calendarDate: calendarDate)
                 }
-
-                if day.isKeyWorkout {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 9))
-                        .foregroundStyle(accentYellow)
-                }
-
-                if day.requiresFTPTest {
-                    Image(systemName: "bolt.heart.fill")
-                        .font(.system(size: 9))
-                        .foregroundStyle(accentOrange)
-                }
-
-                Spacer()
-
-                statusBadge(status: status)
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
+        }
+        .background(isToday ? AppColor.mango.opacity(0.04) : AppColor.bg2)
+        .overlay(
+            Rectangle()
+                .stroke(
+                    isToday ? AppColor.mango.opacity(0.35) : AppColor.hair,
+                    lineWidth: 1
+                )
+        )
+        .animation(.easeInOut(duration: 0.18), value: expandedDayIDs)
+    }
 
-            // Main content
-            HStack(alignment: .top, spacing: 12) {
-                // Left: zone color indicator
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(day.zone.color)
-                    .frame(width: 3, height: 40)
-                    .opacity(day.dayType == .rest ? 0.3 : 0.8)
+    private func dayCompactRow(day: PlanDay, status: PlanDayStatus, calendarDate: Date?) -> some View {
+        let plannedTSS = day.estimatedPlannedTSS(ftp: PowerZone.ftp)
+        let glyph = statusGlyph(for: status)
 
-                // Center: workout info
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        dayTypeIcon(day.dayType)
+        return HStack(spacing: MangoxSpacing.sm.rawValue) {
+            ZStack {
+                if let glyph {
+                    Image(systemName: glyph.symbol)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(glyph.color)
+                }
+            }
+            .frame(width: 10)
 
-                        Text(day.title)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(status == .completed ? .white.opacity(0.5) : .white)
-                            .strikethrough(status == .skipped, color: .white.opacity(0.3))
-                    }
+            Text(dynamicDayLabel(for: day, calendarDate: calendarDate).uppercased())
+                .mangoxFont(.label)
+                .tracking(1.2)
+                .foregroundStyle(AppColor.fg2)
+                .frame(width: 32, alignment: .leading)
 
-                    HStack(spacing: 8) {
-                        if day.durationMinutes > 0 {
-                            Label(day.formattedDuration, systemImage: "clock")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.45))
-                        }
+            if let calendarDate {
+                Text(calendarDate, format: .dateTime.month(.abbreviated).day())
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.fg3)
+                    .frame(width: 48, alignment: .leading)
+            }
 
-                        if day.zone != .rest && day.zone != .none {
-                            Text(day.zone.label)
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(day.zone.color)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(day.zone.color.opacity(0.12))
-                                .clipShape(Capsule())
-                        }
+            Rectangle()
+                .fill(day.zone.color)
+                .frame(width: 2, height: 16)
+                .opacity(day.dayType == .rest ? 0.3 : 0.8)
 
-                        if day.hasStructuredIntervals {
-                            Label("\(day.intervals.count) segments", systemImage: "chart.bar.fill")
+            Text(day.title)
+                .mangoxFont(.body)
+                .foregroundStyle(status == .completed ? AppColor.fg2 : AppColor.fg1)
+                .strikethrough(status == .skipped, color: AppColor.fg3)
+                .lineLimit(1)
+
+            Spacer(minLength: MangoxSpacing.sm.rawValue)
+
+            if plannedTSS > 0 {
+                Text("\(Int(plannedTSS)) TSS")
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.fg2)
+            }
+
+            if day.dayType != .rest {
+                Text(day.zone.label)
+                    .mangoxFont(.micro)
+                    .tracking(0.8)
+                    .foregroundStyle(AppColor.fg3)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(AppColor.fg3)
+        }
+        .padding(.horizontal, MangoxSpacing.lg.rawValue)
+        .padding(.vertical, MangoxSpacing.md.rawValue)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(compactRowAccessibilityLabel(day: day, status: status, calendarDate: calendarDate, plannedTSS: plannedTSS))
+        .accessibilityHint("Double tap to expand")
+    }
+
+    private func compactRowAccessibilityLabel(day: PlanDay, status: PlanDayStatus, calendarDate: Date?, plannedTSS: Double) -> String {
+        var parts: [String] = []
+        if let calendarDate {
+            parts.append(calendarDate.formatted(date: .complete, time: .omitted))
+        } else {
+            parts.append(day.dayLabel)
+        }
+        parts.append(day.title)
+        if plannedTSS > 0 { parts.append("\(Int(plannedTSS)) TSS") }
+        if day.dayType != .rest { parts.append("zone \(day.zone.label)") }
+        switch status {
+        case .completed: parts.append("completed")
+        case .skipped: parts.append("skipped")
+        case .inProgress: parts.append("in progress")
+        case .upcoming: parts.append("upcoming")
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private func dayHeaderRow(day: PlanDay, status: PlanDayStatus, isToday: Bool, calendarDate: Date?) -> some View {
+        HStack(spacing: MangoxSpacing.sm.rawValue) {
+            Text(dynamicDayLabel(for: day, calendarDate: calendarDate).uppercased())
+                .mangoxFont(.label)
+                .tracking(1.2)
+                .foregroundStyle(AppColor.fg2)
+                .frame(width: 32, alignment: .leading)
+
+            if let calendarDate {
+                Text(calendarDate, format: .dateTime.month(.abbreviated).day())
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.fg3)
+            }
+
+            if isToday {
+                Text("TODAY")
+                    .mangoxFont(.micro)
+                    .tracking(1.0)
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, MangoxSpacing.sm.rawValue)
+                    .padding(.vertical, 2)
+                    .background(AppColor.mango)
+            }
+
+            if day.isKeyWorkout {
+                Image(systemName: "star.fill")
+                    .font(MangoxFont.micro.value)
+                    .foregroundStyle(AppColor.yellow)
+            }
+
+            if day.requiresFTPTest {
+                Image(systemName: "bolt.heart.fill")
+                    .font(MangoxFont.micro.value)
+                    .foregroundStyle(AppColor.orange)
+            }
+
+            Spacer()
+
+            statusBadge(status: status)
+
+            if !isToday {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(AppColor.fg3)
+                    .rotationEffect(.degrees(expandedDayIDs.contains(day.id) ? 180 : 0))
+                    .animation(.easeInOut(duration: 0.18), value: expandedDayIDs)
+            }
+        }
+    }
+
+    private func daySummaryRow(day: PlanDay, status: PlanDayStatus) -> some View {
+        HStack(alignment: .top, spacing: MangoxSpacing.md.rawValue) {
+            Rectangle()
+                .fill(day.zone.color)
+                .frame(width: 2, height: 40)
+                .opacity(day.dayType == .rest ? 0.3 : 0.8)
+
+            VStack(alignment: .leading, spacing: MangoxSpacing.xs.rawValue) {
+                HStack(spacing: MangoxSpacing.sm.rawValue) {
+                    dayTypeIcon(day.dayType)
+                    Text(day.title)
+                        .mangoxFont(.bodyBold)
+                        .foregroundStyle(status == .completed ? AppColor.fg2 : AppColor.fg0)
+                        .strikethrough(status == .skipped, color: AppColor.fg3)
+                }
+
+                HStack(spacing: MangoxSpacing.sm.rawValue) {
+                    if day.durationMinutes > 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock")
                                 .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.3))
+                                .foregroundStyle(AppColor.fg3)
+                            Text(day.formattedDuration)
+                                .mangoxFont(.caption)
+                                .foregroundStyle(AppColor.fg2)
                         }
                     }
 
+                    if day.zone != .rest && day.zone != .none {
+                        Text(day.zone.label)
+                            .mangoxFont(.caption)
+                            .foregroundStyle(day.zone.color)
+                            .padding(.horizontal, MangoxSpacing.sm.rawValue)
+                            .padding(.vertical, 2)
+                            .background(AppColor.bg1)
+                            .overlay(Rectangle().stroke(day.zone.color.opacity(0.35), lineWidth: 1))
+                    }
+
+                    if day.hasStructuredIntervals {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chart.bar.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(AppColor.fg3)
+                            Text("\(day.intervals.count) segments")
+                                .mangoxFont(.caption)
+                                .foregroundStyle(AppColor.fg3)
+                        }
+                    }
+                }
+
+                if !day.notes.isEmpty {
                     Text(day.notes)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .mangoxFont(.body)
+                        .foregroundStyle(AppColor.fg3)
                         .lineLimit(2)
                         .padding(.top, 1)
                 }
-
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 6)
-
-            if status == .completed, let w = matchingCompletedWorkout(dayID: day.id) {
-                planDayPlannedVsActualMini(day: day, workout: w)
-                    .padding(.horizontal, 14)
-                    .padding(.top, 6)
             }
 
-            // Interval preview (collapsed)
-            if day.hasStructuredIntervals && status != .completed {
-                intervalPreview(day: day)
-                    .padding(.horizontal, 14)
-                    .padding(.top, 8)
-            }
-
-            // Action buttons
-            dayActions(day: day, status: status)
-                .padding(.horizontal, 14)
-                .padding(.top, 10)
-                .padding(.bottom, 12)
+            Spacer()
         }
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(isToday ? phaseColor(week.phase).opacity(0.04) : Color.white.opacity(0.02))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(
-                    isToday ? phaseColor(week.phase).opacity(0.25) : Color.white.opacity(0.06),
-                    lineWidth: isToday ? 1.5 : 1
-                )
-        )
     }
 
     private func planDayPlannedVsActualMini(day: PlanDay, workout: Workout) -> some View {
@@ -738,265 +937,229 @@ struct TrainingPlanView: View {
         let actualTSS = workout.tss
         let actualMin = max(1, Int(workout.duration / 60))
 
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
             Text("LOGGED VS PLAN")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.white.opacity(0.3))
-                .tracking(1)
+                .mangoxFont(.micro)
+                .tracking(1.0)
+                .foregroundStyle(AppColor.fg3)
             HStack {
                 Text(
                     plannedMin > 0
                         ? "Plan \(plannedMin) min · est. TSS \(Int(plannedTSS))"
                         : "Plan est. TSS \(Int(plannedTSS))"
                 )
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.4))
+                .mangoxFont(.caption)
+                .foregroundStyle(AppColor.fg2)
                 Spacer()
                 Text("\(actualMin) min · TSS \(Int(actualTSS))")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(accentYellow.opacity(0.9))
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.yellow)
             }
         }
-        .padding(10)
+        .padding(MangoxSpacing.md.rawValue)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.03))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
-        )
+        .background(AppColor.bg1)
+        .overlay(Rectangle().stroke(AppColor.hair, lineWidth: 1))
+    }
+
+    private func dayWorkoutProfile(day: PlanDay) -> some View {
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(Array(day.intervals.prefix(7).enumerated()), id: \.offset) { _, segment in
+                Rectangle()
+                    .fill(segment.zone.color)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: intervalBarHeight(for: segment.zone))
+            }
+        }
+        .frame(height: 38, alignment: .bottom)
+    }
+
+    private func intervalBarHeight(for zone: TrainingZoneTarget) -> CGFloat {
+        switch zone {
+        case .rest, .none:
+            return 10
+        case .z1, .z1z2:
+            return 14
+        case .z2, .z2z3:
+            return 20
+        case .z3, .z3z4, .mixed:
+            return 28
+        case .z4, .z4z5, .all:
+            return 32
+        case .z5, .z3z5:
+            return 36
+        }
     }
 
     // MARK: - Interval Preview
 
     private func intervalPreview(day: PlanDay) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: MangoxSpacing.xs.rawValue) {
             ForEach(day.intervals) { segment in
-                HStack(spacing: 6) {
-                    Circle()
+                HStack(spacing: MangoxSpacing.sm.rawValue) {
+                    Rectangle()
                         .fill(segment.zone.color)
                         .frame(width: 6, height: 6)
 
                     Text(segment.name)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .mangoxFont(.caption)
+                        .foregroundStyle(AppColor.fg2)
 
                     if segment.repeats > 1 {
                         Text("\(segment.repeats)x")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundStyle(accentYellow.opacity(0.7))
+                            .mangoxFont(.micro)
+                            .foregroundStyle(AppColor.yellow)
                     }
 
                     Text(formatSeconds(segment.durationSeconds))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .mangoxFont(.micro)
+                        .foregroundStyle(AppColor.fg3)
 
                     Text(segment.zone.label)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(segment.zone.color.opacity(0.7))
+                        .mangoxFont(.micro)
+                        .foregroundStyle(segment.zone.color)
 
                     if let low = segment.cadenceLow, let high = segment.cadenceHigh {
                         Text("\(low)–\(high) RPM")
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.25))
+                            .mangoxFont(.micro)
+                            .foregroundStyle(AppColor.fg3)
                     }
 
                     Spacer()
                 }
             }
         }
-        .padding(10)
-        .background(Color.white.opacity(0.02))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(MangoxSpacing.md.rawValue)
+        .background(AppColor.bg1)
+        .overlay(Rectangle().stroke(AppColor.hair, lineWidth: 1))
     }
 
     // MARK: - Day Actions
 
+    private enum ActionStyle {
+        case primary(Color)   // filled block, black text
+        case secondary(Color) // hairline block, accent text
+        case ghost            // subtle block, muted text
+    }
+
+    @ViewBuilder
+    private func actionButton(_ title: String, icon: String, style: ActionStyle, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: MangoxSpacing.xs.rawValue) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(title)
+                    .mangoxFont(.caption)
+            }
+            .padding(.horizontal, MangoxSpacing.md.rawValue)
+            .padding(.vertical, MangoxSpacing.sm.rawValue)
+            .foregroundStyle(actionFg(style))
+            .background(actionBg(style))
+            .overlay(Rectangle().stroke(actionBorder(style), lineWidth: 1))
+        }
+    }
+
+    private func actionFg(_ style: ActionStyle) -> Color {
+        switch style {
+        case .primary: return .black
+        case .secondary(let c): return c
+        case .ghost: return AppColor.fg2
+        }
+    }
+
+    private func actionBg(_ style: ActionStyle) -> Color {
+        switch style {
+        case .primary(let c): return c
+        case .secondary(let c): return c.opacity(0.08)
+        case .ghost: return AppColor.bg1
+        }
+    }
+
+    private func actionBorder(_ style: ActionStyle) -> Color {
+        switch style {
+        case .primary(let c): return c
+        case .secondary(let c): return c.opacity(0.3)
+        case .ghost: return AppColor.hair
+        }
+    }
+
+    private func statusReadout(icon: String, text: String, color: Color) -> some View {
+        HStack(spacing: MangoxSpacing.sm.rawValue) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundStyle(color)
+            Text(text.uppercased())
+                .mangoxFont(.label)
+                .tracking(1.2)
+                .foregroundStyle(AppColor.fg2)
+        }
+    }
+
     @ViewBuilder
     private func dayActions(day: PlanDay, status: PlanDayStatus) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: MangoxSpacing.sm.rawValue) {
             switch day.dayType {
             case .workout, .optionalWorkout, .commute:
                 if status == .completed {
-                    Button {
+                    actionButton("Undo", icon: "arrow.uturn.backward", style: .ghost) {
                         viewModel.unmark(day.id, progress: progress)
-                    } label: {
-                        Label("Undo", systemImage: "arrow.uturn.backward")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.4))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(Color.white.opacity(0.04))
-                            .clipShape(Capsule())
                     }
                 } else if status == .skipped {
-                    Button {
+                    actionButton("Undo Skip", icon: "arrow.uturn.backward", style: .ghost) {
                         viewModel.unmark(day.id, progress: progress)
-                    } label: {
-                        Label("Undo Skip", systemImage: "arrow.uturn.backward")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.4))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(Color.white.opacity(0.04))
-                            .clipShape(Capsule())
                     }
                 } else {
-                    Button {
+                    actionButton("Start Ride", icon: "play.fill", style: .primary(AppColor.mango)) {
                         viewModel.requestPlanWorkout(planID: plan.id, dayID: day.id)
-                    } label: {
-                        Label("Start Ride", systemImage: "play.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(accentGreen)
-                            .clipShape(Capsule())
                     }
-
-                    Button {
+                    actionButton("Done", icon: "checkmark", style: .secondary(AppColor.success)) {
                         viewModel.markCompleted(day.id, progress: progress)
-                    } label: {
-                        Label("Done", systemImage: "checkmark")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(accentGreen.opacity(0.8))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(accentGreen.opacity(0.08))
-                            .clipShape(Capsule())
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(accentGreen.opacity(0.2), lineWidth: 1)
-                            )
                     }
-
-                    Button {
+                    actionButton("Skip", icon: "forward.fill", style: .ghost) {
                         viewModel.markSkipped(day.id, progress: progress)
-                    } label: {
-                        Label("Skip", systemImage: "forward.fill")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(accentOrange.opacity(0.7))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(Color.white.opacity(0.03))
-                            .clipShape(Capsule())
                     }
                 }
 
             case .ftpTest:
                 if status == .completed {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(accentGreen)
-                        Text("FTP Test Complete")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
-
-                    Button {
+                    statusReadout(icon: "checkmark.circle.fill", text: "FTP Test Complete", color: AppColor.success)
+                    actionButton("Undo", icon: "arrow.uturn.backward", style: .ghost) {
                         viewModel.unmark(day.id, progress: progress)
-                    } label: {
-                        Label("Undo", systemImage: "arrow.uturn.backward")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.4))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(Color.white.opacity(0.04))
-                            .clipShape(Capsule())
                     }
                 } else {
-                    Button {
+                    actionButton("Take FTP Test", icon: "bolt.heart.fill", style: .primary(AppColor.yellow)) {
                         viewModel.requestFTPSetup()
-                    } label: {
-                        Label("Take FTP Test", systemImage: "bolt.heart.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(accentYellow)
-                            .clipShape(Capsule())
                     }
-
-                    Button {
+                    actionButton("Done", icon: "checkmark", style: .secondary(AppColor.success)) {
                         viewModel.markCompleted(day.id, progress: progress)
-                    } label: {
-                        Label("Done", systemImage: "checkmark")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(accentGreen.opacity(0.8))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(accentGreen.opacity(0.08))
-                            .clipShape(Capsule())
                     }
                 }
 
             case .rest:
                 if status != .completed {
-                    Button {
+                    actionButton("Rest Day Complete", icon: "checkmark.circle", style: .secondary(AppColor.blue)) {
                         viewModel.markCompleted(day.id, progress: progress)
-                    } label: {
-                        Label("Rest Day Complete", systemImage: "checkmark.circle")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(accentBlue.opacity(0.7))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(accentBlue.opacity(0.06))
-                            .clipShape(Capsule())
                     }
                 } else {
-                    HStack(spacing: 6) {
-                        Image(systemName: "moon.fill")
-                            .foregroundStyle(accentBlue.opacity(0.6))
-                        Text("Rested")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.4))
-                    }
+                    statusReadout(icon: "moon.fill", text: "Rested", color: AppColor.blue)
                 }
 
             case .race:
                 if status != .completed {
-                    Button {
+                    actionButton("I Finished the Race", icon: "flag.checkered", style: .primary(AppColor.yellow)) {
                         viewModel.markCompleted(day.id, progress: progress)
-                    } label: {
-                        Label("I Finished the Race!", systemImage: "flag.checkered")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(accentYellow)
-                            .clipShape(Capsule())
                     }
                 } else {
-                    HStack(spacing: 6) {
-                        Image(systemName: "trophy.fill")
-                            .foregroundStyle(accentYellow)
-                        Text("Race Complete! 🏆")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(accentYellow)
-                    }
+                    statusReadout(icon: "trophy.fill", text: "Race Complete", color: AppColor.yellow)
                 }
 
             case .event:
                 if status != .completed {
-                    Button {
+                    actionButton("Done", icon: "checkmark", style: .ghost) {
                         viewModel.markCompleted(day.id, progress: progress)
-                    } label: {
-                        Label("Done", systemImage: "checkmark")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.5))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(Color.white.opacity(0.04))
-                            .clipShape(Capsule())
                     }
                 } else {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(accentGreen)
-                        Text("Done")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.4))
-                    }
+                    statusReadout(icon: "checkmark.circle.fill", text: "Done", color: AppColor.success)
                 }
             }
 
@@ -1015,16 +1178,21 @@ struct TrainingPlanView: View {
                     VStack(spacing: 20) {
                         VStack(spacing: 8) {
                             Image(systemName: "figure.outdoor.cycle")
-                                .font(.system(size: 40))
-                                .foregroundStyle(accentGreen)
+                                .font(.system(size: 32))
+                                .foregroundStyle(AppColor.mango)
 
-                            Text("Start Your Training Plan")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundStyle(.white)
+                            Text("START TRAINING PLAN")
+                                .mangoxFont(.label)
+                                .tracking(1.6)
+                                .foregroundStyle(AppColor.mango)
+
+                            Text(plan.eventName)
+                                .mangoxFont(.title)
+                                .foregroundStyle(AppColor.fg0)
 
                             Text("Pick the Monday you want Week 1 to start. Your \(plan.totalWeeks)-week plan maps from this date through each day on the calendar.")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.white.opacity(0.5))
+                                .mangoxFont(.body)
+                                .foregroundStyle(AppColor.fg2)
                                 .multilineTextAlignment(.center)
                         }
 
@@ -1034,52 +1202,57 @@ struct TrainingPlanView: View {
                             displayedComponents: .date
                         )
                         .datePickerStyle(.graphical)
-                        .tint(accentGreen)
+                        .tint(AppColor.mango)
                         .colorScheme(.dark)
 
-                        VStack(spacing: 6) {
+                        VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
                             HStack {
-                                Text("Current FTP")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(.white.opacity(0.6))
+                                Text("CURRENT FTP")
+                                    .mangoxFont(.label)
+                                    .tracking(1.4)
+                                    .foregroundStyle(AppColor.fg3)
                                 Spacer()
-                                Text("\(PowerZone.ftp) W")
-                                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(.white)
+                                Text("\(PowerZone.ftp)W")
+                                    .mangoxFont(.caption)
+                                    .foregroundStyle(AppColor.fg0)
                             }
 
                             if PowerZone.ftp == 265 {
-                                HStack(spacing: 6) {
+                                HStack(spacing: MangoxSpacing.sm.rawValue) {
                                     Image(systemName: "exclamationmark.triangle.fill")
                                         .font(.system(size: 10))
-                                        .foregroundStyle(accentOrange)
-                                    Text("Using default FTP. Take the FTP test in Week 1 to set accurate zones.")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(accentOrange.opacity(0.8))
+                                        .foregroundStyle(AppColor.orange)
+                                    Text("Using default FTP. Take the FTP test in Week 1 for accurate zones.")
+                                        .mangoxFont(.body)
+                                        .foregroundStyle(AppColor.orange)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
                         }
-                        .padding(14)
-                        .background(Color.white.opacity(0.04))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(MangoxSpacing.lg.rawValue)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(AppColor.bg2)
+                        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
 
                         Button {
                             startPlan()
                             viewModel.showStartPlanSheet = false
                         } label: {
-                            HStack(spacing: 8) {
+                            HStack(spacing: MangoxSpacing.sm.rawValue) {
                                 Image(systemName: "play.fill")
-                                Text("Begin Plan")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text("BEGIN PLAN")
+                                    .mangoxFont(.label)
+                                    .tracking(1.6)
                             }
-                            .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.black)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 15)
-                            .background(accentGreen)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .padding(.vertical, MangoxSpacing.lg.rawValue)
+                            .background(AppColor.mango)
+                            .overlay(Rectangle().stroke(AppColor.mango, lineWidth: 1))
                         }
                     }
-                    .padding(24)
+                    .padding(MangoxSpacing.xl.rawValue)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -1090,7 +1263,7 @@ struct TrainingPlanView: View {
                     Button("Cancel") {
                         viewModel.showStartPlanSheet = false
                     }
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(AppColor.fg2)
                 }
             }
         }
@@ -1101,44 +1274,47 @@ struct TrainingPlanView: View {
     // MARK: - Helper Views
 
     private func eventStat(icon: String, label: String, value: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.4))
-            Text(value)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-            Text(label)
-                .font(.system(size: 9))
-                .foregroundStyle(.white.opacity(0.3))
+        VStack(alignment: .leading, spacing: MangoxSpacing.xs.rawValue) {
+            Text(label.uppercased())
+                .mangoxFont(.micro)
+                .tracking(1.2)
+                .foregroundStyle(AppColor.fg3)
+            HStack(spacing: MangoxSpacing.xs.rawValue) {
+                Image(systemName: icon)
+                    .font(.system(size: 10))
+                    .foregroundStyle(AppColor.fg2)
+                Text(value)
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.fg1)
+                    .lineLimit(1)
+            }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func requirementRow(icon: String, text: String, met: Bool, note: String? = nil) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: MangoxSpacing.md.rawValue) {
             Image(systemName: icon)
-                .font(.system(size: 13))
-                .foregroundStyle(met ? accentGreen : accentOrange)
+                .font(.system(size: 12))
+                .foregroundStyle(met ? AppColor.success : AppColor.orange)
                 .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(text)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .mangoxFont(.body)
+                    .foregroundStyle(AppColor.fg1)
                 if let note {
                     Text(note)
-                        .font(.system(size: 10))
-                        .foregroundStyle(met ? .white.opacity(0.3) : accentOrange.opacity(0.7))
+                        .mangoxFont(.micro)
+                        .foregroundStyle(met ? AppColor.fg3 : AppColor.orange)
                 }
             }
 
             Spacer()
 
             Image(systemName: met ? "checkmark.circle.fill" : "exclamationmark.circle")
-                .font(.system(size: 14))
-                .foregroundStyle(met ? accentGreen : accentOrange)
+                .font(.system(size: 13))
+                .foregroundStyle(met ? AppColor.success : AppColor.orange)
         }
     }
 
@@ -1146,34 +1322,34 @@ struct TrainingPlanView: View {
         Group {
             switch status {
             case .completed:
-                HStack(spacing: 4) {
+                HStack(spacing: MangoxSpacing.xs.rawValue) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 10))
                     Text("DONE")
-                        .font(.system(size: 8, weight: .bold))
-                        .tracking(1)
+                        .mangoxFont(.micro)
+                        .tracking(1.0)
                 }
-                .foregroundStyle(accentGreen)
+                .foregroundStyle(AppColor.success)
 
             case .skipped:
-                HStack(spacing: 4) {
+                HStack(spacing: MangoxSpacing.xs.rawValue) {
                     Image(systemName: "forward.fill")
-                        .font(.system(size: 9))
+                        .font(.system(size: 10))
                     Text("SKIPPED")
-                        .font(.system(size: 8, weight: .bold))
-                        .tracking(1)
+                        .mangoxFont(.micro)
+                        .tracking(1.0)
                 }
-                .foregroundStyle(accentOrange.opacity(0.7))
+                .foregroundStyle(AppColor.orange)
 
             case .inProgress:
-                HStack(spacing: 4) {
+                HStack(spacing: MangoxSpacing.xs.rawValue) {
                     Image(systemName: "figure.indoor.cycle")
                         .font(.system(size: 10))
                     Text("IN PROGRESS")
-                        .font(.system(size: 8, weight: .bold))
-                        .tracking(1)
+                        .mangoxFont(.micro)
+                        .tracking(1.0)
                 }
-                .foregroundStyle(accentYellow)
+                .foregroundStyle(AppColor.mango)
 
             case .upcoming:
                 EmptyView()
@@ -1187,15 +1363,15 @@ struct TrainingPlanView: View {
             case .workout:
                 Image(systemName: "figure.indoor.cycle")
                     .font(.system(size: 12))
-                    .foregroundStyle(accentGreen)
+                    .foregroundStyle(AppColor.success)
             case .rest:
                 Image(systemName: "moon.fill")
                     .font(.system(size: 12))
-                    .foregroundStyle(accentBlue.opacity(0.6))
+                    .foregroundStyle(AppColor.blue.opacity(0.6))
             case .race:
                 Image(systemName: "flag.checkered")
                     .font(.system(size: 12))
-                    .foregroundStyle(accentYellow)
+                    .foregroundStyle(AppColor.yellow)
             case .event:
                 Image(systemName: "calendar.badge.clock")
                     .font(.system(size: 12))
@@ -1203,7 +1379,7 @@ struct TrainingPlanView: View {
             case .ftpTest:
                 Image(systemName: "bolt.heart.fill")
                     .font(.system(size: 12))
-                    .foregroundStyle(accentOrange)
+                    .foregroundStyle(AppColor.orange)
             case .optionalWorkout:
                 Image(systemName: "questionmark.circle")
                     .font(.system(size: 12))
@@ -1211,19 +1387,8 @@ struct TrainingPlanView: View {
             case .commute:
                 Image(systemName: "bicycle.circle")
                     .font(.system(size: 12))
-                    .foregroundStyle(accentBlue.opacity(0.85))
+                    .foregroundStyle(AppColor.blue.opacity(0.85))
             }
-        }
-    }
-
-    private func miniStat(value: String, label: String, color: Color) -> some View {
-        VStack(spacing: 1) {
-            Text(value)
-                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                .foregroundStyle(color)
-            Text(label)
-                .font(.system(size: 8, weight: .medium))
-                .foregroundStyle(.white.opacity(0.3))
         }
     }
 
@@ -1231,11 +1396,11 @@ struct TrainingPlanView: View {
 
     private func phaseColor(_ phase: String) -> Color {
         switch phase.lowercased() {
-        case "foundation": return accentBlue
-        case "build": return accentOrange
-        case "taper": return accentGreen
-        case "race": return accentYellow
-        default: return accentGreen
+        case "foundation": return AppColor.blue
+        case "build": return AppColor.orange
+        case "taper": return AppColor.success
+        case "race": return AppColor.yellow
+        default: return AppColor.success
         }
     }
 

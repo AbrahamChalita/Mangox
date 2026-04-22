@@ -8,36 +8,59 @@ import UIKit
 
 /// Centralized color constants used throughout the app.
 enum AppColor {
-    /// Primary brand accent — mango yellow-orange.
-    static let mango = Color(red: 255/255, green: 186/255, blue: 50/255)
+    // Canvas
+    static let bg0 = Color(hex: "#000000")
+    static let bg1 = Color(hex: "#0A0A0A")
+    static let bg2 = Color(hex: "#0F0F0F")
+    static let bg3 = Color(hex: "#141414")
+    static let bg4 = Color(hex: "#1A1A1A")
 
-    /// Semantic green for success states (connected, in-zone, checkmarks).
-    static let success = Color(red: 79/255, green: 195/255, blue: 161/255)
+    // Foreground
+    static let fg0 = Color.white
+    static let fg1 = Color.white.opacity(0.72)
+    static let fg2 = Color.white.opacity(0.48)
+    static let fg3 = Color.white.opacity(0.28)
+    static let fg4 = Color.white.opacity(0.12)
 
-    static let yellow = Color(red: 240/255, green: 195/255, blue: 78/255)
-    static let orange = Color(red: 240/255, green: 122/255, blue: 58/255)
-    static let red = Color(red: 232/255, green: 68/255, blue: 90/255)
-    static let blue = Color(red: 107/255, green: 127/255, blue: 212/255)
+    // Hairlines
+    static let hair = Color.white.opacity(0.06)
+    static let hair2 = Color.white.opacity(0.10)
+    static let hair3 = Color.white.opacity(0.16)
+
+    // Brand — deep golden accent (#FFB31A vs lighter #FFC933); pairs with semantic `yellow`
+    static let mango = Color(hex: "#FFB31A")
+    static let mangoDim = Color(hex: "#A87312")
+    /// Soft mango wash for glows and vignettes; tracks ``mango``.
+    static var mangoGlow: Color { mango.opacity(0.22) }
+
+    // Data/semantic accents
+    static let success = Color(hex: "#4BD16B")
+    static let yellow = Color(hex: "#F5D23B")
+    static let orange = Color(hex: "#FF8A3D")
+    static let red = Color(hex: "#FF3B30")
+    static let blue = Color(hex: "#3DD6FF")
+    static let cadence = blue
+    static let form = Color(hex: "#D7FF3D")
     static let strava = Color(red: 252/255, green: 82/255, blue: 0)
     static let stravaEnd = Color(red: 232/255, green: 58/255, blue: 0)
     /// WHOOP brand accent (approximate; UI only).
     static let whoop = Color(red: 0/255, green: 158/255, blue: 127/255)
     static let discord = Color(red: 88/255, green: 101/255, blue: 242/255)
-    static let bg = Color(red: 0.03, green: 0.04, blue: 0.06)
+    static let bg = bg0
 
-    static let surfaceTint = Color.white.opacity(0.08)
-    static let surfaceBorder = Color.white.opacity(0.12)
-    static let subtleTint = Color.white.opacity(0.03)
+    static let surfaceTint = bg3
+    static let surfaceBorder = hair2
+    static let subtleTint = bg1
 
     /// Heart-rate accent (slightly different from the zone red).
-    static let heartRate = Color(red: 245/255, green: 96/255, blue: 108/255)
+    static let heartRate = red
 
     static func tint(for color: Color) -> Color {
-        color.opacity(0.15)
+        color.opacity(0.12)
     }
 
     static func wash(for color: Color) -> Color {
-        color.opacity(0.12)
+        color.opacity(0.08)
     }
 }
 
@@ -212,17 +235,17 @@ enum AppFormat {
 /// Canonical opacity levels. Use these instead of ad-hoc `.white.opacity(x)`.
 enum AppOpacity {
     // Backgrounds
-    static let cardBg: Double    = 0.04   // standard card background
+    static let cardBg: Double    = 0.05   // standard card background
     static let pillBg: Double    = 0.03   // nested pill/chip inside a card
     static let subtleBg: Double  = 0.02   // very subtle section tint
     // Borders
-    static let cardBorder: Double  = 0.08 // standard card stroke
+    static let cardBorder: Double  = 0.10 // standard card stroke
     static let divider: Double     = 0.06 // dividers and separators
     // Text hierarchy
-    static let textPrimary: Double   = 0.90
-    static let textSecondary: Double = 0.60
-    static let textTertiary: Double  = 0.35
-    static let textQuaternary: Double = 0.25
+    static let textPrimary: Double   = 0.92
+    static let textSecondary: Double = 0.72
+    static let textTertiary: Double  = 0.48
+    static let textQuaternary: Double = 0.28
 }
 
 // MARK: - Card Style Modifier
@@ -231,23 +254,49 @@ enum AppOpacity {
 /// `Color.white.opacity(0.04)` background + matching stroke + clip.
 /// Apply after adding internal padding: `.padding(...).cardStyle()`.
 struct CardStyle: ViewModifier {
-    var cornerRadius: CGFloat = 14
+    var cornerRadius: CGFloat = MangoxRadius.card.rawValue
 
     func body(content: Content) -> some View {
         content
-            .background(Color.white.opacity(AppOpacity.cardBg))
+            .background(AppColor.bg2)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
+                    .strokeBorder(AppColor.hair2, lineWidth: 1)
             )
     }
 }
 
 extension View {
     /// Applies the standard Mangox card visual treatment.
-    func cardStyle(cornerRadius: CGFloat = 14) -> some View {
+    func cardStyle(cornerRadius: CGFloat = MangoxRadius.card.rawValue) -> some View {
         modifier(CardStyle(cornerRadius: cornerRadius))
+    }
+
+    /// Adds the subtle engineering grid from the new visual system.
+    func mangoxGridBackground(step: CGFloat = 32, opacity: Double = 1.0) -> some View {
+        background {
+            Canvas { context, size in
+                var path = Path()
+
+                for x in stride(from: 0, through: size.width, by: step) {
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: size.height))
+                }
+
+                for y in stride(from: 0, through: size.height, by: step) {
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: size.width, y: y))
+                }
+
+                context.stroke(
+                    path,
+                    with: .color(Color.white.opacity(0.018 * opacity)),
+                    lineWidth: 0.5
+                )
+            }
+            .allowsHitTesting(false)
+        }
     }
 
     /// Applies `accessibilityHint` only when `hint` is non-empty (avoids VoiceOver noise).

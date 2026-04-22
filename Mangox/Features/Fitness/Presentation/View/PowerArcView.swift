@@ -1,5 +1,30 @@
 import SwiftUI
 
+#if canImport(UIKit)
+    import UIKit
+#endif
+
+private enum PowerArcFontToken {
+    static func mono(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        let fontName: String
+        switch weight {
+        case .light:
+            fontName = "GeistMono-Light"
+        case .medium, .semibold, .bold, .heavy, .black:
+            fontName = "GeistMono-Medium"
+        default:
+            fontName = "GeistMono-Regular"
+        }
+
+        #if canImport(UIKit)
+            if UIFont(name: fontName, size: size) != nil {
+                return .custom(fontName, size: size)
+            }
+        #endif
+        return .system(size: size, weight: weight, design: .monospaced)
+    }
+}
+
 struct PowerArcView: View {
     let watts: Int
     var maxWatts: Int = 500
@@ -53,7 +78,7 @@ struct PowerArcView: View {
             ZStack {
                 // Base track (gray, visible in the gap above Z5)
                 ArcShape(startAngle: startAngle, sweepAngle: sweepAngle)
-                    .stroke(Color.white.opacity(0.06),
+                    .stroke(AppColor.hair2,
                             style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
 
                 // Zone-colored segments
@@ -92,22 +117,29 @@ struct PowerArcView: View {
                 if showCenterText {
                     VStack(spacing: compact ? 2 : 4) {
                         Text("\(watts)")
-                            .font(.system(size: compact ? 36 : 48, weight: .bold, design: .monospaced))
+                            .font(
+                                PowerArcFontToken.mono(
+                                    size: compact ? 36 : 48,
+                                    weight: .bold
+                                )
+                            )
                             .foregroundStyle(zone.color)
 
                         Text("WATTS")
-                            .font(.system(size: compact ? 10 : 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .mangoxFont(.micro)
+                            .fontWeight(.medium)
+                            .foregroundStyle(AppColor.fg3)
                             .tracking(1.5)
 
                         Text(zone.name.uppercased())
-                            .font(.system(size: compact ? 10 : 11, weight: .semibold))
+                            .mangoxFont(.label)
+                            .fontWeight(.semibold)
                             .foregroundStyle(zone.color.opacity(0.9))
                             .tracking(1.5)
 
                         Text(zoneRangeText)
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .font(PowerArcFontToken.mono(size: 10, weight: .medium))
+                            .foregroundStyle(AppColor.fg3)
                     }
                 }
             }
@@ -128,26 +160,26 @@ private struct MiniStatCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 3 : 5) {
             Text(label)
-                .font(.system(size: 10, weight: .regular))
-                .foregroundStyle(.white.opacity(0.3))
+                .mangoxFont(.micro)
+                .foregroundStyle(AppColor.fg3)
                 .tracking(1.5)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(value)
-                    .font(.system(size: compact ? 17 : 22, weight: .bold, design: .monospaced))
+                    .font(PowerArcFontToken.mono(size: compact ? 17 : 22, weight: .bold))
                     .foregroundStyle(valueColor)
                 Text(unit)
-                    .font(.system(size: compact ? 9 : 11))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .mangoxFont(compact ? .micro : .label)
+                    .foregroundStyle(AppColor.fg3)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, compact ? 10 : 14)
         .padding(.vertical, compact ? 8 : 12)
-        .background(Color.white.opacity(0.03))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(AppColor.bg2)
+        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue)
+                .strokeBorder(AppColor.hair2, lineWidth: 1)
         )
     }
 }
@@ -196,7 +228,7 @@ private struct TickMark: View {
                 y: center.y + outer * sin(rad)
             ))
         }
-        .stroke(Color.white.opacity(0.22), lineWidth: 1.25)
+        .stroke(AppColor.fg3, lineWidth: 1.25)
     }
 }
 
@@ -204,5 +236,5 @@ private struct TickMark: View {
     PowerArcView(watts: 210)
         .environment(FTPRefreshTrigger.shared)
         .padding()
-        .background(Color(red: 0.03, green: 0.04, blue: 0.06))
+        .background(AppColor.bg0)
 }

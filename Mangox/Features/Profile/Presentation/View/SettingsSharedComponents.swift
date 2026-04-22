@@ -12,7 +12,7 @@ func settingsSubCard<Content: View>(@ViewBuilder content: () -> Content) -> some
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(16)
-    .cardStyle(cornerRadius: 16)
+    .cardStyle(cornerRadius: MangoxRadius.sharp.rawValue)
     .padding(.horizontal, MangoxSpacing.page)
 }
 
@@ -20,13 +20,13 @@ func settingsSubToggle(title: String, subtitle: String, isOn: Binding<Bool>) -> 
     Toggle(isOn: isOn) {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.85))
+                .font(MangoxFont.callout.value)
+                .foregroundStyle(AppColor.fg1)
                 .lineLimit(2)
                 .minimumScaleFactor(0.85)
             Text(subtitle)
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.35))
+                .font(MangoxFont.caption.value)
+                .foregroundStyle(AppColor.fg3)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -38,6 +38,42 @@ func settingsSubSectionLabel(_ title: String) -> some View {
         .tracking(1.2)
         .padding(.top, 8)
         .padding(.bottom, 4)
+}
+
+// MARK: - Typography (Manrope / Geist Mono — matches Mangox design system)
+
+extension Text {
+    /// Card field labels and emphasized one-line titles (~15pt medium).
+    func settingsPrimary() -> some View {
+        font(MangoxFont.bodyBold.value).foregroundStyle(AppColor.fg1)
+    }
+
+    /// Toggle titles, compact row headings (~13pt medium).
+    func settingsSecondary() -> some View {
+        font(MangoxFont.callout.value).foregroundStyle(AppColor.fg1)
+    }
+
+    /// Supporting copy and descriptions (11pt mono).
+    func settingsFootnote() -> some View {
+        font(MangoxFont.caption.value).foregroundStyle(AppColor.fg2)
+    }
+
+    /// Muted footnotes and helper lines.
+    func settingsFootnoteMuted() -> some View {
+        font(MangoxFont.caption.value).foregroundStyle(AppColor.fg3)
+    }
+
+    /// Fine print (9pt mono).
+    func settingsMicro() -> some View {
+        font(MangoxFont.micro.value).foregroundStyle(AppColor.fg3)
+    }
+
+    /// Numeric / monospace data (11pt mono, tabular digits).
+    func settingsMonoCaption() -> some View {
+        font(MangoxFont.caption.value)
+            .foregroundStyle(AppColor.fg3)
+            .monospacedDigit()
+    }
 }
 
 struct SettingsSubviewShell<Content: View>: View {

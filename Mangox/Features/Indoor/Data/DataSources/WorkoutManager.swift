@@ -120,6 +120,9 @@ final class WorkoutManager {
     /// Tracked here so PowerGraphView never needs to scan the array.
     var powerHistoryMax: Int = 100
 
+    /// Seconds accumulated in each ``PowerZone`` id (1…5) while recording.
+    private(set) var zoneSecondsByZoneID: [Int: Int] = [:]
+
     var formattedSpeed: String = "0.0"
     /// Current speed in km/h (raw, not formatted). Used by Live Activity.
     var metricsSpeed: Double = 0
@@ -193,6 +196,7 @@ final class WorkoutManager {
     // Current lap accumulators (exposed for UI)
     var currentLapDuration: TimeInterval = 0
     var currentLapAvgPower: Double = 0
+    var currentLapAvgHR: Double = 0
     var previousLapAvgPower: Double = 0
     var previousLapDuration: TimeInterval = 0
     var activeDistance: Double = 0  // meters since workout start
@@ -841,6 +845,9 @@ final class WorkoutManager {
             }
         }
 
+        let zoneForHistogram = PowerZone.zone(for: displayPower)
+        zoneSecondsByZoneID[zoneForHistogram.id, default: 0] += elapsedDelta
+
         // Rebuild peakPowers array from current bests
         peakPowers = Self.peakWindows.compactMap { window in
             guard let best = peakBests[window] else { return nil }
@@ -935,6 +942,7 @@ final class WorkoutManager {
         lapElapsedSeconds += elapsedDelta
         currentLapDuration = TimeInterval(lapElapsedSeconds)
         currentLapAvgPower = lapSampleCount > 0 ? lapPowerSum / Double(lapSampleCount) : 0
+        currentLapAvgHR = lapSampleCount > 0 ? lapHRSum / Double(lapSampleCount) : 0
 
         // Auto-pause: trigger after N consecutive seconds of zero averaged power AND zero speed
         let autoPauseAllowed = autoPauseSuppressedUntilElapsed.map { elapsedSeconds >= $0 } ?? true
@@ -1108,6 +1116,7 @@ final class WorkoutManager {
         lapElapsedSeconds = 0
         currentLapDuration = 0
         currentLapAvgPower = 0
+        currentLapAvgHR = 0
     }
 
     private func resetAccumulators() {
@@ -1201,6 +1210,8 @@ final class WorkoutManager {
         for window in Self.peakWindows {
             peakBuffers[window] = RingBuffer<Int>(capacity: window)
         }
+
+        zoneSecondsByZoneID = [:]
 
         resetLapAccumulators()
     }

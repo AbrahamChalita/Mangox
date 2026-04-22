@@ -55,10 +55,14 @@ struct CoachSessionsSheet: View {
                 toolbarTrailingContent
             }
         }
-        .fullScreenCover(item: $deleteConfirm) { kind in
-            deleteConfirmCover(kind)
-                .presentationBackground(.clear)
+        .overlay {
+            if let kind = deleteConfirm {
+                deleteConfirmationOverlay(for: kind)
+                    .zIndex(300)
+                    .transition(.opacity)
+            }
         }
+        .animation(accessibilityReduceMotion ? .none : MangoxMotion.smooth, value: deleteConfirm?.id)
     }
 
     @ViewBuilder
@@ -285,94 +289,54 @@ struct CoachSessionsSheet: View {
         .padding(.bottom, 80)
     }
 
-    private func deleteConfirmCover(_ kind: DeleteConfirmKind) -> some View {
-        let title: String
-        let message: String
-        let confirmLabel: String
-        let onConfirm: () -> Void
-
+    private func deleteConfirmationPayload(for kind: DeleteConfirmKind)
+        -> (title: String, message: String, confirmLabel: String, onCommit: () -> Void)
+    {
         switch kind {
         case .selection:
             let n = selectedIDs.count
-            title = "Delete \(n) conversation\(n == 1 ? "" : "s")?"
-            message = "This can't be undone."
-            confirmLabel = "Delete"
-            onConfirm = {
-                removeSessions(ids: selectedIDs)
-                selectedIDs.removeAll()
-                isSelecting = false
-            }
+            return (
+                "Delete \(n) conversation\(n == 1 ? "" : "s")?",
+                "This can't be undone.",
+                "Delete",
+                {
+                    removeSessions(ids: selectedIDs)
+                    selectedIDs.removeAll()
+                    isSelecting = false
+                }
+            )
         case .all:
             let n = sessions.count
-            title = "Delete all \(n) conversation\(n == 1 ? "" : "s")?"
-            message = "Permanently removes all chat history. This can't be undone."
-            confirmLabel = "Delete all"
-            onConfirm = {
-                removeSessions(ids: Set(sessions.map(\.id)))
-                isSelecting = false
-                selectedIDs.removeAll()
-            }
-        }
-
-        return ZStack {
-            Color.black.opacity(0.6)
-                .ignoresSafeArea()
-                .onTapGesture { deleteConfirm = nil }
-                .transition(.opacity)
-
-            VStack(alignment: .leading, spacing: MangoxSpacing.lg.rawValue) {
-                VStack(alignment: .leading, spacing: MangoxSpacing.xs.rawValue) {
-                    Text(title)
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(textPrimary)
-
-                    Text(message)
-                        .font(MangoxFont.body.value)
-                        .foregroundStyle(textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            return (
+                "Delete all \(n) conversation\(n == 1 ? "" : "s")?",
+                "Permanently removes all chat history. This can't be undone.",
+                "Delete all",
+                {
+                    removeSessions(ids: Set(sessions.map(\.id)))
+                    isSelecting = false
+                    selectedIDs.removeAll()
                 }
-
-                HStack(spacing: MangoxSpacing.md.rawValue) {
-                    Button {
-                        deleteConfirm = nil
-                    } label: {
-                        Text("Cancel")
-                            .font(MangoxFont.bodyBold.value)
-                            .foregroundStyle(textPrimary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                    }
-                    .buttonStyle(.plain)
-                    .background(Color.white.opacity(AppOpacity.cardBg))
-                    .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
-
-                    Button {
-                        deleteConfirm = nil
-                        onConfirm()
-                    } label: {
-                        Text(confirmLabel)
-                            .font(MangoxFont.bodyBold.value)
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                    }
-                    .buttonStyle(.plain)
-                    .background(AppColor.red)
-                    .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
-                }
-            }
-            .padding(MangoxSpacing.xl.rawValue)
-            .frame(maxWidth: 340)
-            .background(
-                RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous)
-                    .fill(AppColor.bg)
-                    .shadow(color: .black.opacity(0.4), radius: 24, y: 8)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous)
-                    .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
             )
         }
-        .animation(accessibilityReduceMotion ? .none : MangoxMotion.smooth, value: deleteConfirm)
+    }
+
+    private func deleteConfirmationOverlay(for kind: DeleteConfirmKind) -> some View {
+        let p = deleteConfirmationPayload(for: kind)
+        return MangoxConfirmOverlay(
+            title: p.title,
+            message: p.message,
+            onDismiss: { deleteConfirm = nil }
+        ) {
+            MangoxConfirmDualButtonRow(
+                cancelTitle: "Cancel",
+                confirmTitle: p.confirmLabel,
+                trailingStyle: .destructive,
+                onCancel: { deleteConfirm = nil },
+                onConfirm: {
+                    deleteConfirm = nil
+                    p.onCommit()
+                }
+            )
+        }
     }
 }

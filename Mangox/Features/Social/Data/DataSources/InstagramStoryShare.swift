@@ -60,34 +60,34 @@ enum InstagramStoryShare {
     // MARK: - Encoding (pasteboard size)
 
     /// Opaque story layers: prefer **JPEG** so two-layer shares stay under iOS pasteboard limits (large dual-PNG payloads often fail silently).
+    ///
+    /// `UIImage` encoding APIs are main-actor-isolated (Swift 6); keep encoding on the main actor.
+    @MainActor
     static func encodeBackgroundImageData(_ image: UIImage) -> Data? {
         if let j = image.jpegData(compressionQuality: 0.92) { return j }
         return image.pngData()
     }
 
     /// Sticker layer must keep alpha — **PNG** only.
+    @MainActor
     static func encodeStickerImageData(_ image: UIImage) -> Data? {
         image.pngData()
     }
 
-    /// JPEG/PNG compression is CPU-heavy; offload so ``UIPasteboard`` + Instagram handoff stay smooth on the main actor.
+    /// JPEG/PNG compression can be CPU-heavy; `async` preserves structured-concurrency cancellation checks while encoding on the main actor.
+    @MainActor
     static func encodeBackgroundImageDataAsync(_ image: UIImage) async -> Data? {
-        await withTaskGroup(of: Data?.self, returning: Data?.self) { group in
-            group.addTask(priority: .userInitiated) {
-                guard !Task.isCancelled else { return nil }
-                return Self.encodeBackgroundImageData(image)
-            }
-            return await group.next() ?? nil
+        guard !Task.isCancelled else { return nil }
+        return await MainActor.run {
+            encodeBackgroundImageData(image)
         }
     }
 
+    @MainActor
     static func encodeStickerImageDataAsync(_ image: UIImage) async -> Data? {
-        await withTaskGroup(of: Data?.self, returning: Data?.self) { group in
-            group.addTask(priority: .userInitiated) {
-                guard !Task.isCancelled else { return nil }
-                return Self.encodeStickerImageData(image)
-            }
-            return await group.next() ?? nil
+        guard !Task.isCancelled else { return nil }
+        return await MainActor.run {
+            encodeStickerImageData(image)
         }
     }
 
@@ -189,8 +189,9 @@ enum InstagramStoryShare {
         return true
     }
 
-    /// Encodes on the caller’s thread, then presents. For large story assets, prefer encoding with ``presentStories(withPNGData:)`` on a background executor.
+    /// Encodes on the main actor, then presents. For large story assets, prefer ``encodeBackgroundImageDataAsync`` then ``presentStories(withPNGData:)``.
     @discardableResult
+    @MainActor
     static func presentStories(with image: UIImage) -> Bool {
         guard let imageData = encodeBackgroundImageData(image) else { return false }
         return presentStories(withPNGData: imageData)

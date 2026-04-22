@@ -1,3 +1,54 @@
+/* Indoor dashboard — pager segments (mono labels) */
+"indoor.dashboard.segment.ride" = "RIDE";
+"indoor.dashboard.segment.details" = "DETAILS";
+"indoor.dashboard.a11y.page_ride" = "Ride: power, heart rate, and primary metrics";
+"indoor.dashboard.a11y.page_details" = "Details: charts, analysis, and hardware controls";
+"indoor.header.status.paused" = "Paused";
+"indoor.header.status.auto_paused" = "Auto-paused";
+"indoor.header.a11y.session_state" = "Session state";
+"indoor.header.a11y.session_recording" = "Recording";
+"indoor.dashboard.heart_card.title" = "HEART RATE";
+"indoor.dashboard.heart_card.waiting" = "Waiting for sensor";
+"indoor.dashboard.heart_card.waiting_a11y" = "No heart rate";
+"indoor.dashboard.zones.title" = "TIME IN ZONE";
+"indoor.dashboard.zones.empty" = "—";
+"indoor.dashboard.zones.empty_caption" = "Fills in as you ride";
+"indoor.dashboard.zones.a11y" = "Time in power zones";
+"indoor.dashboard.hero.hr.a11y" = "Heart rate";
+"indoor.dashboard.tile.work" = "WORK";
+"indoor.dashboard.session.menu.status_section" = "Status";
+"indoor.dashboard.session.menu.hint_section" = "Tip";
+"indoor.dashboard.session.menu.hint_body" = "Change laps and defaults in Settings. Controls for trainer and laps stay below when active.";
+"indoor.dashboard.session.menu.guided_on" = "Guided workout active";
+"indoor.dashboard.session.menu.guided_off" = "Guided workout off";
+"indoor.dashboard.session.menu.laps_on" = "Laps on";
+"indoor.dashboard.session.menu.laps_off" = "Laps off";
+"indoor.dashboard.session.menu.ftms_ready" = "Trainer controls ready";
+"indoor.dashboard.session.menu.ftms_unavailable" = "Trainer controls unavailable";
+"indoor.dashboard.session.menu.a11y" = "Session mode and hardware status";
+"indoor.dashboard.milestone_sound" = "Milestone sound";
+
+"indoor.dashboard.snapshot.kj" = "WORK";
+"indoor.dashboard.snapshot.np" = "NP";
+"indoor.dashboard.snapshot.avg" = "AVG";
+
+"indoor.link.no_recent_data" = "No recent data from sensor.";
+
+"indoor.workout.auto_pause_detail" = "No power for a few seconds";
+"indoor.workout.start_accessibility" = "Start workout";
+"indoor.workout.pause_accessibility" = "Pause workout";
+"indoor.workout.resume_accessibility" = "Resume workout";
+"indoor.workout.lap_accessibility" = "Record lap";
+"indoor.workout.end_accessibility" = "End workout";
+"indoor.workout.end_accessibility_hint" = "Opens end-workout confirmation.";
+
+"indoor.header.a11y.elapsed" = "Elapsed time";
+"indoor.header.a11y.close_preride" = "Close indoor setup";
+
+"indoor.dashboard.session.placeholder_title" = "Coach & hardware";
+"indoor.dashboard.session.placeholder_body" = "ERG, laps, simulation, and guided blocks appear here when they are active. Use RIDE for your main readout; open DETAILS for trends and hardware.";
+"indoor.dashboard.session.placeholder_ftms" = "No FTMS trainer detected — you can still ride with power and heart rate.";
+
 /* Indoor dashboard — session mode */
 "indoor.mode.free_ride" = "Free ride";
 "indoor.mode.route" = "Route";
@@ -13,8 +64,27 @@
 
 /* Power graph */
 "indoor.power_graph.title" = "POWER";
+"indoor.power_graph.timeframe" = "Last 60s";
 "indoor.power_graph.empty" = "Pedal to see your power curve";
 "indoor.power_graph.empty_accessibility" = "Power chart, empty until you start pedaling";
+"indoor.power_graph.y_max" = "%lld W max";
+
+/* Peak efforts (Details) */
+"indoor.peak_effort.5s" = "PEAK 5S";
+"indoor.peak_effort.5s_a11y" = "Peak 5 second power %lld watts";
+
+/* Header context */
+"indoor.intent.free_ride" = "Free ride";
+"indoor.intent.route" = "Route ride";
+"indoor.intent.route_named" = "Route · %@";
+"indoor.header.goal_line" = "%@ · %@ / %@ %@";
+"indoor.sensor.trainer_stale" = "Trainer link quiet — keep pedaling";
+
+/* Guided target line (Ride hero) */
+"indoor.guided.hero.target_format" = "Target %lld–%lld W";
+"indoor.guided.status.on_target" = "On target";
+"indoor.guided.status.below_w" = "+%lld W";
+"indoor.guided.status.above_w" = "−%lld W";
 
 /* Trainer */
 "indoor.trainer.route_sim_footer" = "Route simulation appears when a GPX route is loaded.";

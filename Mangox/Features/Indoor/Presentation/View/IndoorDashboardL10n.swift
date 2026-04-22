@@ -12,8 +12,12 @@ enum IndoorDashboardL10n {
     static var ftpEstimatedHint: String { String(localized: "indoor.ftp.estimated_hint") }
 
     static var powerGraphTitle: String { String(localized: "indoor.power_graph.title") }
+    /// Rolling window matches ``WorkoutManager`` power history (≈60 one-second samples).
+    static var powerGraphTimeframe: String { String(localized: "indoor.power_graph.timeframe") }
     static var powerGraphEmpty: String { String(localized: "indoor.power_graph.empty") }
     static var powerGraphEmptyA11y: String { String(localized: "indoor.power_graph.empty_accessibility") }
 
     static var trainerRouteSimFooter: String { String(localized: "indoor.trainer.route_sim_footer") }
+
+    static var peakEffort5sTitle: String { String(localized: "indoor.peak_effort.5s") }
 }

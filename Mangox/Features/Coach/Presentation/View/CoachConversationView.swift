@@ -124,10 +124,12 @@ struct CoachConversationView: View {
                 Button {
                     chatSheetPresented = false
                 } label: {
-                    Text("Close")
-                        .font(.body)
-                        .foregroundStyle(.white.opacity(0.55))
-                        .frame(minWidth: 44, minHeight: 44)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(AppColor.fg2)
+                        .frame(width: 42, height: 42)
+                        .background(AppColor.bg2)
+                        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -142,11 +144,12 @@ struct CoachConversationView: View {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.system(size: 17, weight: .medium))
                             .frame(width: 40, height: 40)
-                            .mangoxSurface(.frostedInteractive, shape: .circle)
+                            .background(AppColor.bg2)
+                            .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(AppColor.fg2)
                     .accessibilityLabel("Conversations")
 
                     Button {
@@ -155,7 +158,8 @@ struct CoachConversationView: View {
                         Image(systemName: "calendar.badge.plus")
                             .font(.system(size: 17, weight: .medium))
                             .frame(width: 40, height: 40)
-                            .mangoxSurface(.frostedInteractive, shape: .circle)
+                            .background(AppColor.bg2)
+                            .overlay(Rectangle().stroke(AppColor.mango.opacity(0.35), lineWidth: 1))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -169,27 +173,36 @@ struct CoachConversationView: View {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 17, weight: .medium))
                             .frame(width: 40, height: 40)
-                            .mangoxSurface(.frostedInteractive, shape: .circle)
+                            .background(AppColor.bg2)
+                            .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(AppColor.fg2)
                     .accessibilityLabel("New conversation")
                     .disabled(coachViewModel.isLoading)
                 }
             }
             .padding(.horizontal, 8)
 
-            Text("Coach")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.92))
+            VStack(spacing: 2) {
+                Text("COACH")
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.mango)
+                    .tracking(1.4)
+                Text(greetingText)
+                    .font(MangoxFont.caption.value)
+                    .foregroundStyle(AppColor.fg2)
+            }
                 .accessibilityAddTraits(.isHeader)
                 .allowsHitTesting(false)
         }
         .padding(.top, 4)
-        .padding(.bottom, 2)
+        .padding(.bottom, 8)
         .overlay(alignment: .bottom) {
-            Divider().opacity(0.12)
+            Rectangle()
+                .fill(AppColor.hair)
+                .frame(height: 1)
         }
     }
 
@@ -212,45 +225,46 @@ struct CoachConversationView: View {
             )
         }
         .ignoresSafeArea()
+        .mangoxGridBackground(opacity: 0.35)
     }
 
     // MARK: Metrics
 
     private var metricsStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
-                    metricCapsule(
-                        icon: "bolt.fill", label: "FTP", value: "\(PowerZone.ftp)W",
-                        color: AppColor.yellow)
-                    metricCapsule(
-                        icon: "heart.fill", label: "Max HR", value: "\(HeartRateZone.maxHR)",
-                        color: AppColor.heartRate)
-                    if !coachViewModel.isPro {
-                        if coachViewModel.bypassesDailyLimit {
-                            metricCapsule(
-                                icon: "person.fill.checkmark",
-                                label: "Coach",
-                                value: "Staff",
-                                color: AppColor.mango.opacity(0.85)
-                            )
-                        } else {
-                            let left = coachViewModel.remainingFreeMessages(isPro: coachViewModel.isPro)
-                            metricCapsule(
-                                icon: "bubble.left.fill",
-                                label: "Today",
-                                value: "\(left) left",
-                                color: left > 0 ? .white.opacity(0.45) : AppColor.red
-                            )
-                        }
+            HStack(spacing: 8) {
+                metricCapsule(
+                    icon: "bolt.fill", label: "FTP", value: "\(PowerZone.ftp)W",
+                    color: AppColor.yellow)
+                metricCapsule(
+                    icon: "heart.fill", label: "Max HR", value: "\(HeartRateZone.maxHR)",
+                    color: AppColor.heartRate)
+                if !coachViewModel.isPro {
+                    if coachViewModel.bypassesDailyLimit {
+                        metricCapsule(
+                            icon: "person.fill.checkmark",
+                            label: "Coach",
+                            value: "Staff",
+                            color: AppColor.mango.opacity(0.85)
+                        )
+                    } else {
+                        let left = coachViewModel.remainingFreeMessages(isPro: coachViewModel.isPro)
+                        metricCapsule(
+                            icon: "bubble.left.fill",
+                            label: "Today",
+                            value: "\(left) left",
+                            color: left > 0 ? AppColor.fg2 : AppColor.red
+                        )
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
         .overlay(alignment: .bottom) {
-            Divider().opacity(0.15)
+            Rectangle()
+                .fill(AppColor.hair)
+                .frame(height: 1)
         }
     }
 
@@ -262,16 +276,17 @@ struct CoachConversationView: View {
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(color)
             Text(label.uppercased())
-                .font(.system(size: 9, weight: .heavy))
-                .foregroundStyle(.white.opacity(0.32))
+                .mangoxFont(.micro)
+                .foregroundStyle(AppColor.fg3)
                 .tracking(0.6)
             Text(value)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.78))
+                .font(MangoxFont.caption.value)
+                .foregroundStyle(AppColor.fg1)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .glassEffect(.regular, in: .capsule)
+        .background(AppColor.bg2)
+        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
     }
 
     // MARK: Messages
@@ -782,45 +797,43 @@ struct InputBarView: View {
                 )
             }
 
-            GlassEffectContainer(spacing: 12) {
-                HStack(alignment: .bottom, spacing: 10) {
-                    TextField(
-                        "Message",
-                        text: $inputText,
-                        prompt: Text("Message").foregroundColor(.white.opacity(0.35)),
-                        axis: .vertical
-                    )
-                    .font(.body)
-                    .foregroundStyle(.white)
-                    .tint(AppColor.mango)
-                    .textInputAutocapitalization(.sentences)
-                    .autocorrectionDisabled(false)
-                    .keyboardType(.default)
-                    .textContentType(.none)
-                    .lineLimit(1...6)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 11)
-                    .background(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .fill(Color.white.opacity(inputFocused ? 0.11 : 0.065))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .strokeBorder(
-                                Color.white.opacity(inputFocused ? 0.22 : 0.08), lineWidth: 1)
-                    )
-                    .focused($inputFocused)
-                    .submitLabel(.send)
-                    .accessibilityLabel("Message")
-                    .onSubmit { sendAction(inputText) }
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField(
+                    "Message",
+                    text: $inputText,
+                    prompt: Text("Message").foregroundColor(AppColor.fg3),
+                    axis: .vertical
+                )
+                .font(.body)
+                .foregroundStyle(.white)
+                .tint(AppColor.mango)
+                .textInputAutocapitalization(.sentences)
+                .autocorrectionDisabled(false)
+                .keyboardType(.default)
+                .textContentType(.none)
+                .lineLimit(1...6)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .background(inputFocused ? AppColor.bg2 : AppColor.bg1)
+                .overlay(
+                    Rectangle()
+                        .stroke(inputFocused ? AppColor.mango.opacity(0.35) : AppColor.hair2, lineWidth: 1)
+                )
+                .focused($inputFocused)
+                .submitLabel(.send)
+                .accessibilityLabel("Message")
+                .onSubmit { sendAction(inputText) }
 
-                    sendButton
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+                sendButton
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
             .background(AppColor.bg.opacity(0.94))
-            .overlay(alignment: .top) { Divider().opacity(0.18) }
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(AppColor.hair)
+                    .frame(height: 1)
+            }
         }
     }
 
@@ -850,11 +863,12 @@ struct InputBarView: View {
         } label: {
             Image(systemName: "arrow.up")
                 .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(canSend ? .black : .white.opacity(0.35))
+                .foregroundStyle(canSend ? AppColor.bg0 : AppColor.fg3)
                 .frame(width: 44, height: 44)
-                .glassEffect(
-                    canSend ? .regular.tint(AppColor.mango).interactive() : .regular.interactive(),
-                    in: .circle
+                .background(canSend ? AppColor.mango : AppColor.bg2)
+                .overlay(
+                    Rectangle()
+                        .stroke(canSend ? AppColor.mango.opacity(0.45) : AppColor.hair2, lineWidth: 1)
                 )
         }
         .buttonStyle(MangoxPressStyle())

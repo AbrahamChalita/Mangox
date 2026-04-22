@@ -9,15 +9,13 @@ struct RideFABView: View {
     let onSelect: (AppRoute) -> Void
 
     @State private var showRideMenu = false
-    @Namespace private var glassNamespace
-
-    private static let morphID = "rideGlassFAB"
+    @Namespace private var fabNamespace
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Color.clear  // anchors the ZStack to fill the full overlay area
             if showRideMenu {
-                Color.black.opacity(0.18)
+                AppColor.bg0.opacity(0.34)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -26,40 +24,52 @@ struct RideFABView: View {
                     .transition(.opacity)
             }
 
-            if showFloatingButton {
-                GlassEffectContainer {
-                    if showRideMenu {
-                        expandedCard
-                    } else {
-                        collapsedFAB
-                    }
-                }
+            if showFloatingButton || showRideMenu {
+                floatingMenu
                 .padding(.trailing, MangoxSpacing.page)
                 .padding(.bottom, 70)
-                .transition(.opacity)
             }
         }
+        .onChange(of: showFloatingButton) { _, isVisible in
+            guard !isVisible, showRideMenu else { return }
+            showRideMenu = false
+        }
+        .animation(MangoxMotion.expansive, value: showRideMenu)
         .animation(MangoxMotion.smooth, value: showFloatingButton)
+    }
+
+    private var floatingMenu: some View {
+        ZStack(alignment: .bottomTrailing) {
+            if showRideMenu {
+                expandedCard
+                    .transition(
+                        .asymmetric(
+                            insertion: .scale(scale: 0.94, anchor: .bottomTrailing)
+                                .combined(with: .opacity),
+                            removal: .scale(scale: 0.98, anchor: .bottomTrailing)
+                                .combined(with: .opacity)
+                        )
+                    )
+            }
+
+            if !showRideMenu {
+                collapsedFAB
+                    .transition(
+                        .scale(scale: 0.9, anchor: .bottomTrailing)
+                            .combined(with: .opacity)
+                    )
+            }
+        }
     }
 
     // MARK: - Collapsed FAB
 
     private var collapsedFAB: some View {
-        Button {
+        fabToggleButton(isExpanded: false) {
             withAnimation(MangoxMotion.micro) {
                 showRideMenu = true
             }
-        } label: {
-            Image(systemName: "plus")
-                .font(.title2.bold())
-                .foregroundStyle(.white)
-                .frame(width: 52, height: 52)
-                .contentShape(Circle())
         }
-        .buttonStyle(MangoxPressStyle())
-        .glassEffect(.regular.tint(AppColor.mango), in: .circle)
-        .glassEffectID(Self.morphID, in: glassNamespace)
-        .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 6)
     }
 
     // MARK: - Expanded card
@@ -67,13 +77,40 @@ struct RideFABView: View {
     private var expandedCard: some View {
         menuPanelContent
             .frame(width: 260)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .glassEffectID(Self.morphID, in: glassNamespace)
-            .shadow(color: .black.opacity(0.3), radius: 16, x: 0, y: 8)
+            .background(
+                RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous)
+                    .fill(AppColor.bg2)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous)
+                    .strokeBorder(AppColor.hair2, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.35), radius: 16, x: 0, y: 8)
     }
 
     private var menuPanelContent: some View {
         VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: MangoxSpacing.md.rawValue) {
+                Text("Start Ride")
+                    .mangoxFont(.bodyBold)
+                    .foregroundStyle(AppColor.fg0)
+
+                Spacer(minLength: 0)
+
+                fabToggleButton(isExpanded: true) {
+                    withAnimation(MangoxMotion.micro) {
+                        showRideMenu = false
+                    }
+                }
+            }
+            .padding(.horizontal, MangoxSpacing.lg.rawValue)
+            .padding(.top, MangoxSpacing.lg.rawValue)
+            .padding(.bottom, MangoxSpacing.md.rawValue)
+
+            Rectangle()
+                .fill(AppColor.hair)
+                .frame(height: 1)
+
             menuRow(
                 icon: "figure.indoor.cycle",
                 iconColor: AppColor.mango,
@@ -82,7 +119,9 @@ struct RideFABView: View {
                 route: .indoorRideSetup
             )
 
-            Divider()
+            Rectangle()
+                .fill(AppColor.hair)
+                .frame(height: 1)
 
             menuRow(
                 icon: "bicycle",
@@ -92,6 +131,42 @@ struct RideFABView: View {
                 route: .outdoorDashboard
             )
         }
+    }
+
+    private func fabToggleButton(isExpanded: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            ZStack {
+                RoundedRectangle(
+                    cornerRadius: MangoxRadius.button.rawValue,
+                    style: .continuous
+                )
+                .fill(AppColor.mango)
+                .matchedGeometryEffect(id: "ride-fab.chrome", in: fabNamespace)
+
+                RoundedRectangle(
+                    cornerRadius: MangoxRadius.button.rawValue,
+                    style: .continuous
+                )
+                .strokeBorder(AppColor.mango.opacity(0.45), lineWidth: 1)
+                .matchedGeometryEffect(id: "ride-fab.stroke", in: fabNamespace)
+
+                Image(systemName: "plus")
+                    .font(.title2.bold())
+                    .foregroundStyle(AppColor.bg0)
+                    .rotationEffect(.degrees(isExpanded ? 45 : 0))
+                    .matchedGeometryEffect(id: "ride-fab.icon", in: fabNamespace)
+            }
+            .frame(width: 52, height: 52)
+            .contentShape(
+                RoundedRectangle(
+                    cornerRadius: MangoxRadius.button.rawValue,
+                    style: .continuous
+                )
+            )
+        }
+        .buttonStyle(MangoxPressStyle())
+        .shadow(color: .black.opacity(0.35), radius: isExpanded ? 8 : 10, x: 0, y: isExpanded ? 4 : 6)
+        .accessibilityLabel(isExpanded ? "Close ride options" : "Start a ride")
     }
 
     private func menuRow(
@@ -107,20 +182,25 @@ struct RideFABView: View {
         } label: {
             HStack(spacing: 14) {
                 ZStack {
-                    MangoxIconBadge(systemName: icon, color: iconColor, size: 44, cornerRadius: 10)
+                    MangoxIconBadge(
+                        systemName: icon,
+                        color: iconColor,
+                        size: 44,
+                        cornerRadius: MangoxRadius.button.rawValue
+                    )
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .mangoxFont(.bodyBold)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppColor.fg0)
                     Text(subtitle)
                         .mangoxFont(.caption)
-                        .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
+                        .foregroundStyle(AppColor.fg2)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.horizontal, MangoxSpacing.lg.rawValue)
+            .padding(.vertical, MangoxSpacing.lg.rawValue)
             .contentShape(Rectangle())
         }
         .buttonStyle(MangoxPressStyle())

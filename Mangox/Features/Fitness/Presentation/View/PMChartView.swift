@@ -87,14 +87,18 @@ struct PMChartView: View {
             AppColor.bg.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                HStack {
-                    Text("Training Load")
-                        .font(.title2.weight(.bold))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("FITNESS · \(viewModel.rangeDays) DAYS")
+                        .mangoxFont(.caption)
+                        .foregroundStyle(AppColor.mango)
+
+                    Text("Stats")
+                        .font(MangoxFont.title.value)
                         .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
                         .lineLimit(1)
-                    Spacer(minLength: 8)
                 }
-                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, MangoxSpacing.page)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
 
@@ -204,14 +208,13 @@ struct PMChartView: View {
         let scaleMax = max(latest.ctl, latest.atl, 1)
 
         return HStack(alignment: .center, spacing: 14) {
-            // LEFT: Hero TSB
             VStack(alignment: .leading, spacing: 0) {
                 Text("FORM")
-                    .font(.system(size: 10, weight: .heavy))
-                    .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                    .tracking(1.1)
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.mango)
+                    .tracking(1.4)
                 Text(String(format: "%.0f", latest.tsb))
-                    .font(.system(size: 42, weight: .bold, design: .monospaced))
+                    .font(MangoxFont.heroValue.value)
                     .foregroundStyle(status.color)
                     .contentTransition(.numericText(value: latest.tsb))
                     .lineLimit(1)
@@ -219,7 +222,6 @@ struct PMChartView: View {
             }
             .frame(minWidth: 72, alignment: .leading)
 
-            // RIGHT: status + advice + stacked balance bars
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 6) {
                     Image(systemName: status.icon)
@@ -257,21 +259,10 @@ struct PMChartView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .mangoxSurface(.frosted, shape: .rounded(MangoxRadius.card.rawValue))
+        .background(AppColor.bg2)
         .overlay(
-            RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            status.color.opacity(0.55),
-                            status.color.opacity(0.12),
-                            status.color.opacity(0.32)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
+            Rectangle()
+                .stroke(status.color.opacity(0.28), lineWidth: 1)
                 .allowsHitTesting(false)
         )
         .animation(.snappy, value: latest.tsb)
@@ -292,12 +283,12 @@ struct PMChartView: View {
                 .tracking(0.6)
                 .frame(width: 22, alignment: .leading)
 
-            Capsule()
-                .fill(Color.white.opacity(0.06))
+            Rectangle()
+                .fill(AppColor.bg4)
                 .frame(height: 4)
                 .overlay(alignment: .leading) {
                     GeometryReader { geo in
-                        Capsule()
+                        Rectangle()
                             .fill(color)
                             .frame(width: geo.size.width * pct)
                             .animation(.smooth(duration: 0.4), value: pct)
@@ -333,7 +324,8 @@ struct PMChartView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .mangoxSurface(.frosted, shape: .capsule)
+        .background(AppColor.bg1, in: Capsule())
+        .overlay(Capsule().strokeBorder(AppColor.hair2, lineWidth: 1))
         .padding(.top, 4)
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -377,7 +369,8 @@ struct PMChartView: View {
             Spacer(minLength: 0)
         }
         .padding(14)
-        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.card.rawValue))
+        .background(AppColor.bg2)
+        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
         .animation(.snappy, value: snap.fraction)
     }
 
@@ -399,6 +392,13 @@ struct PMChartView: View {
     private var pmcChartCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
+                Text("TRAINING LOAD")
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.mango)
+                    .tracking(1.4)
+
+                Spacer(minLength: 8)
+
                 rangeSegmented
 
                 Menu {
@@ -456,7 +456,8 @@ struct PMChartView: View {
             }
         }
         .padding(14)
-        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.card.rawValue))
+        .background(AppColor.bg2)
+        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
     }
 
     private var scopeInfoPopover: some View {
@@ -481,35 +482,27 @@ struct PMChartView: View {
     }
 
     private var rangeSegmented: some View {
-        GlassEffectContainer(spacing: 6) {
-            HStack(spacing: 6) {
-                ForEach(viewModel.rangeOptions, id: \.self) { days in
-                    let isSelected = days == viewModel.rangeDays
-                    Button {
-                        setRange(days)
-                    } label: {
-                        Text("\(days)d")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(
-                                isSelected
-                                    ? .white.opacity(AppOpacity.textPrimary)
-                                    : .white.opacity(AppOpacity.textSecondary)
-                            )
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 28)
-                            .contentShape(Rectangle())
-                            .background(
-                                isSelected
-                                    ? AppColor.wash(for: AppColor.blue)
-                                    : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            )
-                            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 9, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(days)-day range")
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+        HStack(spacing: 6) {
+            ForEach(viewModel.rangeOptions, id: \.self) { days in
+                let isSelected = days == viewModel.rangeDays
+                Button {
+                    setRange(days)
+                } label: {
+                    Text("\(days)D")
+                        .mangoxFont(.caption)
+                        .foregroundStyle(isSelected ? AppColor.fg0 : AppColor.fg2)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 28)
+                        .contentShape(Rectangle())
+                        .background(isSelected ? AppColor.bg2 : AppColor.bg1)
+                        .overlay(
+                            Rectangle()
+                                .stroke(isSelected ? AppColor.blue.opacity(0.4) : AppColor.hair, lineWidth: 1)
+                        )
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(days)-day range")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
         .sensoryFeedback(.selection, trigger: viewModel.rangeDays)
@@ -647,12 +640,13 @@ struct PMChartView: View {
     private var powerCurveCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Power curve")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+                Text("POWER CURVE")
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.mango)
+                    .tracking(1.4)
                 Spacer()
-                Text("\(viewModel.rangeDays)d")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                Text("\(viewModel.rangeDays)D")
+                    .mangoxFont(.caption)
                     .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
             }
 
@@ -733,7 +727,8 @@ struct PMChartView: View {
             .frame(height: 180)
         }
         .padding(14)
-        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.card.rawValue))
+        .background(AppColor.bg2)
+        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
     }
 
     /// Axis tick positions at conventional duration breakpoints that intersect
@@ -789,4 +784,3 @@ struct PMChartView: View {
         .frame(maxWidth: .infinity)
     }
 }
-

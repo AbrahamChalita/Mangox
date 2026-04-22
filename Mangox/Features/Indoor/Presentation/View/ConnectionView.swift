@@ -4,6 +4,10 @@ import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
 
+#if canImport(UIKit)
+    import UIKit
+#endif
+
 enum ConnectionStartMode {
     case ride
     case ftpTest
@@ -35,6 +39,27 @@ private struct ConnectedDeviceStateRow: Identifiable {
     let name: String
     let type: DeviceType
     let state: BLEConnectionState
+}
+
+private enum ConnectionFontToken {
+    static func mono(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        let fontName: String
+        switch weight {
+        case .light:
+            fontName = "GeistMono-Light"
+        case .medium, .semibold, .bold, .heavy, .black:
+            fontName = "GeistMono-Medium"
+        default:
+            fontName = "GeistMono-Regular"
+        }
+
+        #if canImport(UIKit)
+            if UIFont(name: fontName, size: size) != nil {
+                return .custom(fontName, size: size)
+            }
+        #endif
+        return .system(size: size, weight: weight, design: .monospaced)
+    }
 }
 
 struct ConnectionView: View {
@@ -295,6 +320,7 @@ struct ConnectionView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize)
 
             // Sticky bottom action bar
             if bleService.bluetoothState == .poweredOn
@@ -308,12 +334,15 @@ struct ConnectionView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 2) {
+                    Text(toolbarEyebrow)
+                        .mangoxFont(.caption)
+                        .foregroundStyle(AppColor.mango)
                     Text(screenTitle)
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(.white)
+                        .font(MangoxFont.title.value)
+                        .foregroundStyle(AppColor.fg0)
                     Text(screenSubtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .mangoxFont(.micro)
+                        .foregroundStyle(AppColor.fg3)
                 }
             }
         }
@@ -492,12 +521,7 @@ struct ConnectionView: View {
             statusBannerVertical
         }
         .padding(.vertical, 4)
-        .background(Color.white.opacity(AppOpacity.pillBg))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
-        )
+        .cardStyle(cornerRadius: MangoxRadius.sharp.rawValue)
     }
 
     private var statusBannerHorizontal: some View {
@@ -584,7 +608,7 @@ struct ConnectionView: View {
 
     private var connectionStatusDivider: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.06))
+            .fill(AppColor.hair)
             .frame(height: 1)
             .padding(.leading, 56)
     }
@@ -608,7 +632,7 @@ struct ConnectionView: View {
         let pillColor: Color = {
             if isConnected { return accentSuccess }
             if isConnecting || isScanning { return accentYellow }
-            return accentOverride ?? Color.white.opacity(0.28)
+            return accentOverride ?? AppColor.fg3
         }()
 
         return HStack(alignment: .center, spacing: 12) {
@@ -618,19 +642,20 @@ struct ConnectionView: View {
                     .frame(width: 36, height: 36)
 
                 Image(systemName: icon)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(MangoxFont.bodyBold.value)
                     .foregroundStyle(pillColor)
             }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(category.uppercased())
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.38))
+                    .mangoxFont(.label)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(AppColor.fg3)
                     .tracking(0.6)
 
                 Text(title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(isConnected ? 0.95 : 0.55))
+                    .mangoxFont(.bodyBold)
+                    .foregroundStyle(isConnected ? AppColor.fg0 : AppColor.fg2)
                     .lineLimit(2)
                     .minimumScaleFactor(0.85)
                     .fixedSize(horizontal: false, vertical: true)
@@ -639,7 +664,7 @@ struct ConnectionView: View {
 
             if isConnected {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 20))
+                    .font(MangoxFont.title.value)
                     .foregroundStyle(accentSuccess)
                     .accessibilityHidden(true)
             } else if isConnecting || isScanning {
@@ -661,11 +686,12 @@ struct ConnectionView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 6) {
                 Image(systemName: "figure.outdoor.cycle")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.fg3)
                 Text("RIDE MODE")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .mangoxFont(.label)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(AppColor.fg3)
                     .tracking(1.5)
             }
 
@@ -678,33 +704,36 @@ struct ConnectionView: View {
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: mode.icon)
-                                .font(.system(size: 12, weight: .semibold))
+                                .mangoxFont(.callout)
                             Text(mode.label)
-                                .font(.system(size: 14, weight: .bold))
+                                .mangoxFont(.bodyBold)
                         }
-                        .foregroundStyle(rideLaunchMode == mode ? AppColor.bg : .white.opacity(0.7))
+                        .foregroundStyle(rideLaunchMode == mode ? AppColor.bg0 : AppColor.fg2)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
-                        .background(
-                            rideLaunchMode == mode ? accentSuccess : Color.white.opacity(0.05)
+                        .background(rideLaunchMode == mode ? accentSuccess : AppColor.hair)
+                        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(
+                                cornerRadius: MangoxRadius.overlay.rawValue,
+                                style: .continuous
+                            )
+                            .strokeBorder(
+                                rideLaunchMode == mode ? accentSuccess : AppColor.hair2,
+                                lineWidth: 1
+                            )
                         )
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(MangoxPressStyle())
                 }
             }
 
             Text(rideModeHint)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.38))
+                .mangoxFont(.callout)
+                .foregroundStyle(AppColor.fg3)
         }
         .padding(16)
-        .background(Color.white.opacity(AppOpacity.pillBg))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
-        )
+        .cardStyle(cornerRadius: MangoxRadius.sharp.rawValue)
     }
 
     // MARK: - Section Header
@@ -712,11 +741,12 @@ struct ConnectionView: View {
     private func sectionHeader(title: String, icon: String, prominent: Bool = false) -> some View {
         HStack(spacing: 7) {
             Image(systemName: icon)
-                .font(.system(size: prominent ? 13 : 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(prominent ? 0.6 : 0.3))
+                .font(MangoxFont.callout.value)
+                .foregroundStyle(prominent ? AppColor.fg2 : AppColor.fg3)
             Text(title)
-                .font(.system(size: prominent ? 13 : 11, weight: .bold))
-                .foregroundStyle(.white.opacity(prominent ? 0.7 : 0.35))
+                .mangoxFont(.callout)
+                .fontWeight(.semibold)
+                .foregroundStyle(prominent ? AppColor.fg2 : AppColor.fg3)
                 .tracking(prominent ? 1.5 : 2)
             Spacer()
         }
@@ -762,15 +792,15 @@ struct ConnectionView: View {
                             .frame(width: 36, height: 36)
 
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 14, weight: .semibold))
+                            .mangoxFont(.callout)
                             .foregroundStyle(accentSuccess)
                     }
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(bleService.isScanningForDevices ? "Scanning…" : "Scan for Devices")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .mangoxFont(.bodyBold)
+                        .foregroundStyle(AppColor.fg0)
                     Text(
                         bleService.isScanningForDevices
                             ? "Tap to stop"
@@ -778,8 +808,8 @@ struct ConnectionView: View {
                                 ? "Find speed/cadence sensors & heart rate monitors"
                                 : "Find nearby trainers & HR monitors")
                     )
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.fg3)
                 }
 
                 Spacer()
@@ -787,15 +817,15 @@ struct ConnectionView: View {
                 Image(
                     systemName: bleService.isScanningForDevices ? "stop.circle" : "arrow.clockwise"
                 )
-                .font(.system(size: 16, weight: .medium))
+                .font(MangoxFont.title.value)
                 .foregroundStyle(accentSuccess.opacity(0.6))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .background(accentSuccess.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous)
                     .strokeBorder(accentSuccess.opacity(0.15), lineWidth: 1)
             )
         }
@@ -903,12 +933,7 @@ struct ConnectionView: View {
                 }
             }
         }
-        .background(Color.white.opacity(AppOpacity.pillBg))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
-        )
+        .cardStyle(cornerRadius: MangoxRadius.sharp.rawValue)
     }
 
     // MARK: - WiFi Trainers Card
@@ -940,8 +965,8 @@ struct ConnectionView: View {
             Text(
                 "Finds trainers on your Wi‑Fi that advertise as a bridge (e.g. Zwift Companion, Wahoo, FTMS)."
             )
-            .font(.system(size: 11))
-            .foregroundStyle(.white.opacity(0.28))
+            .mangoxFont(.caption)
+            .foregroundStyle(AppColor.fg3)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -950,11 +975,11 @@ struct ConnectionView: View {
             if case .error(let message) = wifiState {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 12))
+                        .mangoxFont(.caption)
                         .foregroundStyle(accentOrange)
                     Text(message)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .mangoxFont(.body)
+                        .foregroundStyle(AppColor.fg2)
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
@@ -962,7 +987,7 @@ struct ConnectionView: View {
 
             if showWifiRows {
                 Rectangle()
-                    .fill(Color.white.opacity(0.05))
+                    .fill(AppColor.hair)
                     .frame(height: 1)
                     .padding(.horizontal, 16)
 
@@ -983,11 +1008,11 @@ struct ConnectionView: View {
             } else if !isWiFiDiscovering {
                 HStack(spacing: 8) {
                     Image(systemName: "wifi.slash")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.white.opacity(0.2))
+                        .mangoxFont(.callout)
+                        .foregroundStyle(AppColor.fg3)
                     Text("Search to discover trainers on your network")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.28))
+                        .mangoxFont(.body)
+                        .foregroundStyle(AppColor.fg3)
                     Spacer()
                 }
                 .padding(.horizontal, 16)
@@ -1000,20 +1025,15 @@ struct ConnectionView: View {
                         .tint(accentBlue.opacity(0.7))
                         .scaleEffect(0.75)
                     Text("Browsing Bonjour services…")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.32))
+                        .mangoxFont(.label)
+                        .foregroundStyle(AppColor.fg3)
                     Spacer()
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 14)
             }
         }
-        .background(Color.white.opacity(AppOpacity.pillBg))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
-        )
+        .cardStyle(cornerRadius: MangoxRadius.sharp.rawValue)
     }
 
     private var wifiTrainerDiscoveryButton: some View {
@@ -1038,33 +1058,34 @@ struct ConnectionView: View {
                             .fill(accentBlue.opacity(0.12))
                             .frame(width: 36, height: 36)
                         Image(systemName: "wifi")
-                            .font(.system(size: 14, weight: .semibold))
+                            .mangoxFont(.callout)
+                            .fontWeight(.semibold)
                             .foregroundStyle(accentBlue)
                     }
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(isWiFiDiscovering ? "Searching…" : "Search Wi‑Fi Trainers")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .mangoxFont(.bodyBold)
+                        .foregroundStyle(AppColor.fg0)
                     Text(isWiFiDiscovering ? "Tap to stop" : "Bonjour / mDNS on your local network")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .mangoxFont(.label)
+                        .foregroundStyle(AppColor.fg3)
                 }
 
                 Spacer()
 
                 Image(systemName: isWiFiDiscovering ? "stop.circle" : "arrow.clockwise")
-                    .font(.system(size: 16, weight: .medium))
+                    .mangoxFont(.callout)
                     .foregroundStyle(accentBlue.opacity(0.6))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
-            .background(accentBlue.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(AppColor.wash(for: accentBlue))
+            .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(accentBlue.opacity(0.15), lineWidth: 1)
+                RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous)
+                    .strokeBorder(accentBlue.opacity(0.18), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -1083,22 +1104,23 @@ struct ConnectionView: View {
     private func wifiConnectedRow(trainer: DiscoveredWiFiTrainer) -> some View {
         HStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous)
                     .fill(accentSuccess.opacity(0.1))
                     .frame(width: 40, height: 40)
                 Image(systemName: "wifi")
-                    .font(.system(size: 15, weight: .semibold))
+                    .mangoxFont(.callout)
+                    .fontWeight(.semibold)
                     .foregroundStyle(accentSuccess)
             }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(trainer.name)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .mangoxFont(.bodyBold)
+                    .foregroundStyle(AppColor.fg0)
                     .lineLimit(1)
                 Text("\(trainer.ipAddress) · \(trainer.port)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.25))
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.fg3)
             }
 
             Spacer()
@@ -1106,7 +1128,7 @@ struct ConnectionView: View {
             Button("Disconnect") {
                 dataSourceService.disconnectWiFi()
             }
-            .font(.system(size: 12, weight: .semibold))
+            .mangoxFont(.caption)
             .foregroundStyle(accentOrange)
         }
         .padding(.horizontal, 16)
@@ -1123,11 +1145,11 @@ struct ConnectionView: View {
                 .scaleEffect(0.85)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .mangoxFont(.bodyBold)
+                    .foregroundStyle(AppColor.fg0)
                     .lineLimit(1)
                 Text("Connecting…")
-                    .font(.system(size: 11))
+                    .mangoxFont(.label)
                     .foregroundStyle(accentYellow.opacity(0.85))
             }
             Spacer()
@@ -1145,34 +1167,35 @@ struct ConnectionView: View {
         } label: {
             HStack(spacing: 12) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous)
                         .fill(accentBlue.opacity(0.08))
                         .frame(width: 40, height: 40)
                     Image(systemName: "wifi")
-                        .font(.system(size: 15, weight: .semibold))
+                        .mangoxFont(.callout)
+                        .fontWeight(.semibold)
                         .foregroundStyle(accentBlue.opacity(0.85))
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(trainer.name)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .mangoxFont(.bodyBold)
+                        .foregroundStyle(AppColor.fg0)
                         .lineLimit(1)
                     Text("\(trainer.ipAddress) · \(trainer.port)")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.25))
+                        .mangoxFont(.label)
+                        .foregroundStyle(AppColor.fg3)
                 }
 
                 Spacer()
 
                 Text("Connect")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(connectDisabled ? 0.25 : 0.5))
+                    .mangoxFont(.caption)
+                    .foregroundStyle(connectDisabled ? AppColor.fg4 : AppColor.fg2)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.05))
+                    .background(AppColor.hair)
                     .clipShape(Capsule())
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
+                    .overlay(Capsule().strokeBorder(AppColor.hair2))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -1191,15 +1214,16 @@ struct ConnectionView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.shield.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(accentSuccess.opacity(0.6))
+                    .mangoxFont(.micro)
+                    .foregroundStyle(accentSuccess.opacity(0.78))
                 Text("CONNECTED")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(accentSuccess.opacity(0.5))
+                    .mangoxFont(.micro)
+                    .fontWeight(.bold)
+                    .foregroundStyle(accentSuccess.opacity(0.72))
                     .tracking(1.5)
                 Spacer()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, MangoxSpacing.page)
             .padding(.top, 14)
             .padding(.bottom, 8)
 
@@ -1209,7 +1233,7 @@ struct ConnectionView: View {
 
                 if device.id != devices.last?.id {
                     Rectangle()
-                        .fill(Color.white.opacity(0.03))
+                        .fill(AppColor.hair2)
                         .frame(height: 1)
                         .padding(.leading, 62)
                         .padding(.trailing, 12)
@@ -1240,30 +1264,32 @@ struct ConnectionView: View {
 
         return HStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(accentSuccess.opacity(0.1))
+                RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous)
+                    .fill(accentSuccess.opacity(0.12))
                     .frame(width: 40, height: 40)
 
                 Image(systemName: icon)
-                    .font(.system(size: 15, weight: .semibold))
+                    .mangoxFont(.callout)
+                    .fontWeight(.semibold)
                     .foregroundStyle(accentSuccess)
             }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(device.name)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .mangoxFont(.body)
+                    .fontWeight(.medium)
+                    .foregroundStyle(AppColor.fg1)
                     .lineLimit(1)
 
                 Text(typeLabel)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.25))
+                    .mangoxFont(.micro)
+                    .foregroundStyle(AppColor.fg3)
             }
 
             Spacer()
 
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 18))
+                .mangoxFont(.callout)
                 .foregroundStyle(accentSuccess)
         }
         .padding(.horizontal, 4)
@@ -1275,14 +1301,14 @@ struct ConnectionView: View {
     private var scanningFooter: some View {
         HStack(spacing: 8) {
             ProgressView()
-                .tint(accentSuccess.opacity(0.6))
+                .tint(accentSuccess.opacity(0.78))
                 .scaleEffect(0.65)
             Text("Scanning for more devices…")
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.3))
+                .mangoxFont(.label)
+                .foregroundStyle(AppColor.fg3)
             Spacer()
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, MangoxSpacing.page)
         .padding(.vertical, 12)
     }
 
@@ -1299,18 +1325,22 @@ struct ConnectionView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .mangoxFont(.micro)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(AppColor.fg2)
                 Text("Scan for more devices")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .mangoxFont(.body)
+                    .fontWeight(.medium)
+                    .foregroundStyle(AppColor.fg2)
                 Spacer()
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.2))
+                    .mangoxFont(.micro)
+                    .fontWeight(.medium)
+                    .foregroundStyle(AppColor.fg3)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .mangoxSurface(.flatSubtle, shape: .rounded(MangoxRadius.overlay.rawValue))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1323,14 +1353,14 @@ struct ConnectionView: View {
             if bleService.isScanningForDevices {
                 HStack(spacing: 10) {
                     ForEach(0..<3) { i in
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.white.opacity(0.04))
+                        RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue)
+                            .fill(AppColor.hair)
                             .frame(height: 50)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8)
+                                RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue)
                                     .fill(
                                         LinearGradient(
-                                            colors: [.clear, Color.white.opacity(0.03), .clear],
+                                            colors: [.clear, AppColor.hair2, .clear],
                                             startPoint: .leading,
                                             endPoint: .trailing
                                         )
@@ -1354,27 +1384,28 @@ struct ConnectionView: View {
                 .padding(.top, 16)
 
                 Text("Looking for devices…")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .mangoxFont(.body)
+                    .foregroundStyle(AppColor.fg3)
                     .padding(.bottom, 16)
             } else {
                 VStack(spacing: 8) {
                     Image(systemName: "sensor.tag.radiowaves.forward")
-                        .font(.system(size: 28))
-                        .foregroundStyle(.white.opacity(0.12))
+                        .font(MangoxFont.title.value)
+                        .foregroundStyle(AppColor.fg3)
                         .padding(.top, 12)
                     Text("No devices found")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .mangoxFont(.body)
+                        .fontWeight(.medium)
+                        .foregroundStyle(AppColor.fg2)
                     Text("Tap scan to discover nearby BLE devices")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.2))
+                        .mangoxFont(.label)
+                        .foregroundStyle(AppColor.fg3)
                     #if targetEnvironment(simulator)
                         Text(
                             "Bluetooth doesn’t discover trainers or sensors in the Simulator — use a physical iPhone."
                         )
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.28))
+                        .mangoxFont(.label)
+                        .foregroundStyle(AppColor.fg3)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 8)
                     #endif
@@ -1387,9 +1418,9 @@ struct ConnectionView: View {
 
     private var sectionDivider: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.05))
+            .fill(AppColor.hair)
             .frame(height: 1)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, MangoxSpacing.page)
     }
 
     private func deviceSection(
@@ -1398,18 +1429,19 @@ struct ConnectionView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .mangoxFont(.micro)
+                    .foregroundStyle(AppColor.fg3)
                 Text(title.uppercased())
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .mangoxFont(.micro)
+                    .fontWeight(.bold)
+                    .foregroundStyle(AppColor.fg3)
                     .tracking(1.5)
                 Spacer()
                 Text("\(devices.count)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.2))
+                    .font(ConnectionFontToken.mono(size: 11, weight: .semibold))
+                    .foregroundStyle(AppColor.fg3)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, MangoxSpacing.page)
             .padding(.top, 14)
             .padding(.bottom, 8)
 
@@ -1419,7 +1451,7 @@ struct ConnectionView: View {
 
                 if device.id != devices.last?.id {
                     Rectangle()
-                        .fill(Color.white.opacity(0.03))
+                        .fill(AppColor.hair2)
                         .frame(height: 1)
                         .padding(.leading, 62)
                         .padding(.trailing, 12)
@@ -1454,7 +1486,7 @@ struct ConnectionView: View {
         }()
         let rowColor =
             isThisConnected
-            ? accentSuccess : (isThisConnecting ? accentYellow : Color.white.opacity(0.5))
+            ? accentSuccess : (isThisConnecting ? accentYellow : AppColor.fg2)
         let icon: String = {
             switch type {
             case .heartRateMonitor: return "heart.fill"
@@ -1474,19 +1506,21 @@ struct ConnectionView: View {
         } label: {
             HStack(spacing: 12) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(rowColor.opacity(0.1))
+                    RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous)
+                        .fill(rowColor.opacity(isThisConnected || isThisConnecting ? 0.12 : 0.08))
                         .frame(width: 40, height: 40)
 
                     Image(systemName: icon)
-                        .font(.system(size: 15, weight: .semibold))
+                        .mangoxFont(.callout)
+                        .fontWeight(.semibold)
                         .foregroundStyle(rowColor)
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(device.name)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .mangoxFont(.body)
+                        .fontWeight(.medium)
+                        .foregroundStyle(AppColor.fg1)
                         .lineLimit(1)
 
                     HStack(spacing: 8) {
@@ -1496,7 +1530,7 @@ struct ConnectionView: View {
                                 RoundedRectangle(cornerRadius: 1)
                                     .fill(
                                         bar < signalBars(rssi: device.rssi)
-                                            ? rowColor : Color.white.opacity(0.1)
+                                            ? rowColor : AppColor.hair
                                     )
                                     .frame(width: 3, height: CGFloat(4 + bar * 3))
                             }
@@ -1504,8 +1538,8 @@ struct ConnectionView: View {
                         .frame(height: 13, alignment: .bottom)
 
                         Text("\(device.rssi) dBm")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.25))
+                            .font(ConnectionFontToken.mono(size: 10))
+                            .foregroundStyle(AppColor.fg3)
                     }
                 }
 
@@ -1513,7 +1547,7 @@ struct ConnectionView: View {
 
                 if isThisConnected {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 18))
+                        .mangoxFont(.callout)
                         .foregroundStyle(accentSuccess)
                 } else if isThisConnecting {
                     ProgressView()
@@ -1521,13 +1555,12 @@ struct ConnectionView: View {
                         .scaleEffect(0.8)
                 } else {
                     Text("Connect")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .mangoxFont(.label)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(AppColor.fg2)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.05))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
+                        .mangoxSurface(.flatSubtle, shape: .capsule)
                 }
             }
             .padding(.horizontal, 4)
@@ -1552,8 +1585,8 @@ struct ConnectionView: View {
                 Text(
                     "Import a Zwift .zwo file or pick a saved workout for a structured indoor session with ERG targets."
                 )
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.38))
+                .mangoxFont(.caption)
+                .foregroundStyle(AppColor.fg2)
                 .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 18)
@@ -1565,7 +1598,7 @@ struct ConnectionView: View {
                     ForEach(customWorkoutTemplates, id: \.id) { template in
                         customWorkoutRow(template)
                         if template.id != customWorkoutTemplates.last?.id {
-                            Divider().background(Color.white.opacity(0.06))
+                            Divider().background(AppColor.hair)
                         }
                     }
                 }
@@ -1578,15 +1611,29 @@ struct ConnectionView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.up.doc.fill")
-                        .font(.system(size: 13))
+                        .mangoxFont(.body)
                         .foregroundStyle(accentMango)
                     Text("Import .zwo file")
-                        .font(.system(size: 13, weight: .semibold))
+                        .mangoxFont(.body)
+                        .fontWeight(.semibold)
                         .foregroundStyle(accentMango)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
                 .background(accentMango.opacity(0.08))
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: MangoxRadius.button.rawValue,
+                        style: .continuous
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(
+                        cornerRadius: MangoxRadius.button.rawValue,
+                        style: .continuous
+                    )
+                    .strokeBorder(accentMango.opacity(0.18), lineWidth: 1)
+                )
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 14)
@@ -1594,14 +1641,19 @@ struct ConnectionView: View {
         }
         .background(
             ZStack {
-                Color.white.opacity(0.02)
+                AppColor.bg2
+                LinearGradient(
+                    colors: [accentMango.opacity(0.05), .clear],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
                 GridPatternView().opacity(0.25)
             }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous)
+                .strokeBorder(AppColor.hair2, lineWidth: 1)
         )
     }
 
@@ -1613,32 +1665,34 @@ struct ConnectionView: View {
             } label: {
                 HStack(spacing: 12) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous)
                             .fill(
-                                (selected ? accentMango : Color.white.opacity(0.5)).opacity(0.12)
+                                selected ? accentMango.opacity(0.14) : AppColor.hair
                             )
                             .frame(width: 40, height: 40)
                         Image(systemName: "figure.indoor.cycle")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(selected ? accentMango : Color.white.opacity(0.55))
+                            .mangoxFont(.callout)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(selected ? accentMango : AppColor.fg2)
                     }
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text(template.name)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.9))
+                            .mangoxFont(.body)
+                            .fontWeight(.medium)
+                            .foregroundStyle(AppColor.fg1)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                         Text("\(template.intervals.count) steps")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.28))
+                            .font(ConnectionFontToken.mono(size: 11))
+                            .foregroundStyle(AppColor.fg3)
                     }
 
                     Spacer(minLength: 0)
 
                     if selected {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 18))
+                            .mangoxFont(.callout)
                             .foregroundStyle(accentMango)
                     }
                 }
@@ -1652,9 +1706,11 @@ struct ConnectionView: View {
                 deleteCustomTemplate(template)
             } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.35))
-                    .frame(width: 36, height: 36)
+                    .mangoxFont(.body)
+                    .fontWeight(.medium)
+                    .foregroundStyle(AppColor.fg2)
+                    .frame(width: 44, height: 44)
+                    .mangoxSurface(.flatSubtle, shape: .circle)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -1683,11 +1739,11 @@ struct ConnectionView: View {
                 emptyRouteCard
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous)
                 .strokeBorder(
-                    routeDropTargeted ? accentSuccess.opacity(0.6) : Color.white.opacity(0.07),
+                    routeDropTargeted ? accentSuccess.opacity(0.6) : AppColor.hair2,
                     lineWidth: routeDropTargeted ? 2 : 1
                 )
         )
@@ -1700,70 +1756,61 @@ struct ConnectionView: View {
             showRouteImporter = true
         } label: {
             VStack(spacing: 16) {
-                // Route illustration
                 ZStack {
-                    // Dashed path visual
                     RouteIllustration()
                         .frame(height: 80)
                         .padding(.horizontal, 30)
 
-                    // Map pin
-                    VStack(spacing: 0) {
-                        Image(systemName: "map.fill")
-                            .font(.system(size: 28, weight: .medium))
-                            .foregroundStyle(accentBlue)
-                            .frame(width: 56, height: 56)
-                            .background(accentBlue.opacity(0.12))
-                            .clipShape(Circle())
-                            .overlay(Circle().strokeBorder(accentBlue.opacity(0.2), lineWidth: 1))
-                    }
+                    Image(systemName: "map.fill")
+                        .font(MangoxFont.title.value)
+                        .foregroundStyle(accentBlue)
+                        .frame(width: 56, height: 56)
+                        .mangoxSurface(.flatSubtle, shape: .circle)
                 }
                 .padding(.top, 24)
 
                 VStack(spacing: 6) {
                     Text("Add a Route")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .mangoxFont(.title)
+                        .foregroundStyle(AppColor.fg0)
 
                     Text(
                         "Import a GPX file to track your position\nduring the ride and unlock route-based GPX export"
                     )
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .mangoxFont(.body)
+                    .foregroundStyle(AppColor.fg2)
                     .multilineTextAlignment(.center)
                     .lineSpacing(2)
                 }
 
-                // Upload area
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.up.doc.fill")
-                        .font(.system(size: 13))
+                        .mangoxFont(.callout)
                         .foregroundStyle(accentBlue)
                     Text("Choose GPX File")
-                        .font(.system(size: 13, weight: .semibold))
+                        .mangoxFont(.callout)
+                        .fontWeight(.semibold)
                         .foregroundStyle(accentBlue)
                 }
                 .padding(.horizontal, MangoxSpacing.page)
                 .padding(.vertical, 10)
-                .background(accentBlue.opacity(0.1))
+                .background(AppColor.wash(for: accentBlue))
                 .clipShape(Capsule())
                 .overlay(Capsule().strokeBorder(accentBlue.opacity(0.25), lineWidth: 1))
                 .padding(.bottom, 6)
 
                 Text("OPTIONAL")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.18))
+                    .mangoxFont(.micro)
+                    .foregroundStyle(AppColor.fg4)
                     .tracking(2)
                     .padding(.bottom, 20)
             }
             .frame(maxWidth: .infinity)
             .background(
                 ZStack {
-                    Color.white.opacity(0.02)
-
-                    // Subtle grid pattern
+                    AppColor.bg2
                     GridPatternView()
-                        .opacity(0.3)
+                        .opacity(0.22)
                 }
             )
         }
@@ -1788,36 +1835,34 @@ struct ConnectionView: View {
                 .frame(height: 160)
                 .allowsHitTesting(false)
                 .overlay(alignment: .topTrailing) {
-                    // Route stats overlay
                     VStack(alignment: .trailing, spacing: 4) {
                         Text(String(format: "%.1f km", routeService.totalDistance / 1000))
-                            .font(.system(size: 13, weight: .bold, design: .monospaced))
-                            .foregroundStyle(.white)
+                            .font(MangoxFont.bodyBold.value)
+                            .foregroundStyle(AppColor.fg0)
                         Text("\(routeService.points.count) points")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.7))
+                            .mangoxFont(.label)
+                            .foregroundStyle(AppColor.fg2)
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 10))
+                    .mangoxSurface(.mapOverlay, shape: .rounded(MangoxRadius.overlay.rawValue))
                     .padding(10)
                 }
             }
 
-            // Route info bar
             HStack(spacing: 12) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 16))
+                    .mangoxFont(.callout)
                     .foregroundStyle(accentSuccess)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(routeService.routeName ?? "Route loaded")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .mangoxFont(.bodyBold)
+                        .foregroundStyle(AppColor.fg0)
                         .lineLimit(1)
                     Text(routeSubtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .mangoxFont(.label)
+                        .foregroundStyle(AppColor.fg3)
                 }
 
                 Spacer()
@@ -1835,15 +1880,16 @@ struct ConnectionView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 18))
-                        .foregroundStyle(.white.opacity(0.4))
-                        .frame(width: 36, height: 36)
+                        .mangoxFont(.callout)
+                        .foregroundStyle(AppColor.fg2)
+                        .frame(width: 44, height: 44)
+                        .mangoxSurface(.flatSubtle, shape: .circle)
                         .contentShape(Rectangle())
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
-            .background(Color.white.opacity(AppOpacity.pillBg))
+            .background(AppColor.bg2)
         }
     }
 
@@ -1877,11 +1923,13 @@ struct ConnectionView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 7) {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .mangoxFont(.micro)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(AppColor.fg3)
                     Text("QUICK SETTINGS")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .mangoxFont(.micro)
+                        .fontWeight(.bold)
+                        .foregroundStyle(AppColor.fg3)
                         .tracking(2)
                     Spacer()
                 }
@@ -1899,17 +1947,18 @@ struct ConnectionView: View {
 
                 // Ride display toggles
                 Rectangle()
-                    .fill(Color.white.opacity(0.06))
+                    .fill(AppColor.hair)
                     .frame(height: 1)
 
                 HStack {
                     HStack(spacing: 6) {
                         Image(systemName: "flag.fill")
-                            .font(.system(size: 10))
+                            .mangoxFont(.micro)
                             .foregroundStyle(accentBlue.opacity(0.7))
                         Text("Show Laps")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.75))
+                            .mangoxFont(.body)
+                            .fontWeight(.medium)
+                            .foregroundStyle(AppColor.fg1)
                     }
                     Spacer()
                     Toggle(
@@ -1925,22 +1974,23 @@ struct ConnectionView: View {
 
                 // Ride goal
                 Rectangle()
-                    .fill(Color.white.opacity(0.06))
+                    .fill(AppColor.hair)
                     .frame(height: 1)
 
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 6) {
                         Image(systemName: "flag.checkered")
-                            .font(.system(size: 10))
+                            .mangoxFont(.micro)
                             .foregroundStyle(accentSuccess.opacity(0.7))
                         Text("RIDE GOAL")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .mangoxFont(.micro)
+                            .fontWeight(.bold)
+                            .foregroundStyle(AppColor.fg3)
                             .tracking(2)
                         Spacer()
                         if rideGoalDistance > 0 {
                             Text("\(Int(rideGoalDistance)) km")
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .font(ConnectionFontToken.mono(size: 12, weight: .semibold))
                                 .foregroundStyle(accentSuccess)
                         }
                     }
@@ -1957,12 +2007,7 @@ struct ConnectionView: View {
                 }
             }
             .padding(16)
-            .background(Color.white.opacity(AppOpacity.pillBg))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
-            )
+            .cardStyle(cornerRadius: MangoxRadius.sharp.rawValue)
             .sheet(isPresented: $showCustomDistanceSheet) {
                 customDistanceSheet
             }
@@ -1976,27 +2021,34 @@ struct ConnectionView: View {
         return NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Enter your target distance in kilometers.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .mangoxFont(.body)
+                    .foregroundStyle(AppColor.fg2)
 
                 TextField("km", text: $customDistanceDraft)
                     .keyboardType(.decimalPad)
                     .focused($isCustomDistanceFocused)
-                    .font(.system(size: 20, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white)
+                    .font(ConnectionFontToken.mono(size: 20, weight: .semibold))
+                    .foregroundStyle(AppColor.fg0)
                     .padding(12)
-                    .background(Color.white.opacity(0.06))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(AppColor.bg3)
+                    .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(
+                            cornerRadius: MangoxRadius.overlay.rawValue,
+                            style: .continuous
+                        )
+                        .strokeBorder(AppColor.hair, lineWidth: 1)
+                    )
 
                 Text("Range: \(Int(range.lowerBound))–\(Int(range.upperBound)) km")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.fg3)
 
                 Spacer(minLength: 0)
             }
             .padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Color(red: 0.05, green: 0.06, blue: 0.09))
+            .background(AppColor.bg2)
             .navigationTitle("Custom distance")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
@@ -2058,12 +2110,24 @@ struct ConnectionView: View {
             applyRideGoalDistance(km)
         } label: {
             Text(label)
-                .font(.system(size: 13, weight: isSelected ? .bold : .medium, design: .monospaced))
-                .foregroundStyle(isSelected ? .black : .white.opacity(0.7))
+                .font(
+                    ConnectionFontToken.mono(
+                        size: 13,
+                        weight: isSelected ? .bold : .medium
+                    )
+                )
+                .foregroundStyle(isSelected ? AppColor.bg : AppColor.fg1)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
-                .background(isSelected ? accentSuccess : Color.white.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(isSelected ? accentSuccess : AppColor.hair)
+                .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous))
+                .overlay(
+                    RoundedRectangle(
+                        cornerRadius: MangoxRadius.overlay.rawValue,
+                        style: .continuous
+                    )
+                    .strokeBorder(isSelected ? accentSuccess : AppColor.hair2, lineWidth: 1)
+                )
         }
         .buttonStyle(.plain)
     }
@@ -2078,13 +2142,25 @@ struct ConnectionView: View {
             showCustomDistanceSheet = true
         } label: {
             Text("Custom")
-                .font(.system(size: 13, weight: isSelected ? .bold : .medium, design: .monospaced))
-                .foregroundStyle(isSelected ? .black : .white.opacity(0.7))
+                .font(
+                    ConnectionFontToken.mono(
+                        size: 13,
+                        weight: isSelected ? .bold : .medium
+                    )
+                )
+                .foregroundStyle(isSelected ? AppColor.bg : AppColor.fg1)
                 .frame(minWidth: 68)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 8)
-                .background(isSelected ? accentSuccess : Color.white.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(isSelected ? accentSuccess : AppColor.hair)
+                .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous))
+                .overlay(
+                    RoundedRectangle(
+                        cornerRadius: MangoxRadius.overlay.rawValue,
+                        style: .continuous
+                    )
+                    .strokeBorder(isSelected ? accentSuccess : AppColor.hair2, lineWidth: 1)
+                )
         }
         .buttonStyle(.plain)
     }
@@ -2092,20 +2168,21 @@ struct ConnectionView: View {
     private func settingChip(label: String, value: String, color: Color) -> some View {
         VStack(spacing: 4) {
             Text(label)
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.white.opacity(0.3))
+                .mangoxFont(.micro)
+                .fontWeight(.bold)
+                .foregroundStyle(AppColor.fg3)
                 .tracking(1)
             Text(value)
-                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .font(ConnectionFontToken.mono(size: 14, weight: .bold))
                 .foregroundStyle(color)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)
-        .background(color.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(color.opacity(0.12), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous)
+                .strokeBorder(color.opacity(0.18), lineWidth: 1)
         )
     }
 
@@ -2122,21 +2199,22 @@ struct ConnectionView: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: outdoorSensorsOnly ? "checkmark.circle.fill" : "play.fill")
-                        .font(.system(size: 14))
+                        .mangoxFont(.bodyBold)
                     Text(primaryActionTitle)
-                        .font(.system(size: 16, weight: .bold))
+                        .font(MangoxFont.bodyBold.value)
+                        .fontWeight(.semibold)
                         .lineLimit(2)
                         .multilineTextAlignment(.center)
                 }
-                .foregroundStyle(canStartRide ? .black : .white.opacity(0.4))
+                .foregroundStyle(canStartRide ? AppColor.bg0 : AppColor.fg3)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
                 .background(
                     canStartRide
                         ? AnyShapeStyle(accentSuccess)
-                        : AnyShapeStyle(Color.white.opacity(0.06))
+                        : AnyShapeStyle(AppColor.hair)
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous))
                 .shadow(color: canStartRide ? accentSuccess.opacity(0.3) : .clear, radius: 12, y: 4)
             }
             .disabled(!canStartRide)
@@ -2146,8 +2224,8 @@ struct ConnectionView: View {
                     .fill(canStartRide ? accentSuccess : accentOrange)
                     .frame(width: 5, height: 5)
                 Text(primaryActionHint)
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.35))
+                    .mangoxFont(.body)
+                    .foregroundStyle(AppColor.fg3)
                     .multilineTextAlignment(.leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2162,7 +2240,7 @@ struct ConnectionView: View {
                     .fill(bg)
                     .overlay(
                         Rectangle()
-                            .fill(Color.white.opacity(0.04))
+                            .fill(AppColor.hair)
                             .frame(height: 1),
                         alignment: .top
                     )
@@ -2186,29 +2264,30 @@ struct ConnectionView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "figure.indoor.cycle")
-                    .font(.system(size: 12, weight: .semibold))
+                    .mangoxFont(.callout)
                     .foregroundStyle(accentMango)
                 Text("Guided workout selected")
-                    .font(.caption.weight(.bold))
+                    .mangoxFont(.caption)
+                    .fontWeight(.semibold)
                     .foregroundStyle(accentMango.opacity(0.9))
                     .tracking(0.8)
                 Spacer(minLength: 0)
                 Text("\(template.intervals.count) steps")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.45))
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.fg3)
             }
 
             Text(template.name)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.white)
+                .mangoxFont(.bodyBold)
+                .foregroundStyle(AppColor.fg0)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Color.white.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(AppColor.bg2)
+        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous)
                 .strokeBorder(accentMango.opacity(0.18), lineWidth: 1)
         )
     }
@@ -2222,34 +2301,30 @@ struct ConnectionView: View {
                     .fill(accentBlue.opacity(0.08))
                     .frame(width: 80, height: 80)
                 Image(systemName: "bluetooth")
-                    .font(.system(size: 36, weight: .light))
+                    .font(MangoxFont.title.value)
                     .foregroundStyle(accentBlue.opacity(0.6))
             }
             .padding(.top, 40)
 
             VStack(spacing: 8) {
                 Text("Bluetooth Required")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.8))
+                    .font(MangoxFont.title.value)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(AppColor.fg0)
                 Text(
                     outdoorSensorsOnly
                         ? "Enable Bluetooth in Settings to\nconnect heart rate and speed/cadence sensors."
                         : "Enable Bluetooth in Settings to\nconnect to your trainer and sensors."
                 )
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.35))
+                .mangoxFont(.caption)
+                .foregroundStyle(AppColor.fg3)
                 .multilineTextAlignment(.center)
                 .lineSpacing(2)
             }
             .padding(.bottom, 40)
         }
         .frame(maxWidth: .infinity)
-        .background(Color.white.opacity(AppOpacity.pillBg))
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
-        )
+        .cardStyle(cornerRadius: MangoxRadius.sharp.rawValue)
     }
 
     // MARK: - Helpers
@@ -2260,6 +2335,15 @@ struct ConnectionView: View {
         if rssi >= -80 { return 2 }
         if rssi >= -90 { return 1 }
         return 0
+    }
+
+    /// Small mango label above the nav title (matches Home / Stats tab hierarchy).
+    private var toolbarEyebrow: String {
+        if outdoorSensorsOnly { return "OUTDOOR" }
+        switch startMode {
+        case .ride: return "RIDE"
+        case .ftpTest: return "FTP"
+        }
     }
 
     private var screenTitle: String {
@@ -2367,16 +2451,17 @@ struct ConnectionView: View {
     #if DEBUG
         private var debugOverlay: some View {
             VStack(alignment: .leading, spacing: 4) {
-                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+                Rectangle().fill(AppColor.hair).frame(height: 1)
                 Text("DEBUG")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.25))
+                    .mangoxFont(.micro)
+                    .fontWeight(.bold)
+                    .foregroundStyle(AppColor.fg3)
                     .tracking(2)
                 Text(
                     "BT: \(String(describing: bleService.bluetoothState.rawValue))  Trainer: \(bleService.trainerConnectionState.label)  HR: \(bleService.hrConnectionState.label)  Devices: \(bleService.discoveredPeripherals.count)"
                 )
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.2))
+                .font(ConnectionFontToken.mono(size: 9))
+                .foregroundStyle(AppColor.fg3)
             }
         }
     #endif

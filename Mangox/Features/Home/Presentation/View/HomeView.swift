@@ -9,6 +9,7 @@ struct HomeView: View {
     @Binding var navigationPath: NavigationPath
     @Binding var selectedTab: Int
 
+    @Environment(\.launchOverlayVisible) private var launchOverlayVisible
     @Environment(StravaService.self) private var stravaService
     @State private var viewModel: HomeViewModel
 
@@ -103,7 +104,11 @@ struct HomeView: View {
         .task {
             await viewModel.refreshWhoopIfStale()
         }
-        .task(id: viewModel.trainingStatusRequestID) {
+        .task(id: "\(viewModel.trainingStatusRequestID)-\(launchOverlayVisible)") {
+            guard !launchOverlayVisible else { return }
+            // Defer the on-device coach badge until the home shell is already visible.
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
             await viewModel.generateAITrainingInsight()
         }
     }
@@ -128,15 +133,53 @@ struct HomeView: View {
         RiderIdentityDisplay.resolvedTitle(stravaDisplayName: stravaService.athleteDisplayName)
     }
 
-    private var minimalTopBar: some View {
-        HStack(spacing: 8) {
-            Text(homeHeaderTitle)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(textPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
+    private var homeGreetingName: String {
+        let token = homeHeaderTitle
+            .split(whereSeparator: \.isWhitespace)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .punctuationCharacters)
+        return token?.isEmpty == false ? token! : homeHeaderTitle
+    }
 
-            Spacer(minLength: 8)
+    private var homeGreetingLine: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let salutation: String
+        switch hour {
+        case 5..<12:
+            salutation = "Morning"
+        case 12..<17:
+            salutation = "Afternoon"
+        default:
+            salutation = "Evening"
+        }
+        return "\(salutation), \(homeGreetingName)"
+    }
+
+    private var minimalTopBar: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(homeGreetingLine)
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.mango)
+
+                Text("Mangox")
+                    .font(MangoxFont.title.value)
+                    .foregroundStyle(textPrimary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 12)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(Date(), format: .dateTime.month(.abbreviated).day())
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.fg2)
+                Text(Date(), format: .dateTime.weekday(.wide))
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.fg3)
+                    .lineLimit(1)
+            }
         }
     }
 
@@ -144,103 +187,146 @@ struct HomeView: View {
 
     private var trainingStatusCard: some View {
         let weeklyTSS = viewModel.weeklyTSS
-        let chronicLoad = viewModel.chronicLoad > 0 ? viewModel.chronicLoad : 300
+        let chronicLoad = viewModel.chronicLoad > 0 ? viewModel.chronicLoad : 0
         let acwr = viewModel.acwr
         let form = formData(acwr: acwr)
-        let acwrText = chronicLoad > 0 && !workouts.isEmpty ? String(format: "%.1f", acwr) : "--"
+        let acwrText = chronicLoad > 0 && !workouts.isEmpty ? String(format: "%.1f", acwr) : "—"
+        let weekBars = viewModel.weekBars
+        let maxTSS = max(weekBars.map(\.tss).max() ?? 1, 1)
 
-        return VStack(alignment: .leading, spacing: 14) {
-            // Header with form badge
-            HStack(spacing: 10) {
-                MangoxSectionLabel(title: "Training Status", horizontalPadding: 0)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("TRAINING SNAPSHOT")
+                        .mangoxFont(.label)
+                        .foregroundStyle(AppColor.mango)
+                        .tracking(1.4)
 
-                Spacer()
-
-                // ACWR tint + on-device status words (falls back to ACWR band label)
-                HStack(spacing: 5) {
-                    Image(systemName: form.icon)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(form.color)
                     Text(trainingStatusBadgeText(form: form))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(form.color)
+                        .font(MangoxFont.bodyBold.value)
+                        .foregroundStyle(textPrimary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.75)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(form.color.opacity(0.12))
-                .clipShape(Capsule())
-            }
 
-            // 4-metric row
-            HStack(spacing: 0) {
-                trainingMetric(
-                    value: "\(Int(weeklyTSS))",
-                    label: "WEEK TSS",
-                    color: mango
+                Spacer(minLength: 8)
+
+                MangoxStatusPill(
+                    text: form.description,
+                    color: form.color,
+                    icon: form.icon
                 )
-                metricDivider
-                trainingMetric(
-                    value: "\(viewModel.weekRides)",
-                    label: "RIDES",
+            }
+            .padding(16)
+
+            Rectangle()
+                .fill(AppColor.hair)
+                .frame(height: 1)
+
+            HStack(spacing: 0) {
+                snapshotMetricCell(
+                    label: "CTL · FIT",
+                    value: chronicLoad > 0 ? "\(Int(chronicLoad.rounded()))" : "—",
+                    detail: chronicLoad > 0 ? "\(viewModel.weekRides) rides" : "No load yet",
                     color: AppColor.blue
                 )
                 metricDivider
-                trainingMetric(
-                    value: "\(viewModel.ftp)",
-                    label: "FTP",
-                    color: AppColor.orange
+                snapshotMetricCell(
+                    label: "WEEK · TSS",
+                    value: "\(Int(weeklyTSS.rounded()))",
+                    detail: "FTP \(viewModel.ftp)W",
+                    color: AppColor.mango
                 )
                 metricDivider
-                trainingMetric(
+                snapshotMetricCell(
+                    label: "ACWR · LOAD",
                     value: acwrText,
-                    label: "ACWR",
+                    detail: form.description.uppercased(),
                     color: form.color
                 )
             }
 
-            // Weekly micro-bars
-            let weekBars = viewModel.weekBars
-            let maxTSS = weekBars.map(\.tss).max() ?? 1
-            HStack(spacing: 4) {
-                ForEach(weekBars) { dayData in
-                    VStack(spacing: 4) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(dayData.tss == 0 ? Color.white.opacity(0.06) : weekBarColor(tss: dayData.tss))
-                            .frame(
-                                height: maxTSS > 0 && dayData.tss > 0
-                                    ? max(3, CGFloat(dayData.tss / maxTSS) * 24)
-                                    : 3)
-                        Text(String(dayData.day.prefix(1)))
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
+            Rectangle()
+                .fill(AppColor.hair)
+                .frame(height: 1)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("LOAD · 7D")
+                        .mangoxFont(.label)
+                        .foregroundStyle(AppColor.fg3)
+                        .tracking(1.2)
+                    Spacer()
+                    Text("\(viewModel.weekRides) SESSIONS")
+                        .mangoxFont(.caption)
+                        .foregroundStyle(AppColor.fg2)
+                }
+
+                HStack(spacing: 4) {
+                    ForEach(weekBars) { dayData in
+                        VStack(spacing: 6) {
+                            Rectangle()
+                                .fill(dayData.tss == 0 ? AppColor.bg4 : weekBarColor(tss: dayData.tss))
+                                .frame(
+                                    height: dayData.tss > 0
+                                        ? max(4, CGFloat(dayData.tss / maxTSS) * 28)
+                                        : 4
+                                )
+
+                            Text(String(dayData.day.prefix(1)))
+                                .mangoxFont(.micro)
+                                .foregroundStyle(AppColor.fg3)
+                        }
+                        .frame(maxWidth: .infinity)
                     }
-                    .frame(maxWidth: .infinity)
+                }
+                .frame(height: 42, alignment: .bottom)
+
+                if viewModel.whoopConnected, viewModel.whoopConfigured {
+                    whoopTrainingStrip
                 }
             }
-            .frame(height: 40, alignment: .bottom)
-
-            if viewModel.whoopConnected, viewModel.whoopConfigured {
-                whoopTrainingStrip
-            }
+            .padding(16)
         }
-        .padding(16)
-        .cardStyle(cornerRadius: 14)
+        .background(AppColor.bg2)
+        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+    }
+
+    private func snapshotMetricCell(label: String, value: String, detail: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .mangoxFont(.label)
+                .foregroundStyle(color.opacity(0.92))
+                .tracking(1.2)
+
+            Text(value)
+                .font(MangoxFont.value.value)
+                .foregroundStyle(textPrimary)
+                .monospacedDigit()
+                .minimumScaleFactor(0.75)
+                .lineLimit(1)
+
+            Text(detail)
+                .mangoxFont(.caption)
+                .foregroundStyle(AppColor.fg3)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
     }
 
     private var whoopTrainingStrip: some View {
         VStack(alignment: .leading, spacing: 0) {
             Divider()
-                .background(Color.white.opacity(0.08))
+                .background(AppColor.hair)
             HStack(alignment: .center, spacing: 6) {
                 Image(systemName: "waveform.path.ecg")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(AppColor.whoop)
                 Text("WHOOP")
-                    .font(.system(size: 9, weight: .heavy))
+                    .mangoxFont(.label)
                     .foregroundStyle(textTertiary)
-                    .tracking(0.6)
+                    .tracking(1.0)
 
                 if let pct = viewModel.whoopRecoveryScore {
                     Text(String(format: "%.0f%%", pct))
@@ -276,7 +362,7 @@ struct HomeView: View {
 
                 if let last = viewModel.whoopLastRefreshAt {
                     Text(last.formatted(.relative(presentation: .named)))
-                        .font(.system(size: 9))
+                        .mangoxFont(.micro)
                         .foregroundStyle(textTertiary.opacity(0.55))
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
@@ -290,43 +376,52 @@ struct HomeView: View {
     private var nextWorkoutFromPlanCard: some View {
         Group {
             if let nw = viewModel.nextScheduledWorkout(allProgress: allProgress) {
+                let plannedTSS = Int(nw.day.estimatedPlannedTSS(ftp: PowerZone.ftp).rounded())
                 Button {
                     navigationPath.append(
                         AppRoute.connectionForPlan(planID: nw.planID, dayID: nw.day.id))
                 } label: {
-                    HStack(spacing: 14) {
-                        ZStack {
-                            Circle()
-                                .fill(mango.opacity(0.15))
-                                .frame(width: 46, height: 46)
-                            Image(systemName: "calendar.badge.clock")
-                                .font(.title3)
-                                .foregroundStyle(mango)
-                        }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("NEXT WORKOUT")
-                                .font(.system(size: 10, weight: .heavy))
-                                .foregroundStyle(textTertiary)
-                                .tracking(0.8)
-                            Text(nw.day.title)
-                                .font(.headline)
-                                .foregroundStyle(textPrimary)
-                                .multilineTextAlignment(.leading)
-                            Text(nw.plan.name)
-                                .font(.caption)
-                                .foregroundStyle(textSecondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Text("TODAY · \(nw.plan.name.uppercased())")
+                                .mangoxFont(.label)
+                                .foregroundStyle(AppColor.mango)
+                                .tracking(1.4)
                                 .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                                .layoutPriority(1)
+
+                            Spacer(minLength: 6)
+
+                            Text(plannedMetaLine(day: nw.day, plannedTSS: plannedTSS))
+                                .mangoxFont(.caption)
+                                .foregroundStyle(AppColor.fg2)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
                         }
 
-                        Spacer(minLength: 8)
+                        HStack(spacing: 8) {
+                            Text(nw.day.title)
+                                .mangoxFont(.bodyBold)
+                                .foregroundStyle(textPrimary)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.9)
+                                .multilineTextAlignment(.leading)
 
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(textTertiary)
+                            Spacer(minLength: 6)
+
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(AppColor.fg2)
+                        }
+
+                        workoutProfile(for: nw.day, rowHeight: 14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(18)
-                    .cardStyle(cornerRadius: 14)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(AppColor.bg2)
+                    .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
                 }
                 .buttonStyle(MangoxPressStyle())
                 .accessibilityLabel("Next workout: \(nw.day.title)")
@@ -334,25 +429,59 @@ struct HomeView: View {
         }
     }
 
-    private func trainingMetric(value: String, label: String, color: Color) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.system(size: 20, weight: .bold, design: .monospaced))
-                .foregroundStyle(color)
-                .minimumScaleFactor(0.7)
-                .lineLimit(1)
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(textTertiary)
-                .tracking(1.0)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
     private var metricDivider: some View {
         Rectangle()
-            .fill(Color.white.opacity(AppOpacity.divider))
-            .frame(width: 1, height: 28)
+            .fill(AppColor.hair)
+            .frame(width: 1)
+    }
+
+    private func plannedMetaLine(day: PlanDay, plannedTSS: Int) -> String {
+        var parts: [String] = []
+        if day.durationMinutes > 0 { parts.append("\(day.durationMinutes) MIN") }
+        if plannedTSS > 0 { parts.append("\(plannedTSS) TSS") }
+        if day.dayType != .rest { parts.append(day.zone.label.uppercased()) }
+        return parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private func workoutProfile(for day: PlanDay, compact: Bool = false, rowHeight overrideHeight: CGFloat? = nil) -> some View {
+        let rowHeight: CGFloat = overrideHeight ?? (compact ? 26 : 34)
+        let barScale = rowHeight / 34
+        HStack(alignment: .bottom, spacing: compact ? 2 : 3) {
+            if day.hasStructuredIntervals {
+                ForEach(Array(day.intervals.prefix(7).enumerated()), id: \.offset) { _, segment in
+                    Rectangle()
+                        .fill(segment.zone.color)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: profileBarHeight(for: segment.zone) * barScale)
+                }
+            } else {
+                ForEach(0..<5, id: \.self) { _ in
+                    Rectangle()
+                        .fill(day.zone.color.opacity(day.dayType == .rest ? 0.35 : 0.9))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: profileBarHeight(for: day.zone) * barScale)
+                }
+            }
+        }
+        .frame(height: rowHeight, alignment: .bottom)
+    }
+
+    private func profileBarHeight(for zone: TrainingZoneTarget) -> CGFloat {
+        switch zone {
+        case .rest, .none:
+            return 10
+        case .z1, .z1z2:
+            return 14
+        case .z2, .z2z3:
+            return 20
+        case .z3, .z3z4, .mixed:
+            return 28
+        case .z4, .z4z5, .all:
+            return 34
+        case .z5, .z3z5:
+            return 38
+        }
     }
 
     private func formData(acwr: Double) -> (color: Color, icon: String, description: String) {
@@ -393,19 +522,14 @@ struct HomeView: View {
             navigationPath.append(AppRoute.ftpSetup)
         } label: {
             HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(AppColor.orange.opacity(0.15))
-                        .frame(width: 46, height: 46)
-
-                    Image(systemName: "bolt.heart.fill")
-                        .font(.title3)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("FTP BASELINE")
+                        .mangoxFont(.label)
                         .foregroundStyle(AppColor.orange)
-                }
+                        .tracking(1.4)
 
-                VStack(alignment: .leading, spacing: 4) {
                     Text(viewModel.hasSetFTP ? "Recalibrate FTP" : "Set Your FTP")
-                        .font(.headline)
+                        .font(MangoxFont.value.value)
                         .foregroundStyle(textPrimary)
 
                     Text(
@@ -413,26 +537,26 @@ struct HomeView: View {
                             ? "It's been over 6 weeks since your last baseline."
                             : "Required for accurate power zones"
                     )
-                    .font(.subheadline)
+                    .mangoxFont(.body)
                     .foregroundStyle(textSecondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
 
-                Text("20 min")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AppColor.orange)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .fill(AppColor.orange.opacity(0.15))
-                    )
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text("20 MIN")
+                        .mangoxFont(.caption)
+                        .foregroundStyle(AppColor.orange)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(AppColor.fg2)
+                }
             }
-            .padding(18)
-            .cardStyle(cornerRadius: 14)
+            .padding(16)
+            .background(AppColor.bg2)
+            .overlay(Rectangle().stroke(AppColor.orange.opacity(0.22), lineWidth: 1))
         }
         .buttonStyle(MangoxPressStyle())
     }
@@ -441,9 +565,11 @@ struct HomeView: View {
 
     private var recentRidesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Header
             HStack {
-                MangoxSectionLabel(title: "Recent Rides", horizontalPadding: 0)
+                Text("RECENT ACTIVITY")
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.mango)
+                    .tracking(1.4)
 
                 Spacer()
 
@@ -451,7 +577,7 @@ struct HomeView: View {
                     selectedTab = 1
                 } label: {
                     Text("See all")
-                        .font(.system(size: 13, weight: .medium))
+                        .mangoxFont(.caption)
                         .foregroundStyle(mango)
                 }
             }
@@ -476,9 +602,7 @@ struct HomeView: View {
                 .padding(.vertical, 30)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    HomeRecentRidesTableHeader()
-
-                    VStack(spacing: 8) {
+                    VStack(spacing: 6) {
                         ForEach(Array(workouts.prefix(5))) { workout in
                             Button {
                                 navigationPath.append(AppRoute.summary(workoutID: workout.id))

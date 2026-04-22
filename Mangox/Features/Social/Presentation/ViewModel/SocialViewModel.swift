@@ -273,15 +273,13 @@ final class SocialViewModel {
         let bgData: Data?
         let stickerData: Data?
 
-        // 2. Layered mode: separate background + sticker layers (encode in parallel off the main queue)
+        // 2. Layered mode: separate background + sticker layers (encode on the main actor; avoid `async let` here — Swift 6 can treat child tasks as non‑MainActor before the first `await`, which breaks UIImage encoding isolation).
         if opts.layeredShare {
             let bgImage = InstagramStoryCardRenderer.renderBackgroundOnly(
                 dominantZone: dominantZone, options: opts, backgroundImage: bgImg)
             let stickerImage = InstagramStoryCardRenderer.renderStickerLayer(fullCard: full)
-            async let bgEncoded = InstagramStoryShare.encodeBackgroundImageDataAsync(bgImage)
-            async let stickerEncoded = InstagramStoryShare.encodeStickerImageDataAsync(stickerImage)
-            bgData = await bgEncoded
-            stickerData = await stickerEncoded
+            bgData = await InstagramStoryShare.encodeBackgroundImageDataAsync(bgImage)
+            stickerData = await InstagramStoryShare.encodeStickerImageDataAsync(stickerImage)
         } else {
             bgData = nil
             stickerData = nil

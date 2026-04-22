@@ -2,11 +2,11 @@ import SwiftUI
 
 enum MangoxSpacing: CGFloat {
     case xs = 4
-    case sm = 8
-    case md = 12
-    case lg = 16
+    case sm = 6
+    case md = 10
+    case lg = 14
     case xl = 20
-    case xxl = 24
+    case xxl = 32
 
     static let page: CGFloat = MangoxSpacing.xl.rawValue
 }

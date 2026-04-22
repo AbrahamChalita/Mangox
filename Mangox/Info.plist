@@ -55,6 +55,10 @@
 	<string>https://mangox.app/privacy</string>
 	<key>MangoxTermsOfUseURL</key>
 	<string>https://mangox.app/terms</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>ManropeVariable.ttf</string>
+	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UISupportedInterfaceOrientations~iphone</key>

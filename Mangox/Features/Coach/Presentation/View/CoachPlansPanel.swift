@@ -68,10 +68,14 @@ struct CoachPlansPanel: View {
             }
         }
         .padding(.bottom, 16)
-        .fullScreenCover(item: $destructiveAction) { action in
-            destructiveActionCover(for: action)
-                .presentationBackground(.clear)
+        .overlay {
+            if let action = destructiveAction {
+                destructiveConfirmationOverlay(for: action)
+                    .zIndex(300)
+                    .transition(.opacity)
+            }
         }
+        .animation(.smooth, value: destructiveAction)
         .alert("Can't regenerate", isPresented: $showRegenerateInputsMissing) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -85,111 +89,66 @@ struct CoachPlansPanel: View {
 
     // MARK: - Destructive confirm
 
-    private func destructiveActionCover(for action: CoachPlansDestructiveAction) -> some View {
+    @ViewBuilder
+    private func destructiveConfirmationOverlay(for action: CoachPlansDestructiveAction) -> some View {
         switch action {
         case .deleteAIPlan(let id):
-            destructiveActionChrome(
+            MangoxConfirmOverlay(
                 title: "Delete this plan?",
                 message: "Permanently deletes the plan and its progress. This can't be undone.",
-                confirmTitle: "Delete plan",
-                confirmIsRed: true,
-                onConfirm: { deleteAIPlan(id: id) }
-            )
+                onDismiss: { destructiveAction = nil }
+            ) {
+                MangoxConfirmDualButtonRow(
+                    cancelTitle: "Cancel",
+                    confirmTitle: "Delete plan",
+                    trailingStyle: .destructive,
+                    onCancel: { destructiveAction = nil },
+                    onConfirm: {
+                        destructiveAction = nil
+                        deleteAIPlan(id: id)
+                    }
+                )
+            }
         case .resetAIProgress(let id):
-            destructiveActionChrome(
+            MangoxConfirmOverlay(
                 title: "Reset plan progress?",
                 message: "Clears completed and skipped workouts for this plan.",
-                confirmTitle: "Reset progress",
-                confirmIsRed: false,
-                onConfirm: { resetAIPlanProgress(planID: id) }
-            )
-        }
-    }
-
-    private func destructiveActionChrome(
-        title: String,
-        message: String,
-        confirmTitle: String,
-        confirmIsRed: Bool,
-        onConfirm: @escaping () -> Void
-    ) -> some View {
-        ZStack {
-            Color.black.opacity(0.52)
-                .ignoresSafeArea()
-                .onTapGesture { destructiveAction = nil }
-
-            VStack(alignment: .leading, spacing: 16) {
-                Text(title)
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
-                Text(message)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                HStack(spacing: 12) {
-                    Button {
+                onDismiss: { destructiveAction = nil }
+            ) {
+                MangoxConfirmDualButtonRow(
+                    cancelTitle: "Cancel",
+                    confirmTitle: "Reset progress",
+                    trailingStyle: .hero,
+                    onCancel: { destructiveAction = nil },
+                    onConfirm: {
                         destructiveAction = nil
-                    } label: {
-                        Text("Cancel")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
+                        resetAIPlanProgress(planID: id)
                     }
-                    .buttonStyle(.plain)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-                    Button {
-                        destructiveAction = nil
-                        onConfirm()
-                    } label: {
-                        Text(confirmTitle)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(confirmIsRed ? .white : AppColor.bg)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                    }
-                    .buttonStyle(.plain)
-                    .background(confirmIsRed ? AppColor.red.opacity(0.95) : AppColor.mango)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
+                )
             }
-            .padding(24)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(AppColor.bg)
-                    .shadow(color: .black.opacity(0.45), radius: 30, y: 8)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-            )
-            .padding(.horizontal, 24)
         }
     }
 
     // MARK: - Empty State
 
     private var plansEmptyState: some View {
-        VStack(spacing: 20) {
-            VStack(spacing: 10) {
-                Image(systemName: "map")
-                    .font(.system(size: 32, weight: .light))
-                    .foregroundStyle(.white.opacity(0.18))
+        VStack(alignment: .leading, spacing: MangoxSpacing.lg.rawValue) {
+            VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
+                Text("Plan library")
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.fg3)
+                    .tracking(1.4)
+                    .textCase(.uppercase)
 
                 Text("No plans yet")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .mangoxFont(.bodyBold)
+                    .foregroundStyle(AppColor.fg0)
 
                 Text("Ask your coach to build a structured training plan — tailored to your goals, target event, and weekly hours.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.3))
-                    .multilineTextAlignment(.center)
+                    .mangoxFont(.body)
+                    .foregroundStyle(AppColor.fg1)
                     .fixedSize(horizontal: false, vertical: true)
-                    .lineSpacing(2)
+                    .lineSpacing(3)
             }
 
             if let onOpenChat {
@@ -198,36 +157,47 @@ struct CoachPlansPanel: View {
                         Image(systemName: "sparkles")
                             .font(.system(size: 12, weight: .semibold))
                         Text("Build a plan")
-                            .font(.system(size: 14, weight: .semibold))
+                            .mangoxFont(.callout)
                     }
-                    .foregroundStyle(AppColor.bg)
-                    .padding(.horizontal, 20)
+                    .foregroundStyle(AppColor.bg0)
+                    .padding(.horizontal, MangoxSpacing.xl.rawValue)
                     .padding(.vertical, 11)
                     .background(AppColor.mango)
                     .clipShape(Capsule())
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(AppColor.mango.opacity(0.45), lineWidth: 1)
+                    )
                 }
                 .buttonStyle(MangoxPressStyle())
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 36)
-        .padding(.horizontal, 16)
-        .background(Color.white.opacity(0.03))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, MangoxSpacing.xl.rawValue)
+        .padding(.vertical, MangoxSpacing.xxl.rawValue)
+        .mangoxSurface(.flatSubtle, shape: .rounded(MangoxRadius.overlay.rawValue))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [AppColor.mango, AppColor.mango.opacity(0)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(height: 1)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     // MARK: - Section Header
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-            .tracking(1.0)
+            .mangoxFont(.label)
+            .foregroundStyle(AppColor.fg3)
+            .tracking(1.4)
     }
 
     // MARK: - AI Plan Card
@@ -242,8 +212,13 @@ struct CoachPlansPanel: View {
                 planCardGlyph(systemName: "figure.outdoor.cycle", color: AppColor.mango)
 
                 VStack(alignment: .leading, spacing: 4) {
+                    Text("TRAINING PLAN")
+                        .mangoxFont(.label)
+                        .foregroundStyle(AppColor.mango)
+                        .tracking(1.4)
+
                     Text(resolvedPlan.name)
-                        .font(.headline)
+                        .font(MangoxFont.value.value)
                         .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
                         .fixedSize(horizontal: false, vertical: true)
                         .lineLimit(2)
@@ -258,14 +233,14 @@ struct CoachPlansPanel: View {
                                     ? resolvedPlan.eventDate
                                     : (resolvedPlan.eventDate.isEmpty ? resolvedPlan.eventName : "\(resolvedPlan.eventName) · \(resolvedPlan.eventDate)")
                             )
-                            .font(.caption)
+                            .mangoxFont(.caption)
                             .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
                             .lineLimit(2)
                         }
                     }
 
                     Text("Updated \(originalAIPlan.generatedAt.formatted(date: .abbreviated, time: .omitted))")
-                        .font(.system(size: 11, weight: .medium))
+                        .mangoxFont(.caption)
                         .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
                 }
 
@@ -320,25 +295,25 @@ struct CoachPlansPanel: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Progress")
-                            .font(.system(size: 10, weight: .heavy))
-                            .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-                            .tracking(0.6)
+                            .mangoxFont(.label)
+                            .foregroundStyle(AppColor.fg3)
+                            .tracking(1.2)
                         Spacer()
                         Text("\(Int((pct * 100).rounded()))%")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .mangoxFont(.caption)
                             .foregroundStyle(AppColor.mango.opacity(0.9))
                     }
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(Color.white.opacity(0.07))
-                                .frame(height: 6)
-                            Capsule()
+                            Rectangle()
+                                .fill(AppColor.hair2)
+                                .frame(height: 3)
+                            Rectangle()
                                 .fill(AppColor.mango)
-                                .frame(width: max(6, geo.size.width * pct), height: 6)
+                                .frame(width: max(6, geo.size.width * pct), height: 3)
                         }
                     }
-                    .frame(height: 6)
+                    .frame(height: 3)
                 }
             }
 
@@ -348,7 +323,8 @@ struct CoachPlansPanel: View {
             } label: {
                 HStack(spacing: 8) {
                     Text((progress?.completedCount ?? 0) > 0 ? "Resume training" : "Open plan")
-                        .font(.system(size: 15, weight: .bold))
+                        .mangoxFont(.label)
+                        .tracking(1.2)
                     Image(systemName: "arrow.right")
                         .font(.system(size: 13, weight: .bold))
                 }
@@ -356,23 +332,25 @@ struct CoachPlansPanel: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 13)
                 .background(AppColor.mango)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(Rectangle().stroke(AppColor.mango.opacity(0.45), lineWidth: 1))
             }
             .buttonStyle(MangoxPressStyle())
         }
         .padding(16)
-        .cardStyle(cornerRadius: 14))
+        .background(AppColor.bg2)
+        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1)))
     }
 
     // MARK: - Card Helpers
 
     private func planCardGlyph(systemName: String, color: Color) -> some View {
         ZStack {
-            Circle()
-                .fill(color.opacity(0.15))
-                .frame(width: 46, height: 46)
+            Rectangle()
+                .fill(AppColor.bg1)
+                .frame(width: 42, height: 42)
+                .overlay(Rectangle().stroke(color.opacity(0.32), lineWidth: 1))
             Image(systemName: systemName)
-                .font(.title3)
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(color)
         }
         .accessibilityHidden(true)
@@ -382,15 +360,15 @@ struct CoachPlansPanel: View {
         HStack(spacing: 4) {
             Image(systemName: icon)
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                .foregroundStyle(AppColor.fg3)
             Text(text)
-                .font(.system(size: 11, weight: .medium))
+                .mangoxFont(.caption)
                 .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color.white.opacity(AppOpacity.pillBg))
-        .clipShape(Capsule())
+        .background(AppColor.bg1)
+        .overlay(Rectangle().stroke(AppColor.hair, lineWidth: 1))
     }
 
     // MARK: - Data Actions

@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 @main
 struct MangoxApp: App {
@@ -15,6 +18,7 @@ struct MangoxApp: App {
         if let apiKey = Bundle.main.object(forInfoDictionaryKey: "RevenueCatAPIKey") as? String {
             PurchasesManager.shared.configure(apiKey: apiKey)
         }
+        configureGlobalAppearance()
     }
 
     var body: some Scene {
@@ -55,12 +59,42 @@ struct MangoxApp: App {
                 LaunchScreenView(isVisible: showLaunch)
             }
             .task {
+                #if DEBUG && targetEnvironment(simulator)
+                SimulatorDemoDataSeeder.runIfNeeded(modelContext: PersistenceContainer.shared.mainContext)
+                #endif
                 di.aiService.whoopDataSource = di.whoopService
                 try? await Task.sleep(for: .milliseconds(900))
                 showLaunch = false
             }
         }
         .modelContainer(PersistenceContainer.shared)
+    }
+}
+
+private extension MangoxApp {
+    func configureGlobalAppearance() {
+        #if canImport(UIKit)
+        let tabAppearance = UITabBarAppearance()
+        tabAppearance.configureWithOpaqueBackground()
+        tabAppearance.backgroundColor = UIColor(AppColor.bg0)
+        tabAppearance.shadowColor = UIColor(AppColor.hair2)
+
+        let selectedColor = UIColor(AppColor.mango)
+        let unselectedColor = UIColor(AppColor.fg3)
+
+        tabAppearance.stackedLayoutAppearance.selected.iconColor = selectedColor
+        tabAppearance.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: selectedColor]
+        tabAppearance.stackedLayoutAppearance.normal.iconColor = unselectedColor
+        tabAppearance.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: unselectedColor]
+
+        tabAppearance.inlineLayoutAppearance = tabAppearance.stackedLayoutAppearance
+        tabAppearance.compactInlineLayoutAppearance = tabAppearance.stackedLayoutAppearance
+
+        UITabBar.appearance().standardAppearance = tabAppearance
+        UITabBar.appearance().scrollEdgeAppearance = tabAppearance
+        UITabBar.appearance().tintColor = selectedColor
+        UITabBar.appearance().unselectedItemTintColor = unselectedColor
+        #endif
     }
 }
 

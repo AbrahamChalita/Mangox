@@ -54,14 +54,9 @@ final class HapticManager {
 
     // MARK: - Milestones & Goals
 
-    /// Double-tap for distance milestones (every N km on the indoor dashboard).
+    /// Single firm tap for distance milestones — distinct from zone-change haptics.
     func milestone() {
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(140))
-            guard !Task.isCancelled else { return }
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.55)
-        }
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.88)
     }
 
     /// Single success tap when a ride goal is completed.
@@ -71,7 +66,7 @@ final class HapticManager {
 
     /// Subtle tap for optional in-ride training tips.
     func rideTipNudge() {
-        UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.85)
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.52)
     }
 
     // MARK: - Outdoor Navigation

@@ -1,6 +1,31 @@
 import SwiftUI
 import Charts
 
+#if canImport(UIKit)
+    import UIKit
+#endif
+
+private enum PowerGraphFontToken {
+    static func mono(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        let fontName: String
+        switch weight {
+        case .light:
+            fontName = "GeistMono-Light"
+        case .medium, .semibold, .bold, .heavy, .black:
+            fontName = "GeistMono-Medium"
+        default:
+            fontName = "GeistMono-Regular"
+        }
+
+        #if canImport(UIKit)
+            if UIFont(name: fontName, size: size) != nil {
+                return .custom(fontName, size: size)
+            }
+        #endif
+        return .system(size: size, weight: weight, design: .monospaced)
+    }
+}
+
 struct PoweredSample: Identifiable {
     let elapsed: Int
     let power: Int
@@ -19,6 +44,10 @@ struct PowerGraphView: View {
     var chartHeightCompact: CGFloat? = nil
     /// Line-only strip with no area fill — same data, less vertical weight than the default chart.
     var flatStrip: Bool = false
+    /// Shows a trailing “last N seconds” caption (indoor Details / compact strip).
+    var showTimeframeHint: Bool = false
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Canvas-based zone bar strip — colored columns (height ∝ power, color = zone). Much flatter than a chart.
     var zoneBar: Bool = false
 
@@ -61,10 +90,7 @@ struct PowerGraphView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: zoneBar ? 6 : (flatStrip ? 4 : 6)) {
-            Text(IndoorDashboardL10n.powerGraphTitle)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.white.opacity(0.3))
-                .tracking(1.5)
+            powerGraphHeader
 
             let samples = annotatedSamples
             if samples.isEmpty {
@@ -74,39 +100,90 @@ struct PowerGraphView: View {
                 zoneBarCanvas(samples: samples)
                     .frame(height: chartHeight)
             } else {
-                Chart(samples) { sample in
-                    if !flatStrip {
-                        AreaMark(
+                let yCeiling = powerHistoryMax + 20
+                ZStack(alignment: .topTrailing) {
+                    Chart(samples) { sample in
+                        if !flatStrip {
+                            AreaMark(
+                                x: .value("Time", sample.elapsed),
+                                y: .value("Power", sample.power)
+                            )
+                            .foregroundStyle(by: .value("Zone", sample.zoneKey))
+                            .opacity(0.22)
+                            .interpolationMethod(.catmullRom)
+                        }
+
+                        LineMark(
                             x: .value("Time", sample.elapsed),
                             y: .value("Power", sample.power)
                         )
                         .foregroundStyle(by: .value("Zone", sample.zoneKey))
-                        .opacity(0.22)
                         .interpolationMethod(.catmullRom)
+                        .lineStyle(StrokeStyle(lineWidth: flatStrip ? 1.1 : 1.5))
                     }
+                    .chartForegroundStyleScale(styleScale)
+                    .chartXAxis(.hidden)
+                    .modifier(PowerGraphYAxisStyle(flatStrip: flatStrip))
+                    .chartYScale(domain: 0...yCeiling)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
-                    LineMark(
-                        x: .value("Time", sample.elapsed),
-                        y: .value("Power", sample.power)
-                    )
-                    .foregroundStyle(by: .value("Zone", sample.zoneKey))
-                    .interpolationMethod(.catmullRom)
-                    .lineStyle(StrokeStyle(lineWidth: flatStrip ? 1.1 : 1.5))
+                    Text(String(format: String(localized: "indoor.power_graph.y_max"), locale: .current, yCeiling))
+                        .font(PowerGraphFontToken.mono(size: 9))
+                        .foregroundStyle(AppColor.fg3)
+                        .padding(.trailing, 4)
+                        .padding(.top, 1)
+                        .accessibilityHidden(true)
                 }
-                .chartForegroundStyleScale(styleScale)
-                .chartXAxis(.hidden)
-                .modifier(PowerGraphYAxisStyle(flatStrip: flatStrip))
-                .chartYScale(domain: 0...(powerHistoryMax + 20))
                 .frame(height: chartHeight)
             }
         }
         .padding(zoneBar ? 10 : (flatStrip ? 10 : 12))
-        .background(Color.white.opacity(0.02))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(AppColor.bg2)
+        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue)
+                .strokeBorder(AppColor.hair2, lineWidth: 1)
         )
+    }
+
+    @ViewBuilder
+    private var powerGraphHeader: some View {
+        if showTimeframeHint, dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(IndoorDashboardL10n.powerGraphTitle)
+                    .mangoxFont(.micro)
+                    .fontWeight(.bold)
+                    .foregroundStyle(AppColor.fg3)
+                    .tracking(1.5)
+                Text(IndoorDashboardL10n.powerGraphTimeframe)
+                    .mangoxFont(.micro)
+                    .foregroundStyle(AppColor.fg4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(IndoorDashboardL10n.powerGraphTitle), \(IndoorDashboardL10n.powerGraphTimeframe)")
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(IndoorDashboardL10n.powerGraphTitle)
+                    .mangoxFont(.micro)
+                    .fontWeight(.bold)
+                    .foregroundStyle(AppColor.fg3)
+                    .tracking(1.5)
+                Spacer(minLength: 8)
+                if showTimeframeHint {
+                    Text(IndoorDashboardL10n.powerGraphTimeframe)
+                        .mangoxFont(.micro)
+                        .foregroundStyle(AppColor.fg4)
+                        .lineLimit(1)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                showTimeframeHint
+                    ? "\(IndoorDashboardL10n.powerGraphTitle), \(IndoorDashboardL10n.powerGraphTimeframe)"
+                    : IndoorDashboardL10n.powerGraphTitle
+            )
+        }
     }
 
     private func zoneBarCanvas(samples: [PoweredSample]) -> some View {
@@ -143,14 +220,15 @@ struct PowerGraphView: View {
     private var powerGraphEmptyPlaceholder: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.03))
+                .fill(AppColor.hair)
             VStack(spacing: 8) {
                 Image(systemName: "waveform.path.ecg")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.2))
+                    .font(MangoxFont.title.value)
+                    .foregroundStyle(AppColor.fg3)
                 Text(IndoorDashboardL10n.powerGraphEmpty)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .mangoxFont(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(AppColor.fg2)
                     .multilineTextAlignment(.center)
             }
             .padding(.horizontal, 16)
@@ -173,12 +251,12 @@ private struct PowerGraphYAxisStyle: ViewModifier {
                     AxisValueLabel {
                         if let w = value.as(Int.self) {
                             Text("\(w)")
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.25))
+                                .font(PowerGraphFontToken.mono(size: 9))
+                                .foregroundStyle(AppColor.fg3)
                         }
                     }
                     AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
-                        .foregroundStyle(.white.opacity(0.06))
+                        .foregroundStyle(AppColor.hair)
                 }
             }
         }

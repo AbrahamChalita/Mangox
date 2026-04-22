@@ -1,5 +1,30 @@
 import SwiftUI
 
+#if canImport(UIKit)
+    import UIKit
+#endif
+
+private enum HeartRateFontToken {
+    static func mono(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        let fontName: String
+        switch weight {
+        case .light:
+            fontName = "GeistMono-Light"
+        case .medium, .semibold, .bold, .heavy, .black:
+            fontName = "GeistMono-Medium"
+        default:
+            fontName = "GeistMono-Regular"
+        }
+
+        #if canImport(UIKit)
+            if UIFont(name: fontName, size: size) != nil {
+                return .custom(fontName, size: size)
+            }
+        #endif
+        return .system(size: size, weight: weight, design: .monospaced)
+    }
+}
+
 struct HeartRateBarView: View {
     let heartRate: Int
     var compact: Bool = false
@@ -47,17 +72,18 @@ struct HeartRateBarView: View {
         HStack(spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text("\(heartRate)")
-                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .font(HeartRateFontToken.mono(size: 22, weight: .bold))
                     .foregroundStyle(zone.color)
                     .contentTransition(.numericText())
                     .animation(.easeInOut(duration: 0.3), value: heartRate)
                 Text("bpm")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.fg3)
             }
 
             Text(zone.name.uppercased())
-                .font(.system(size: 10, weight: .bold))
+                .mangoxFont(.micro)
+                .fontWeight(.bold)
                 .foregroundStyle(zone.color)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
@@ -70,7 +96,7 @@ struct HeartRateBarView: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color.white.opacity(AppOpacity.cardBorder))
+                        .fill(AppColor.hair2)
                     Capsule()
                         .fill(zone.color)
                         .frame(width: max(0, geo.size.width * min(pct, 1.0)))
@@ -80,12 +106,12 @@ struct HeartRateBarView: View {
             .frame(width: 72, height: 4)
 
             Text("\(Int((pct * 100).rounded()))%")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.35))
+                .font(HeartRateFontToken.mono(size: 10))
+                .foregroundStyle(AppColor.fg3)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .cardStyle(cornerRadius: 12)
+        .cardStyle(cornerRadius: MangoxRadius.sharp.rawValue)
     }
 
     // MARK: - Full (iPad)
@@ -94,28 +120,29 @@ struct HeartRateBarView: View {
         VStack(spacing: 8) {
             HStack {
                 Text("HEART RATE")
-                    .font(.system(size: 10, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .mangoxFont(.micro)
+                    .foregroundStyle(AppColor.fg3)
                     .tracking(2)
                 Spacer()
                 Text("\(Int(pct * 100))% MAX")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(HeartRateFontToken.mono(size: 10))
                     .foregroundStyle(zone.color)
             }
 
             HStack(spacing: 10) {
                 Text("\(heartRate)")
-                    .font(.system(size: 26, weight: .bold, design: .monospaced))
+                    .font(HeartRateFontToken.mono(size: 26, weight: .bold))
                     .foregroundStyle(zone.color)
 
                 Text("bpm")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.25))
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.fg3)
 
                 Spacer()
 
                 Text(zone.name.uppercased())
-                    .font(.system(size: 10, weight: .bold))
+                    .mangoxFont(.micro)
+                    .fontWeight(.bold)
                     .foregroundStyle(zone.color)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -152,17 +179,17 @@ struct HeartRateBarView: View {
             .frame(height: 10)
 
             Text(subtitle)
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.25))
+                .font(HeartRateFontToken.mono(size: 9))
+                .foregroundStyle(AppColor.fg3)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
-        .background(Color.white.opacity(0.03))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .background(AppColor.bg2)
+        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue)
+                .strokeBorder(AppColor.hair2, lineWidth: 1)
         )
     }
 
@@ -181,5 +208,5 @@ struct HeartRateBarView: View {
         HeartRateBarView(heartRate: 178)
     }
     .padding()
-    .background(Color(red: 0.03, green: 0.04, blue: 0.06))
+    .background(AppColor.bg0)
 }

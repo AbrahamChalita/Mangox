@@ -286,27 +286,11 @@ struct CoachUserBubble: View {
     var body: some View {
         Text(text)
             .font(.body)
-            .foregroundStyle(Color.black.opacity(0.88))
-            .padding(.horizontal, 17)
-            .padding(.vertical, 13)
-            .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                AppColor.mango,
-                                Color(red: 1, green: 0.78, blue: 0.22),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
-            )
-            .shadow(color: AppColor.mango.opacity(0.22), radius: 12, y: 4)
+            .foregroundStyle(AppColor.bg0)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(AppColor.mango)
+            .overlay(Rectangle().stroke(AppColor.mango.opacity(0.5), lineWidth: 1))
             .frame(maxWidth: bubbleMaxWidth, alignment: .trailing)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Your message")
@@ -433,12 +417,12 @@ struct CoachAssistantBubble: View {
                         HStack(spacing: 6) {
                             ForEach(message.tags, id: \.self) { tag in
                                 Text(CoachTagPillFormatting.displayLabel(for: tag))
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.52))
+                                    .mangoxFont(.micro)
+                                    .foregroundStyle(AppColor.fg2)
                                     .padding(.horizontal, 9)
                                     .padding(.vertical, 5)
-                                    .background(Color.white.opacity(0.07))
-                                    .clipShape(Capsule())
+                                    .background(AppColor.bg1)
+                                    .overlay(Rectangle().stroke(AppColor.hair, lineWidth: 1))
                                     .accessibilityLabel(CoachTagPillFormatting.displayLabel(for: tag))
                             }
                         }
@@ -488,14 +472,12 @@ struct CoachAssistantBubble: View {
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(responseAppearance.bubbleFill)
+            AppColor.bg2
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(responseAppearance.bubbleStroke, lineWidth: 1)
+            Rectangle()
+                .stroke(responseAppearance.bubbleStroke, lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.35), radius: 16, y: 8)
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Coach")
@@ -565,21 +547,15 @@ struct CoachErrorBubble: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .frame(minHeight: 44)
-                .background(AppColor.red.opacity(0.65))
-                .clipShape(Capsule())
+                .background(AppColor.red.opacity(0.82))
+                .overlay(Rectangle().stroke(AppColor.red.opacity(0.28), lineWidth: 1))
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(AppColor.red.opacity(0.1))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(AppColor.red.opacity(0.22), lineWidth: 1)
-        )
+        .background(AppColor.red.opacity(0.1))
+        .overlay(Rectangle().stroke(AppColor.red.opacity(0.22), lineWidth: 1))
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
     }
 }
@@ -646,14 +622,8 @@ struct CoachStreamStatusRow: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(style.statusFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(style.statusStroke, lineWidth: 1)
-        )
+        .background(style.statusFill)
+        .overlay(Rectangle().stroke(style.statusStroke, lineWidth: 1))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Coach status: \(text)")
     }
@@ -734,12 +704,11 @@ struct CoachStreamingBubble: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(responseAppearance.bubbleFill)
+            AppColor.bg2
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(responseAppearance.bubbleStroke, lineWidth: 1)
+            Rectangle()
+                .stroke(responseAppearance.bubbleStroke, lineWidth: 1)
         )
         .accessibilityLabel(
             style == .onDevice ? "On-device coach is writing a reply" : "Coach is writing a reply")
@@ -833,12 +802,11 @@ struct CoachPendingReplyBubble: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(responseAppearance.bubbleFill)
+            AppColor.bg2
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(responseAppearance.bubbleStroke, lineWidth: 1)
+            Rectangle()
+                .stroke(responseAppearance.bubbleStroke, lineWidth: 1)
         )
         .accessibilityLabel(accessibilityDescription)
     }
@@ -991,96 +959,83 @@ struct CoachEmptyStartersPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [AppColor.mango.opacity(0.95), AppColor.mango.opacity(0.35)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 3)
-                    .padding(.vertical, 16)
-                    .padding(.leading, 14)
+                Rectangle()
+                    .fill(AppColor.mango)
+                    .frame(width: 2)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
+                    HStack(spacing: MangoxSpacing.xs.rawValue) {
                         Image(systemName: "sparkles")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(MangoxFont.micro.value)
                             .foregroundStyle(AppColor.mango)
                         Text("COACH")
-                            .font(.system(size: 9, weight: .heavy))
-                            .foregroundStyle(textTertiary)
-                            .tracking(0.65)
+                            .mangoxFont(.micro)
+                            .tracking(1.4)
+                            .foregroundStyle(AppColor.fg3)
                     }
                     .accessibilityHidden(true)
 
                     Text(greetingTitle)
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(textPrimary)
+                        .font(MangoxFont.title.value)
+                        .foregroundStyle(AppColor.fg0)
                         .accessibilityLabel(greetingTitle)
 
                     Text(headline)
-                        .font(.headline)
-                        .foregroundStyle(.white.opacity(0.92))
+                        .mangoxFont(.bodyBold)
+                        .foregroundStyle(AppColor.fg1)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
 
                     Text(subhead)
-                        .font(.caption)
-                        .foregroundStyle(textSecondary)
+                        .mangoxFont(.body)
+                        .foregroundStyle(AppColor.fg2)
                         .fixedSize(horizontal: false, vertical: true)
                         .lineSpacing(2)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 14)
-                .padding(.trailing, 16)
-                .padding(.vertical, 16)
+                .padding(.leading, MangoxSpacing.md.rawValue)
+                .padding(.trailing, MangoxSpacing.lg.rawValue)
+                .padding(.vertical, MangoxSpacing.lg.rawValue)
             }
 
             Rectangle()
-                .fill(Color.white.opacity(AppOpacity.divider))
+                .fill(AppColor.hair)
                 .frame(height: 1)
-                .padding(.horizontal, 14)
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: MangoxSpacing.md.rawValue) {
                 if !topicTags.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
+                        HStack(spacing: MangoxSpacing.xs.rawValue) {
                             Image(systemName: "tag.fill")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.cyan.opacity(0.75))
+                                .font(MangoxFont.micro.value)
+                                .foregroundStyle(AppColor.blue.opacity(0.75))
                             Text("GROUNDED TOPICS")
-                                .font(.system(size: 10, weight: .heavy))
-                                .foregroundStyle(textTertiary)
-                                .tracking(0.55)
+                                .mangoxFont(.micro)
+                                .tracking(1.2)
+                                .foregroundStyle(AppColor.fg3)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
+                        .padding(.horizontal, MangoxSpacing.lg.rawValue)
+                        .padding(.top, MangoxSpacing.md.rawValue)
 
                         Text("Based on the ride, plan, and recovery data Mangox can actually see right now.")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(textSecondary)
-                            .padding(.horizontal, 16)
+                            .mangoxFont(.caption)
+                            .foregroundStyle(AppColor.fg2)
+                            .padding(.horizontal, MangoxSpacing.lg.rawValue)
 
                         ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
+                            HStack(spacing: MangoxSpacing.xs.rawValue) {
                                 ForEach(topicTags, id: \.self) { tag in
-                                    Text("#\(CoachTagPillFormatting.displayLabel(for: tag))")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.55))
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 7)
-                                        .background(Color.white.opacity(0.08))
-                                        .clipShape(Capsule())
-                                        .overlay(
-                                            Capsule()
-                                                .strokeBorder(Color.cyan.opacity(0.22), lineWidth: 1)
-                                        )
+                                    Text("#\(CoachTagPillFormatting.displayLabel(for: tag).uppercased())")
+                                        .mangoxFont(.micro)
+                                        .tracking(1.0)
+                                        .foregroundStyle(AppColor.fg2)
+                                        .padding(.horizontal, MangoxSpacing.sm.rawValue)
+                                        .padding(.vertical, 6)
+                                        .overlay(Rectangle().stroke(AppColor.blue.opacity(0.35), lineWidth: 1))
                                         .transition(tagAppearTransition)
                                 }
                             }
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, MangoxSpacing.lg.rawValue)
                             .padding(.bottom, 4)
                         }
                     }
@@ -1090,19 +1045,19 @@ struct CoachEmptyStartersPanel: View {
                     )
                 }
 
-                HStack(spacing: 8) {
+                HStack(spacing: MangoxSpacing.xs.rawValue) {
                     Image(systemName: "hand.tap.fill")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(MangoxFont.micro.value)
                         .foregroundStyle(AppColor.mango.opacity(0.85))
                     Text("QUICK STARTERS")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(textTertiary)
-                        .tracking(0.65)
+                        .mangoxFont(.micro)
+                        .tracking(1.2)
+                        .foregroundStyle(AppColor.fg3)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, topicTags.isEmpty ? 14 : 6)
+                .padding(.horizontal, MangoxSpacing.lg.rawValue)
+                .padding(.top, topicTags.isEmpty ? MangoxSpacing.md.rawValue : MangoxSpacing.xs.rawValue)
 
-                VStack(spacing: 8) {
+                VStack(spacing: MangoxSpacing.sm.rawValue) {
                     CoachTallPromptButton(
                         title: "Build a training plan",
                         subtitle: "Event, target date, weekly hours — guided setup for a full plan.",
@@ -1123,8 +1078,8 @@ struct CoachEmptyStartersPanel: View {
                         .transition(tagAppearTransition)
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 14)
+                .padding(.horizontal, MangoxSpacing.md.rawValue)
+                .padding(.bottom, MangoxSpacing.md.rawValue)
                 .animation(
                     accessibilityReduceMotion ? .easeInOut(duration: 0.18) : .smooth(duration: 0.38),
                     value: prompts.map(\.id)
@@ -1132,14 +1087,8 @@ struct CoachEmptyStartersPanel: View {
             }
         }
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.white.opacity(0.07))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(AppColor.mango.opacity(0.22), lineWidth: 1)
-        )
+        .background(AppColor.bg2)
+        .overlay(Rectangle().stroke(AppColor.mango.opacity(0.28), lineWidth: 1))
         .accessibilityElement(children: .contain)
     }
 }
@@ -1295,85 +1244,60 @@ struct CoachFollowUpRepliesPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if hasQuestion {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
+                    HStack(spacing: MangoxSpacing.xs.rawValue) {
                         Image(systemName: "bubble.left.and.bubble.right.fill")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(MangoxFont.micro.value)
                             .foregroundStyle(sourceAppearance.accent)
-                        Text(sourceAppearance == .onDevice ? "On-device asks" : "Coach asks")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.42))
-                            .tracking(0.4)
+                        Text(sourceAppearance == .onDevice ? "ON-DEVICE ASKS" : "COACH ASKS")
+                            .mangoxFont(.micro)
+                            .tracking(1.2)
+                            .foregroundStyle(AppColor.fg3)
                     }
 
                     Text(trimmedQuestion)
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .mangoxFont(.bodyBold)
+                        .foregroundStyle(AppColor.fg0)
                         .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(.leading)
                         .accessibilityAddTraits(.isHeader)
                 }
-                .padding(16)
+                .padding(MangoxSpacing.lg.rawValue)
             }
 
             if hasQuestion && hasActions {
-                Divider()
-                    .background(sourceAppearance.statusStroke.opacity(0.9))
-                    .padding(.horizontal, 14)
+                Rectangle()
+                    .fill(AppColor.hair)
+                    .frame(height: 1)
             }
 
             if hasActions {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: MangoxSpacing.md.rawValue) {
+                    HStack(spacing: MangoxSpacing.xs.rawValue) {
                         Image(systemName: "hand.tap.fill")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(MangoxFont.micro.value)
                             .foregroundStyle(sourceAppearance.accent.opacity(0.85))
-                        Text(sourceAppearance == .onDevice ? "Pick an on-device reply" : "Pick a reply")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.42))
-                            .tracking(0.4)
+                        Text(sourceAppearance == .onDevice ? "PICK AN ON-DEVICE REPLY" : "PICK A REPLY")
+                            .mangoxFont(.micro)
+                            .tracking(1.2)
+                            .foregroundStyle(AppColor.fg3)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, hasQuestion ? 14 : 16)
+                    .padding(.horizontal, MangoxSpacing.lg.rawValue)
+                    .padding(.top, MangoxSpacing.lg.rawValue)
 
-                    VStack(spacing: 8) {
+                    VStack(spacing: MangoxSpacing.sm.rawValue) {
                         ForEach(actions) { action in
                             suggestedReplyButton(action)
                         }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 14)
+                    .padding(.horizontal, MangoxSpacing.md.rawValue)
+                    .padding(.bottom, MangoxSpacing.md.rawValue)
                 }
             }
         }
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            sourceAppearance.accent.opacity(0.12),
-                            Color.white.opacity(0.045),
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            sourceAppearance.accent.opacity(0.35),
-                            Color.white.opacity(0.08),
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
-        )
+        .background(AppColor.bg2)
+        .overlay(Rectangle().stroke(sourceAppearance.accent.opacity(0.28), lineWidth: 1))
         .accessibilityElement(children: .contain)
     }
 

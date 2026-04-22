@@ -23,6 +23,7 @@ struct SettingsView: View {
     @State private var viewModel: ProfileViewModel
     @Binding var navigationPath: NavigationPath
     @State private var riderAvatarRefreshToken = UUID()
+    @State private var isWeightMasked = true
 
     init(navigationPath: Binding<NavigationPath>, viewModel: ProfileViewModel) {
         _navigationPath = navigationPath
@@ -54,18 +55,46 @@ struct SettingsView: View {
                                 var parts: [String] = []
                                 let name = prefs.riderDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
                                 if !name.isEmpty { parts.append(name) }
-                                parts.append(prefs.isImperial
+                                let weightDisplay = isWeightMasked ? "***" : (prefs.isImperial
                                     ? String(format: "%.0f lb", prefs.riderWeightKg * 2.20462)
                                     : String(format: "%.0f kg", prefs.riderWeightKg))
+                                parts.append(weightDisplay)
                                 if let age = prefs.riderAge { parts.append("\(age) yrs") }
                                 return parts.joined(separator: " · ")
                             }()
-                            navRow(
-                                icon: "figure.outdoor.cycle", iconColor: AppColor.blue,
-                                title: "Rider Profile",
-                                value: riderProfileValue,
-                                route: .riderProfile
-                            )
+                            HStack(spacing: 14) {
+                                settingsIconBadge("figure.outdoor.cycle", color: AppColor.blue)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Rider Profile")
+                                        .font(MangoxFont.bodyBold.value)
+                                        .foregroundStyle(AppColor.fg1)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                    Text(riderProfileValue)
+                                        .font(MangoxFont.caption.value)
+                                        .foregroundStyle(.white.opacity(0.35))
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.75)
+                                }
+                                Spacer(minLength: 8)
+                                Button {
+                                    isWeightMasked.toggle()
+                                } label: {
+                                    Image(systemName: isWeightMasked ? "eye.slash" : "eye")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.white.opacity(0.35))
+                                }
+                                .buttonStyle(.plain)
+                                Image(systemName: "chevron.right")
+                                    .font(MangoxFont.caption.value)
+                                    .foregroundStyle(AppColor.fg4)
+                            }
+                            .contentShape(Rectangle())
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                            .onTapGesture {
+                                navigationPath.append(SettingsRoute.riderProfile)
+                            }
                             rowDivider
                             navRow(
                                 icon: "bolt.fill", iconColor: AppColor.mango,
@@ -302,17 +331,17 @@ struct SettingsView: View {
             settingsIconBadge("crown.fill", color: AppColor.mango)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Mangox Pro")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .font(MangoxFont.bodyBold.value)
+                    .foregroundStyle(AppColor.fg1)
                 if viewModel.isProDevUnlockOnly {
                     Text("Developer unlock")
-                        .font(.system(size: 11))
+                        .font(MangoxFont.caption.value)
                         .foregroundStyle(AppColor.mango.opacity(0.75))
                         .lineLimit(1)
                 } else if let renewal {
                     Text(renewal)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.38))
+                        .font(MangoxFont.caption.value)
+                        .foregroundStyle(AppColor.fg3)
                         .lineLimit(1)
                 }
             }
@@ -324,7 +353,7 @@ struct SettingsView: View {
                         .foregroundStyle(AppColor.success)
                 }
                 Text(viewModel.isProDevUnlockOnly ? "Active" : (plan ?? "Active"))
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(MangoxFont.callout.value)
                     .foregroundStyle(AppColor.success)
                     .lineLimit(1)
             }
@@ -344,17 +373,17 @@ struct SettingsView: View {
                 avatarView
                 VStack(alignment: .leading, spacing: 5) {
                     Text(viewModel.identityTitle)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .font(MangoxFont.title.value)
+                        .foregroundStyle(AppColor.fg1)
                     HStack(spacing: 10) {
                         if isPro {
                             Label("Pro", systemImage: "crown.fill")
-                                .font(.system(size: 12))
+                                .font(MangoxFont.caption.value)
                                 .foregroundStyle(AppColor.mango)
                         }
                         Text("\(ftp) W FTP")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .font(MangoxFont.caption.value)
+                            .foregroundStyle(AppColor.fg3)
                     }
                 }
                 Spacer(minLength: 0)
@@ -417,7 +446,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             content()
         }
-        .cardStyle(cornerRadius: 16)
+        .cardStyle(cornerRadius: MangoxRadius.sharp.rawValue)
         .padding(.horizontal, MangoxSpacing.page)
     }
 
@@ -450,21 +479,21 @@ struct SettingsView: View {
         HStack(spacing: 14) {
             settingsIconBadge(icon, color: iconColor)
             Text(title)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white.opacity(0.9))
+                .font(MangoxFont.bodyBold.value)
+                .foregroundStyle(AppColor.fg1)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Spacer(minLength: 8)
             if !value.isEmpty {
                 Text(value)
-                    .font(.system(size: 13))
+                    .font(MangoxFont.caption.value)
                     .foregroundStyle(valueColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.2))
+                .font(MangoxFont.caption.value)
+                .foregroundStyle(AppColor.fg4)
         }
         .contentShape(Rectangle())
         .padding(.vertical, 12)

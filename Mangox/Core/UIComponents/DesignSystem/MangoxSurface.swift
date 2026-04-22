@@ -28,9 +28,9 @@ private struct MangoxSurfaceModifier: ViewModifier {
         case .frostedInteractive:
             applyFrosted(content: content, interactive: true)
         case .flat:
-            applyFlat(content: content, opacity: AppOpacity.cardBg, borderOpacity: AppOpacity.cardBorder)
+            applyFlat(content: content, fill: AppColor.bg2, border: AppColor.hair2)
         case .flatSubtle:
-            applyFlat(content: content, opacity: AppOpacity.pillBg, borderOpacity: 0)
+            applyFlat(content: content, fill: AppColor.bg1, border: AppColor.hair)
         case .mapOverlay:
             applyMapOverlay(content: content)
         }
@@ -39,33 +39,36 @@ private struct MangoxSurfaceModifier: ViewModifier {
     @ViewBuilder
     private func applyFrosted(content: Content, interactive: Bool) -> some View {
         if reduceTransparency {
-            applyOpaque(content: content, bgOpacity: 0.12, borderOpacity: 0.12)
+            applyFlat(content: content, fill: AppColor.bg3, border: interactive ? AppColor.mango.opacity(0.35) : AppColor.hair2)
         } else {
             switch shape {
             case .rounded(let corner):
-                if interactive {
-                    content.glassEffect(.regular.interactive(), in: .rect(cornerRadius: corner, style: .continuous))
-                } else {
-                    content.glassEffect(.regular, in: .rect(cornerRadius: corner, style: .continuous))
-                }
+                content
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: corner, style: .continuous))
+                    .background(AppColor.bg4.opacity(0.72), in: RoundedRectangle(cornerRadius: corner, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: corner, style: .continuous)
+                            .strokeBorder(interactive ? AppColor.mango.opacity(0.35) : AppColor.hair2, lineWidth: 1)
+                    )
             case .capsule:
-                if interactive {
-                    content.glassEffect(.regular.interactive(), in: .capsule)
-                } else {
-                    content.glassEffect(.regular, in: .capsule)
-                }
+                content
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .background(AppColor.bg4.opacity(0.72), in: Capsule())
+                    .overlay(
+                        Capsule().strokeBorder(interactive ? AppColor.mango.opacity(0.35) : AppColor.hair2, lineWidth: 1)
+                    )
             case .circle:
-                if interactive {
-                    content.glassEffect(.regular.interactive(), in: .circle)
-                } else {
-                    content.glassEffect(.regular, in: .circle)
-                }
+                content
+                    .background(.ultraThinMaterial, in: Circle())
+                    .background(AppColor.bg4.opacity(0.72), in: Circle())
+                    .overlay(
+                        Circle().strokeBorder(interactive ? AppColor.mango.opacity(0.35) : AppColor.hair2, lineWidth: 1)
+                    )
             case .rectangle:
-                if interactive {
-                    content.glassEffect(.regular.interactive(), in: .rect(cornerRadius: 0, style: .continuous))
-                } else {
-                    content.glassEffect(.regular, in: .rect(cornerRadius: 0, style: .continuous))
-                }
+                content
+                    .background(.ultraThinMaterial)
+                    .background(AppColor.bg4.opacity(0.72))
+                    .overlay(Rectangle().strokeBorder(interactive ? AppColor.mango.opacity(0.35) : AppColor.hair2, lineWidth: 1))
             }
         }
     }
@@ -73,104 +76,81 @@ private struct MangoxSurfaceModifier: ViewModifier {
     @ViewBuilder
     private func applyMapOverlay(content: Content) -> some View {
         if reduceTransparency {
-            applyOpaque(content: content, bgOpacity: 0.1, borderOpacity: 0.08)
+            applyFlat(content: content, fill: AppColor.bg2.opacity(0.92), border: AppColor.hair2)
         } else {
             switch shape {
             case .rounded(let corner):
                 content
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: corner, style: .continuous))
+                    .background(AppColor.bg3.opacity(0.62), in: RoundedRectangle(cornerRadius: corner, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: corner, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                            .strokeBorder(AppColor.hair2, lineWidth: 1)
                     )
             case .capsule:
                 content
                     .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                    )
+                    .background(AppColor.bg3.opacity(0.62), in: Capsule())
+                    .overlay(Capsule().strokeBorder(AppColor.hair2, lineWidth: 1))
             case .circle:
                 content
                     .background(.ultraThinMaterial, in: Circle())
-                    .overlay(
-                        Circle()
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                    )
+                    .background(AppColor.bg3.opacity(0.62), in: Circle())
+                    .overlay(Circle().strokeBorder(AppColor.hair2, lineWidth: 1))
             case .rectangle:
                 content
                     .background(.ultraThinMaterial)
+                    .background(AppColor.bg3.opacity(0.62))
+                    .overlay(Rectangle().strokeBorder(AppColor.hair2, lineWidth: 1))
             }
         }
     }
 
     @ViewBuilder
-    private func applyFlat(content: Content, opacity: Double, borderOpacity: Double) -> some View {
+    private func applyFlat(content: Content, fill: Color, border: Color? = nil) -> some View {
         switch shape {
         case .rounded(let corner):
             content
-                .background(Color.white.opacity(opacity))
-                .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+                .background(fill, in: RoundedRectangle(cornerRadius: corner, style: .continuous))
                 .overlay {
-                    if borderOpacity > 0 {
+                    if let border {
                         RoundedRectangle(cornerRadius: corner, style: .continuous)
-                            .strokeBorder(Color.white.opacity(borderOpacity), lineWidth: 1)
+                            .strokeBorder(border, lineWidth: 1)
                     }
                 }
         case .capsule:
             content
-                .background(Color.white.opacity(opacity), in: Capsule())
+                .background(fill, in: Capsule())
                 .overlay {
-                    if borderOpacity > 0 {
-                        Capsule().strokeBorder(Color.white.opacity(borderOpacity), lineWidth: 1)
+                    if let border {
+                        Capsule().strokeBorder(border, lineWidth: 1)
                     }
                 }
         case .circle:
             content
-                .background(Color.white.opacity(opacity), in: Circle())
+                .background(fill, in: Circle())
                 .overlay {
-                    if borderOpacity > 0 {
-                        Circle().strokeBorder(Color.white.opacity(borderOpacity), lineWidth: 1)
+                    if let border {
+                        Circle().strokeBorder(border, lineWidth: 1)
                     }
                 }
         case .rectangle:
-            content.background(Color.white.opacity(opacity))
-        }
-    }
-
-    @ViewBuilder
-    private func applyOpaque(content: Content, bgOpacity: Double, borderOpacity: Double) -> some View {
-        switch shape {
-        case .rounded(let corner):
             content
-                .background(Color.white.opacity(bgOpacity))
-                .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+                .background(fill)
                 .overlay {
-                    RoundedRectangle(cornerRadius: corner, style: .continuous)
-                        .strokeBorder(Color.white.opacity(borderOpacity), lineWidth: 1)
+                    if let border {
+                        Rectangle().strokeBorder(border, lineWidth: 1)
+                    }
                 }
-        case .capsule:
-            content
-                .background(Color.white.opacity(bgOpacity), in: Capsule())
-                .overlay {
-                    Capsule().strokeBorder(Color.white.opacity(borderOpacity), lineWidth: 1)
-                }
-        case .circle:
-            content
-                .background(Color.white.opacity(bgOpacity), in: Circle())
-                .overlay {
-                    Circle().strokeBorder(Color.white.opacity(borderOpacity), lineWidth: 1)
-                }
-        case .rectangle:
-            content
-                .background(Color.white.opacity(bgOpacity))
-                .overlay(Rectangle().strokeBorder(Color.white.opacity(borderOpacity), lineWidth: 1))
         }
     }
 }
 
 extension View {
-    func mangoxSurface(_ surface: MangoxSurface, shape: MangoxSurfaceShape = .rounded(MangoxRadius.card.rawValue)) -> some View {
+    func mangoxSurface(
+        _ surface: MangoxSurface,
+        shape: MangoxSurfaceShape = .rounded(MangoxRadius.card.rawValue)
+    ) -> some View {
         modifier(MangoxSurfaceModifier(surface: surface, shape: shape))
     }
 }

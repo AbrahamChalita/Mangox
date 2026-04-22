@@ -121,22 +121,74 @@ enum InstagramStoryCardRenderer {
             cg.restoreGState()
 
             cg.addPath(path.cgPath)
-            cg.setStrokeColor(UIColor.white.withAlphaComponent(0.08).cgColor)
+            cg.setStrokeColor(StoryCardDesign.panelBorder.cgColor)
             cg.setLineWidth(2)
             cg.strokePath()
         }
     }
 }
 
+private enum StoryCardFontToken {
+    static func ui(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
+        let fontName: String
+        switch weight {
+        case .ultraLight, .thin, .light:
+            fontName = "Manrope-Light"
+        case .medium, .semibold, .bold, .heavy, .black:
+            fontName = "Manrope-Medium"
+        default:
+            fontName = "Manrope-Regular"
+        }
+
+        return UIFont(name: fontName, size: size) ?? .systemFont(ofSize: size, weight: weight)
+    }
+
+    static func mono(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
+        let fontName: String
+        switch weight {
+        case .ultraLight, .thin, .light:
+            fontName = "GeistMono-Light"
+        case .medium, .semibold, .bold, .heavy, .black:
+            fontName = "GeistMono-Medium"
+        default:
+            fontName = "GeistMono-Regular"
+        }
+
+        return UIFont(name: fontName, size: size) ?? .monospacedSystemFont(ofSize: size, weight: weight)
+    }
+}
+
+private enum StoryCardDesign {
+    static let canvasBackground = UIColor(AppColor.bg0)
+    static let canvasSecondary = UIColor(AppColor.bg2)
+    static let panelTop = UIColor(AppColor.bg2).withAlphaComponent(0.96)
+    static let panelBottom = UIColor(AppColor.bg3).withAlphaComponent(0.94)
+    static let panelBorder = UIColor(AppColor.hair2)
+    static let divider = UIColor(AppColor.hair2)
+    static let textPrimary = UIColor(AppColor.fg0)
+    static let textSecondary = UIColor(AppColor.fg1)
+    static let textMuted = UIColor(AppColor.fg2)
+    static let textQuiet = UIColor(AppColor.fg3)
+    static let accentMango = UIColor(AppColor.mango)
+    static let accentBlue = UIColor(AppColor.blue)
+    static let accentYellow = UIColor(AppColor.yellow)
+    static let whoopTeal = UIColor(AppColor.whoop)
+    static let panelShadow = UIColor.black.withAlphaComponent(0.28)
+    static let panelRadius = MangoxRadius.overlay.rawValue
+    static let badgeRadius = MangoxRadius.button.rawValue
+
+    static func accentColor(for accent: InstagramStoryCardOptions.Accent, dominantZone: PowerZone) -> UIColor {
+        switch accent {
+        case .dominantZone:
+            return UIColor(dominantZone.color)
+        case .brandMango:
+            return accentMango
+        }
+    }
+}
+
 private enum StoryCardDrawing {
     private static let sidePad: CGFloat = 64
-    private static let accentOrange = UIColor(red: 252/255, green: 76/255, blue: 2/255, alpha: 1)
-    private static let canvasBackground = UIColor(red: 11/255, green: 14/255, blue: 23/255, alpha: 1)
-    private static let panelBackground = UIColor(red: 24/255, green: 28/255, blue: 40/255, alpha: 0.82)
-    private static let panelBorder = UIColor.white.withAlphaComponent(0.05)
-    private static let mutedText = UIColor(white: 1, alpha: 0.48)
-    private static let secondaryText = UIColor(white: 1, alpha: 0.72)
-    private static let whoopTeal = UIColor(red: 0, green: 158 / 255, blue: 127 / 255, alpha: 1)
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE  •  d MMM"
@@ -161,7 +213,7 @@ private enum StoryCardDrawing {
         UIGraphicsPushContext(cg)
         defer { UIGraphicsPopContext() }
 
-        let accent = options.accent == .dominantZone ? UIColor(dominantZone.color) : accentOrange
+        let accent = StoryCardDesign.accentColor(for: options.accent, dominantZone: dominantZone)
         drawBackground(
             in: cg,
             size: size,
@@ -300,7 +352,7 @@ private enum StoryCardDrawing {
         prepared.draw(in: CGRect(origin: .zero, size: size))
 
         cg.saveGState()
-        cg.setFillColor(UIColor(red: 7/255, green: 10/255, blue: 18/255, alpha: 0.68).cgColor)
+        cg.setFillColor(StoryCardDesign.canvasBackground.withAlphaComponent(0.70).cgColor)
         cg.fill(CGRect(origin: .zero, size: size))
         cg.restoreGState()
     }
@@ -311,36 +363,36 @@ private enum StoryCardDrawing {
         options: InstagramStoryCardOptions,
         cg: CGContext
     ) {
-        canvasBackground.setFill()
+        StoryCardDesign.canvasBackground.setFill()
         UIRectFill(CGRect(origin: .zero, size: size))
 
-        let accent = options.accent == .dominantZone ? UIColor(dominantZone.color) : accentOrange
+        let accent = StoryCardDesign.accentColor(for: options.accent, dominantZone: dominantZone)
         fillRadial(
             center: CGPoint(x: size.width * 0.82, y: size.height * 0.88),
-            radius: 320,
-            color: accent.withAlphaComponent(0.22),
+            radius: 340,
+            color: accent.withAlphaComponent(0.24),
             cg: cg
         )
         fillRadial(
             center: CGPoint(x: size.width * 0.20, y: size.height * 0.15),
-            radius: 240,
-            color: UIColor(red: 66/255, green: 77/255, blue: 120/255, alpha: 0.10),
+            radius: 260,
+            color: StoryCardDesign.accentBlue.withAlphaComponent(0.14),
             cg: cg
         )
         fillRadial(
-            center: CGPoint(x: size.width * 0.50, y: size.height * 0.50),
-            radius: 600,
-            color: UIColor.black.withAlphaComponent(0.18),
+            center: CGPoint(x: size.width * 0.50, y: size.height * 0.48),
+            radius: 560,
+            color: StoryCardDesign.canvasSecondary.withAlphaComponent(0.16),
             cg: cg
         )
     }
 
     private static func drawForegroundScrim(in size: CGSize, cg: CGContext) {
         let colors = [
-            UIColor.black.withAlphaComponent(0.12).cgColor,
-            UIColor.black.withAlphaComponent(0.08).cgColor,
-            UIColor.black.withAlphaComponent(0.18).cgColor,
-            UIColor.black.withAlphaComponent(0.28).cgColor,
+            StoryCardDesign.canvasBackground.withAlphaComponent(0.10).cgColor,
+            StoryCardDesign.canvasBackground.withAlphaComponent(0.04).cgColor,
+            StoryCardDesign.canvasBackground.withAlphaComponent(0.16).cgColor,
+            StoryCardDesign.canvasBackground.withAlphaComponent(0.26).cgColor,
         ] as CFArray
         let locations: [CGFloat] = [0, 0.30, 0.68, 1]
 
@@ -367,7 +419,7 @@ private enum StoryCardDrawing {
         cg: CGContext
     ) {
         let dividerY = y + 10
-        cg.setStrokeColor(UIColor.white.withAlphaComponent(0.08).cgColor)
+        cg.setStrokeColor(StoryCardDesign.divider.cgColor)
         cg.setLineWidth(1)
         cg.move(to: CGPoint(x: sidePad, y: dividerY))
         cg.addLine(to: CGPoint(x: width - sidePad, y: dividerY))
@@ -381,16 +433,16 @@ private enum StoryCardDrawing {
         brandTitle.draw(
             at: CGPoint(x: sidePad + 34, y: dividerY + 14),
             withAttributes: [
-                .font: UIFont.systemFont(ofSize: 36, weight: .heavy),
-                .foregroundColor: UIColor(white: 1, alpha: 0.92),
-                .kern: 2.6,
+                .font: StoryCardFontToken.ui(size: 34, weight: .medium),
+                .foregroundColor: StoryCardDesign.textPrimary,
+                .kern: 2.2,
             ]
         )
 
         let dateAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.monospacedSystemFont(ofSize: 32, weight: .semibold),
-            .foregroundColor: UIColor(white: 1, alpha: 0.58),
-            .kern: 1.8,
+            .font: StoryCardFontToken.mono(size: 28, weight: .medium),
+            .foregroundColor: StoryCardDesign.textQuiet,
+            .kern: 1.6,
         ]
         let dateSize = dateTitle.size(withAttributes: dateAttrs)
         dateTitle.draw(
@@ -421,9 +473,9 @@ private enum StoryCardDrawing {
         eyebrow.draw(
             at: CGPoint(x: sidePad, y: y),
             withAttributes: [
-                .font: UIFont.systemFont(ofSize: 28, weight: .bold),
+                .font: StoryCardFontToken.mono(size: 24, weight: .medium),
                 .foregroundColor: accent.withAlphaComponent(0.94),
-                .kern: 2.2,
+                .kern: 2.0,
             ]
         )
 
@@ -433,9 +485,9 @@ private enum StoryCardDrawing {
             let secondLine = titleLines.count > 1 ? titleLines[1] : ""
 
             let firstAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 116, weight: .black),
-                .foregroundColor: UIColor.white,
-                .kern: -5.5,
+                .font: StoryCardFontToken.ui(size: 112, weight: .heavy),
+                .foregroundColor: StoryCardDesign.textPrimary,
+                .kern: -4.6,
             ]
             firstLine.draw(
                 at: CGPoint(x: sidePad, y: titleRectY),
@@ -446,9 +498,9 @@ private enum StoryCardDrawing {
                 secondLine.draw(
                     at: CGPoint(x: sidePad, y: titleRectY + 118),
                     withAttributes: [
-                        .font: UIFont.systemFont(ofSize: 112, weight: .black),
-                        .foregroundColor: UIColor(white: 1, alpha: 0.22),
-                        .kern: -5.5,
+                        .font: StoryCardFontToken.ui(size: 108, weight: .heavy),
+                        .foregroundColor: StoryCardDesign.textQuiet,
+                        .kern: -4.6,
                     ]
                 )
             }
@@ -458,13 +510,13 @@ private enum StoryCardDrawing {
         let metricY = titleRectY + 300
 
         let distanceAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.monospacedDigitSystemFont(ofSize: 132, weight: .black),
-            .foregroundColor: UIColor.white,
-            .kern: -5,
+            .font: StoryCardFontToken.mono(size: 126, weight: .heavy),
+            .foregroundColor: StoryCardDesign.textPrimary,
+            .kern: -4.6,
         ]
         let unitAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 54, weight: .bold),
-            .foregroundColor: UIColor(white: 1, alpha: 0.64),
+            .font: StoryCardFontToken.ui(size: 46, weight: .medium),
+            .foregroundColor: StoryCardDesign.textMuted,
         ]
         let size = distanceValue.size(withAttributes: distanceAttrs)
         distanceValue.draw(at: CGPoint(x: sidePad, y: metricY), withAttributes: distanceAttrs)
@@ -475,14 +527,14 @@ private enum StoryCardDrawing {
 
         let movingTime = AppFormat.duration(workout.duration)
         let movingAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.monospacedDigitSystemFont(ofSize: 70, weight: .bold),
-            .foregroundColor: UIColor.white,
-            .kern: -2.5,
+            .font: StoryCardFontToken.mono(size: 64, weight: .bold),
+            .foregroundColor: StoryCardDesign.textPrimary,
+            .kern: -2.0,
         ]
         let movingLabelAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 22, weight: .bold),
-            .foregroundColor: mutedText,
-            .kern: 2.2,
+            .font: StoryCardFontToken.mono(size: 18, weight: .medium),
+            .foregroundColor: StoryCardDesign.textQuiet,
+            .kern: 1.7,
         ]
         let movingX = width - sidePad - 255
         movingTime.draw(
@@ -495,7 +547,7 @@ private enum StoryCardDrawing {
         )
 
         let dividerY = metricY + 190
-        cg.setStrokeColor(UIColor.white.withAlphaComponent(0.08).cgColor)
+        cg.setStrokeColor(StoryCardDesign.divider.cgColor)
         cg.setLineWidth(1)
         cg.move(to: CGPoint(x: sidePad, y: dividerY))
         cg.addLine(to: CGPoint(x: width - sidePad, y: dividerY))
@@ -553,17 +605,17 @@ private enum StoryCardDrawing {
                 width: cardWidth,
                 height: 120
             )
-            drawPanel(in: rect, cornerRadius: 26, cg: cg)
+            drawPanel(in: rect, cornerRadius: StoryCardDesign.panelRadius, cg: cg)
 
             let valueAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.monospacedDigitSystemFont(ofSize: 56, weight: .bold),
-                .foregroundColor: UIColor.white,
-                .kern: -2,
+                .font: StoryCardFontToken.mono(size: 54, weight: .bold),
+                .foregroundColor: StoryCardDesign.textPrimary,
+                .kern: -1.8,
             ]
             let labelAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 18, weight: .bold),
-                .foregroundColor: mutedText,
-                .kern: 1.5,
+                .font: StoryCardFontToken.mono(size: 15, weight: .medium),
+                .foregroundColor: StoryCardDesign.textQuiet,
+                .kern: 1.3,
             ]
             let value = slots[index].value
             let label = slots[index].label
@@ -626,19 +678,19 @@ private enum StoryCardDrawing {
         cg: CGContext
     ) {
         let rect = CGRect(x: sidePad, y: y, width: width - sidePad * 2, height: height)
-        drawPanel(in: rect, cornerRadius: 30, cg: cg)
+        drawPanel(in: rect, cornerRadius: StoryCardDesign.panelRadius, cg: cg)
 
         "TRAINING LOAD".draw(
             at: CGPoint(x: rect.minX + 26, y: rect.minY + 24),
             withAttributes: [
-                .font: UIFont.systemFont(ofSize: 22, weight: .bold),
-                .foregroundColor: mutedText,
-                .kern: 2.0,
+                .font: StoryCardFontToken.mono(size: 18, weight: .medium),
+                .foregroundColor: StoryCardDesign.textQuiet,
+                .kern: 1.8,
             ]
         )
 
         let status = trainingStatus(for: workout).uppercased()
-        let badgeFont = UIFont.systemFont(ofSize: 24, weight: .heavy)
+        let badgeFont = StoryCardFontToken.mono(size: 22, weight: .medium)
         let badgeKern: CGFloat = 1.8
         let badgeAttrs: [NSAttributedString.Key: Any] = [
             .font: badgeFont,
@@ -658,15 +710,18 @@ private enum StoryCardDrawing {
             width: badgeWidth,
             height: badgeHeight
         )
-        let badgeCorner = min(22, badgeHeight / 2)
+        let badgeCorner = min(StoryCardDesign.badgeRadius, badgeHeight / 2)
         let badgePath = UIBezierPath(roundedRect: badgeRect, cornerRadius: badgeCorner)
-        accent.withAlphaComponent(0.20).setFill()
+        accent.withAlphaComponent(0.16).setFill()
         badgePath.fill()
+        accent.withAlphaComponent(0.28).setStroke()
+        badgePath.lineWidth = 1
+        badgePath.stroke()
         status.draw(
             at: CGPoint(x: badgeRect.minX + horizontalPadding, y: badgeRect.minY + 10),
             withAttributes: [
                 .font: badgeFont,
-                .foregroundColor: accent.withAlphaComponent(0.95),
+                .foregroundColor: accent.withAlphaComponent(0.92),
                 .kern: badgeKern,
             ]
         )
@@ -674,9 +729,9 @@ private enum StoryCardDrawing {
         let load = trainingLoadValue(for: workout)
         let loadText = "\(load)"
         let loadAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.monospacedDigitSystemFont(ofSize: 92, weight: .black),
-            .foregroundColor: UIColor.white,
-            .kern: -4,
+            .font: StoryCardFontToken.mono(size: 88, weight: .heavy),
+            .foregroundColor: StoryCardDesign.textPrimary,
+            .kern: -3.6,
         ]
         let loadSize = loadText.size(withAttributes: loadAttrs)
         let loadOriginY = rect.minY + 76
@@ -687,9 +742,9 @@ private enum StoryCardDrawing {
 
         let slashText = "/ 100"
         let slashAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.monospacedDigitSystemFont(ofSize: 42, weight: .bold),
-            .foregroundColor: UIColor(white: 1, alpha: 0.26),
-            .kern: -1.5,
+            .font: StoryCardFontToken.mono(size: 38, weight: .medium),
+            .foregroundColor: StoryCardDesign.textQuiet,
+            .kern: -1.0,
         ]
         let slashSize = slashText.size(withAttributes: slashAttrs)
         let slashOriginY = rect.minY + 122
@@ -707,9 +762,9 @@ private enum StoryCardDrawing {
             ? whoopStoryLineText(strain: whoopStrain, recovery: whoopRecovery)
             : nil
         let whoopAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 22, weight: .bold),
-            .foregroundColor: whoopTeal,
-            .kern: 1.2,
+            .font: StoryCardFontToken.mono(size: 17, weight: .medium),
+            .foregroundColor: StoryCardDesign.whoopTeal,
+            .kern: 1.1,
         ]
         var zoneContentTop = scoreBlockBottom + 18
         if let line = whoopLine {
@@ -751,9 +806,9 @@ private enum StoryCardDrawing {
             label.draw(
                 at: CGPoint(x: x + 18, y: legendY),
                 withAttributes: [
-                    .font: UIFont.systemFont(ofSize: 18, weight: .semibold),
-                    .foregroundColor: secondaryText,
-                    .kern: 0.4,
+                    .font: StoryCardFontToken.mono(size: 15, weight: .medium),
+                    .foregroundColor: StoryCardDesign.textSecondary,
+                    .kern: 0.8,
                 ]
             )
         }
@@ -772,31 +827,31 @@ private enum StoryCardDrawing {
         let leftRect = CGRect(x: sidePad, y: y, width: cardWidth, height: 220)
         let rightRect = CGRect(x: sidePad + cardWidth + gap, y: y, width: cardWidth, height: 220)
 
-        drawPanel(in: leftRect, cornerRadius: 30, cg: cg)
-        drawPanel(in: rightRect, cornerRadius: 30, cg: cg)
+        drawPanel(in: leftRect, cornerRadius: StoryCardDesign.panelRadius, cg: cg)
+        drawPanel(in: rightRect, cornerRadius: StoryCardDesign.panelRadius, cg: cg)
 
         "AVG POWER".draw(
             at: CGPoint(x: leftRect.minX + 24, y: leftRect.minY + 22),
             withAttributes: [
-                .font: UIFont.systemFont(ofSize: 22, weight: .bold),
-                .foregroundColor: mutedText,
-                .kern: 1.9,
+                .font: StoryCardFontToken.mono(size: 18, weight: .medium),
+                .foregroundColor: StoryCardDesign.textQuiet,
+                .kern: 1.7,
             ]
         )
 
         let powerValue = metricText(Int(workout.avgPower.rounded()), fallback: "—")
         let powerAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.monospacedDigitSystemFont(ofSize: 72, weight: .black),
-            .foregroundColor: UIColor.white,
-            .kern: -3,
+            .font: StoryCardFontToken.mono(size: 68, weight: .heavy),
+            .foregroundColor: StoryCardDesign.textPrimary,
+            .kern: -2.6,
         ]
         let powerSize = powerValue.size(withAttributes: powerAttrs)
         powerValue.draw(at: CGPoint(x: leftRect.minX + 24, y: leftRect.minY + 66), withAttributes: powerAttrs)
         "w".draw(
             at: CGPoint(x: leftRect.minX + 24 + powerSize.width + 10, y: leftRect.minY + 109),
             withAttributes: [
-                .font: UIFont.systemFont(ofSize: 30, weight: .bold),
-                .foregroundColor: secondaryText,
+                .font: StoryCardFontToken.ui(size: 28, weight: .medium),
+                .foregroundColor: StoryCardDesign.textMuted,
             ]
         )
 
@@ -805,46 +860,46 @@ private enum StoryCardDrawing {
         "\(npText)  •  \(ifText)".draw(
             at: CGPoint(x: leftRect.minX + 24, y: leftRect.maxY - 44),
             withAttributes: [
-                .font: UIFont.monospacedSystemFont(ofSize: 22, weight: .medium),
-                .foregroundColor: UIColor(white: 1, alpha: 0.52),
+                .font: StoryCardFontToken.mono(size: 18, weight: .medium),
+                .foregroundColor: StoryCardDesign.textMuted,
             ]
         )
 
         "TSS • FTP EFFORT".draw(
             at: CGPoint(x: rightRect.minX + 24, y: rightRect.minY + 22),
             withAttributes: [
-                .font: UIFont.systemFont(ofSize: 22, weight: .bold),
-                .foregroundColor: mutedText,
-                .kern: 1.9,
+                .font: StoryCardFontToken.mono(size: 18, weight: .medium),
+                .foregroundColor: StoryCardDesign.textQuiet,
+                .kern: 1.7,
             ]
         )
 
         let tssValue = metricText(Int(workout.tss.rounded()), fallback: "—")
         let tssAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.monospacedDigitSystemFont(ofSize: 72, weight: .black),
-            .foregroundColor: UIColor.white,
-            .kern: -3,
+            .font: StoryCardFontToken.mono(size: 68, weight: .heavy),
+            .foregroundColor: StoryCardDesign.textPrimary,
+            .kern: -2.6,
         ]
         let tssSize = tssValue.size(withAttributes: tssAttrs)
         tssValue.draw(at: CGPoint(x: rightRect.minX + 24, y: rightRect.minY + 66), withAttributes: tssAttrs)
         "tss".draw(
             at: CGPoint(x: rightRect.minX + 24 + tssSize.width + 10, y: rightRect.minY + 109),
             withAttributes: [
-                .font: UIFont.systemFont(ofSize: 28, weight: .bold),
-                .foregroundColor: secondaryText,
+                .font: StoryCardFontToken.ui(size: 26, weight: .medium),
+                .foregroundColor: StoryCardDesign.textMuted,
             ]
         )
 
         let ftpPercent = ftpPercentValue(for: workout)
         let progressRect = CGRect(x: rightRect.minX + 24, y: rightRect.maxY - 52, width: rightRect.width - 48, height: 14)
         let track = UIBezierPath(roundedRect: progressRect, cornerRadius: 7)
-        UIColor.white.withAlphaComponent(0.10).setFill()
+        UIColor(AppColor.hair).setFill()
         track.fill()
 
         let fillWidth = progressRect.width * min(max(CGFloat(ftpPercent) / 100, 0), 1)
         let fillRect = CGRect(x: progressRect.minX, y: progressRect.minY, width: fillWidth, height: progressRect.height)
         let fillPath = UIBezierPath(roundedRect: fillRect, cornerRadius: 7)
-        let gradientColors = [UIColor(red: 245/255, green: 211/255, blue: 82/255, alpha: 1).cgColor, accent.cgColor] as CFArray
+        let gradientColors = [StoryCardDesign.accentYellow.cgColor, accent.cgColor] as CFArray
         cg.saveGState()
         cg.addPath(fillPath.cgPath)
         cg.clip()
@@ -861,16 +916,16 @@ private enum StoryCardDrawing {
         "FTP%".draw(
             at: CGPoint(x: progressRect.minX, y: progressRect.maxY + 8),
             withAttributes: [
-                .font: UIFont.systemFont(ofSize: 18, weight: .bold),
-                .foregroundColor: mutedText,
-                .kern: 1.0,
+                .font: StoryCardFontToken.mono(size: 15, weight: .medium),
+                .foregroundColor: StoryCardDesign.textQuiet,
+                .kern: 1.1,
             ]
         )
         "\(ftpPercent)".draw(
             at: CGPoint(x: progressRect.maxX - 46, y: progressRect.maxY + 4),
             withAttributes: [
-                .font: UIFont.monospacedDigitSystemFont(ofSize: 24, weight: .bold),
-                .foregroundColor: secondaryText,
+                .font: StoryCardFontToken.mono(size: 22, weight: .bold),
+                .foregroundColor: StoryCardDesign.textSecondary,
             ]
         )
     }
@@ -881,16 +936,31 @@ private enum StoryCardDrawing {
         cg.setShadow(
             offset: CGSize(width: 0, height: 20),
             blur: 50,
-            color: UIColor.black.withAlphaComponent(0.22).cgColor
+            color: StoryCardDesign.panelShadow.cgColor
         )
         cg.addPath(path.cgPath)
-        cg.setFillColor(UIColor.black.withAlphaComponent(0.12).cgColor)
+        cg.setFillColor(StoryCardDesign.canvasBackground.withAlphaComponent(0.12).cgColor)
         cg.fillPath()
         cg.restoreGState()
 
-        panelBackground.setFill()
-        path.fill()
-        panelBorder.setStroke()
+        cg.saveGState()
+        cg.addPath(path.cgPath)
+        cg.clip()
+        if let gradient = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(),
+            colors: [StoryCardDesign.panelTop.cgColor, StoryCardDesign.panelBottom.cgColor] as CFArray,
+            locations: [0, 1]
+        ) {
+            cg.drawLinearGradient(
+                gradient,
+                start: CGPoint(x: rect.midX, y: rect.minY),
+                end: CGPoint(x: rect.midX, y: rect.maxY),
+                options: []
+            )
+        }
+        cg.restoreGState()
+
+        StoryCardDesign.panelBorder.setStroke()
         path.lineWidth = 1
         path.stroke()
     }

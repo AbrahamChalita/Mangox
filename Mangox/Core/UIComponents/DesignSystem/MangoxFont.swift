@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 enum MangoxFont {
     case heroValue
@@ -16,28 +19,72 @@ enum MangoxFont {
     var value: Font {
         switch self {
         case .heroValue:
-            return .system(size: 52, weight: .light, design: .rounded)
+            return MangoxFontResolver.mono(size: 52, weight: .light)
         case .largeValue:
-            return .system(size: 28, weight: .bold, design: .monospaced)
+            return MangoxFontResolver.mono(size: 28, weight: .light)
         case .value:
-            return .system(size: 22, weight: .bold, design: .monospaced)
+            return MangoxFontResolver.mono(size: 22, weight: .regular)
         case .compactValue:
-            return .system(size: 20, weight: .bold, design: .monospaced)
+            return MangoxFontResolver.mono(size: 20, weight: .regular)
         case .title:
-            return .system(size: 17, weight: .bold)
+            return MangoxFontResolver.ui(size: 17, weight: .medium)
         case .bodyBold:
-            return .system(size: 15, weight: .semibold)
+            return MangoxFontResolver.ui(size: 15, weight: .medium)
         case .body:
-            return .system(size: 14, weight: .medium)
+            return MangoxFontResolver.ui(size: 14, weight: .regular)
         case .callout:
-            return .system(size: 13, weight: .semibold)
+            return MangoxFontResolver.ui(size: 13, weight: .medium)
         case .caption:
-            return .system(size: 12, weight: .semibold)
+            return MangoxFontResolver.mono(size: 11, weight: .regular)
         case .label:
-            return .system(size: 11, weight: .bold)
+            return MangoxFontResolver.mono(size: 10, weight: .regular)
         case .micro:
-            return .system(size: 9, weight: .heavy)
+            return MangoxFontResolver.mono(size: 9, weight: .regular)
         }
+    }
+}
+
+private enum MangoxFontResolver {
+    static func ui(size: CGFloat, weight: Font.Weight) -> Font {
+        // Manrope (variable font bundle); named instances Manrope-Light / Regular / Medium.
+        let fontName: String
+        switch weight {
+        case .light:
+            fontName = "Manrope-Light"
+        case .medium, .semibold, .bold, .heavy, .black:
+            fontName = "Manrope-Medium"
+        default:
+            fontName = "Manrope-Regular"
+        }
+
+        return custom(name: fontName, size: size, fallback: .system(size: size, weight: weight))
+    }
+
+    static func mono(size: CGFloat, weight: Font.Weight) -> Font {
+        let fontName: String
+        switch weight {
+        case .light:
+            fontName = "GeistMono-Light"
+        case .medium, .semibold, .bold, .heavy, .black:
+            fontName = "GeistMono-Medium"
+        default:
+            fontName = "GeistMono-Regular"
+        }
+
+        return custom(
+            name: fontName,
+            size: size,
+            fallback: .system(size: size, weight: weight, design: .monospaced)
+        )
+    }
+
+    private static func custom(name: String, size: CGFloat, fallback: Font) -> Font {
+        #if canImport(UIKit)
+        if UIFont(name: name, size: size) != nil {
+            return .custom(name, size: size)
+        }
+        #endif
+        return fallback
     }
 }
 

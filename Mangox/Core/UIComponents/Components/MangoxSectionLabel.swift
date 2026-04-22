@@ -7,8 +7,8 @@ struct MangoxSectionLabel: View {
     var body: some View {
         Text(title.uppercased())
             .mangoxFont(.label)
-            .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
-            .tracking(1.0)
+            .foregroundStyle(AppColor.fg3)
+            .tracking(1.4)
             .padding(.horizontal, horizontalPadding)
     }
 }

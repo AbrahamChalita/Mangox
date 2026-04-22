@@ -147,7 +147,7 @@ struct CalendarView: View {
 
             VStack(spacing: 0) {
                 header
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, MangoxSpacing.page)
                     .padding(.top, 12)
                     .padding(.bottom, 8)
 
@@ -500,12 +500,18 @@ struct CalendarView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Text("Workouts")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Ride history")
+                    .mangoxFont(.caption)
+                    .foregroundStyle(AppColor.mango)
 
-            Spacer()
+                Text("Workouts")
+                    .font(MangoxFont.title.value)
+                    .foregroundStyle(.white.opacity(AppOpacity.textPrimary))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             GlassEffectContainer(spacing: 8) {
                 HStack(spacing: 8) {

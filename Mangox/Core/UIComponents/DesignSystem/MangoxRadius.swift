@@ -1,10 +1,12 @@
 import SwiftUI
 
 enum MangoxRadius: CGFloat {
+    /// Hairline panels and settings groups — sharp-first system default.
+    case sharp = 0
     case pill = 999
-    case overlay = 18
-    case card = 14
-    case button = 12
-    case badge = 7
-    case input = 8
+    case overlay = 8
+    case card = 7
+    case button = 4
+    case badge = 3
+    case input = 5
 }

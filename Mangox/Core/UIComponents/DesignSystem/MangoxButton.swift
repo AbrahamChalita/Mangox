@@ -28,53 +28,70 @@ private struct MangoxButtonChrome: ViewModifier {
         case .hero:
             content
                 .mangoxFont(.title)
-                .foregroundStyle(AppColor.bg)
+                .foregroundStyle(AppColor.bg0)
                 .frame(maxWidth: .infinity)
-                .frame(height: 52)
-                .background(tint)
-                .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous))
+                .frame(height: 50)
+                .background(tint, in: RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous)
+                        .strokeBorder(tint.opacity(0.45), lineWidth: 1)
+                )
         case .primary:
             content
                 .foregroundStyle(tint)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .mangoxSurface(.frostedInteractive, shape: .rounded(MangoxRadius.button.rawValue))
+                .padding(.vertical, 12)
+                .background(AppColor.bg2, in: RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous)
+                        .strokeBorder(tint.opacity(0.45), lineWidth: 1)
+                )
         case .secondary:
             content
-                .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
+                .foregroundStyle(AppColor.fg1)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .mangoxSurface(.frostedInteractive, shape: .rounded(MangoxRadius.button.rawValue))
+                .padding(.vertical, 12)
+                .background(AppColor.bg2, in: RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous)
+                        .strokeBorder(AppColor.hair2, lineWidth: 1)
+                )
         case .icon:
             content
                 .frame(width: 40, height: 40)
-                .mangoxSurface(.frostedInteractive, shape: .circle)
+                .mangoxSurface(.frostedInteractive, shape: .rounded(MangoxRadius.button.rawValue))
         case .iconSmall:
             content
                 .frame(width: 32, height: 32)
-                .mangoxSurface(.frostedInteractive, shape: .circle)
+                .mangoxSurface(.frostedInteractive, shape: .rounded(MangoxRadius.button.rawValue))
         case .mapIcon:
             content
                 .frame(width: 40, height: 40)
-                .mangoxSurface(.mapOverlay, shape: .circle)
+                .mangoxSurface(.mapOverlay, shape: .rounded(MangoxRadius.button.rawValue))
         case .mapIconSmall:
             content
                 .frame(width: 32, height: 32)
-                .mangoxSurface(.mapOverlay, shape: .circle)
+                .mangoxSurface(.mapOverlay, shape: .rounded(MangoxRadius.button.rawValue))
         case .endIcon:
             content
                 .mangoxFont(.label)
                 .foregroundStyle(.white)
                 .frame(width: 40, height: 40)
-                .background(AppColor.red)
-                .clipShape(Circle())
+                .background(AppColor.red, in: RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous)
+                        .strokeBorder(AppColor.red.opacity(0.5), lineWidth: 1)
+                )
         case .destructive:
             content
-                .foregroundStyle(AppColor.bg)
+                .foregroundStyle(AppColor.bg0)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(AppColor.red)
-                .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
+                .padding(.vertical, 12)
+                .background(AppColor.red, in: RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous)
+                        .strokeBorder(AppColor.red.opacity(0.5), lineWidth: 1)
+                )
         case .plain:
             content
         }

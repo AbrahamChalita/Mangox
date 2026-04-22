@@ -9,33 +9,37 @@ struct MangoxMetricCard: View {
     var compact: Bool = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .mangoxFont(.label)
-                .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
-                .tracking(1.0)
+                .foregroundStyle(AppColor.fg3)
+                .tracking(1.4)
+                .textCase(.uppercase)
 
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(value)
-                    .font(.system(size: compact ? 24 : 28, weight: .bold, design: .monospaced))
+                    .font((compact ? MangoxFont.value : MangoxFont.largeValue).value)
                     .foregroundStyle(valueColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
+                    .monospacedDigit()
 
                 Text(unit)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
+                    .mangoxFont(.micro)
+                    .foregroundStyle(AppColor.fg2)
+                    .tracking(0.8)
+                    .textCase(.uppercase)
             }
 
             if let subtitle {
                 Text(subtitle)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
+                    .mangoxFont(.micro)
+                    .foregroundStyle(AppColor.fg3)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, compact ? 14 : 20)
-        .padding(.vertical, compact ? 12 : 18)
+        .padding(.horizontal, compact ? MangoxSpacing.lg.rawValue : MangoxSpacing.xl.rawValue)
+        .padding(.vertical, compact ? MangoxSpacing.md.rawValue : MangoxSpacing.lg.rawValue)
         .mangoxSurface(.flat, shape: .rounded(MangoxRadius.card.rawValue))
     }
 }

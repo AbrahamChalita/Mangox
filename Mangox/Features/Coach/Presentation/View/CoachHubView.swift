@@ -21,7 +21,7 @@ struct CoachHubView: View {
 
             VStack(spacing: 0) {
                 minimalTopBar
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, MangoxSpacing.page)
                     .padding(.top, 12)
                     .padding(.bottom, 8)
 
@@ -78,29 +78,40 @@ struct CoachHubView: View {
     // MARK: - Top Bar
 
     private var minimalTopBar: some View {
-        HStack(spacing: 8) {
-            Text("Coach")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(textPrimary)
-                .lineLimit(1)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Plans & chat")
+                    .mangoxFont(.caption)
+                    .foregroundStyle(mango)
 
-            Spacer(minLength: 8)
+                Text("Coach")
+                    .font(MangoxFont.title.value)
+                    .foregroundStyle(textPrimary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Button {
                 chatOpenFeedbackTick += 1
                 showChat = true
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
                         .font(.system(size: 12, weight: .semibold))
                     Text("Chat")
-                        .font(.system(size: 13, weight: .bold))
+                        .mangoxFont(.caption)
+                        .tracking(0.6)
+                        .textCase(.uppercase)
                 }
-                .foregroundStyle(AppColor.bg)
+                .foregroundStyle(mango)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(mango)
+                .background(AppColor.bg1)
                 .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(mango.opacity(0.4), lineWidth: 1)
+                )
             }
             .buttonStyle(MangoxPressStyle())
             .sensoryFeedback(.impact(weight: .light, intensity: 0.85), trigger: chatOpenFeedbackTick)
