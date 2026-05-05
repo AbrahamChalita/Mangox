@@ -1,5 +1,5 @@
 import CoreLocation
-import CoreMotion
+@preconcurrency import CoreMotion
 import Foundation
 import MapKit
 import Observation
@@ -360,7 +360,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
     // MARK: - Private
 
     private var clManager: CLLocationManager?
-    private let motionManager = CMMotionManager()
+    private nonisolated(unsafe) let motionManager = CMMotionManager()
     private var rideStartDate: Date?
     private var totalPausedDuration: TimeInterval = 0
     private var lastPauseStart: Date?
@@ -568,14 +568,15 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         let headingBox = UncheckedOptional<Timer>(concurrencyHandles.headingFlushTimer)
         let fileBox = UncheckedOptional<FileHandle>(
             concurrencyHandles.pendingRecordedTrackFileHandle)
+        let motionBox = UncheckedOptional<CMMotionManager>(motionManager)
         Task { @MainActor in
             rideBox.value?.invalidate()
             gpsBox.value?.invalidate()
             headingBox.value?.invalidate()
             fileBox.value?.closeFile()
-        }
-        if motionManager.isDeviceMotionActive {
-            motionManager.stopDeviceMotionUpdates()
+            if motionBox.value?.isDeviceMotionActive == true {
+                motionBox.value?.stopDeviceMotionUpdates()
+            }
         }
     }
 
@@ -2035,15 +2036,17 @@ extension LocationManager: CLLocationManagerDelegate {
     }
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status = manager.authorizationStatus
         Task { @MainActor in
-            self.authorizationStatus = manager.authorizationStatus
+            self.authorizationStatus = status
+            guard let manager = self.clManager else { return }
             self.applyBackgroundLocationPolicy(to: manager)
             if self.isRecording || self.outdoorLocationPreviewActive {
                 manager.startUpdatingLocation()
             }
             self.applyHighFrequencySensorsPolicy()
             logger.info(
-                "Location authorization changed to: \(manager.authorizationStatus.rawValue)")
+                "Location authorization changed to: \(status.rawValue)")
         }
     }
 

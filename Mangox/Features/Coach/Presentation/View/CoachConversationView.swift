@@ -350,13 +350,8 @@ struct CoachConversationView: View {
                 minHeight: max(transcriptViewportHeight, 0),
                 alignment: transcriptContentAlignment
             )
-            // Smooth the one-time .center → .bottom shift when the user sends
-            // their first message; without this the empty-state collapses with a
-            // visible jump.
-            .animation(
-                accessibilityReduceMotion ? nil : .smooth(duration: 0.32),
-                value: transcriptHasContent
-            )
+            // No layout animation: instant swaps keep the AI chat feeling responsive
+            // and prevent the empty-state → messages jump from looking laggy.
         }
         .background {
             GeometryReader { proxy in
@@ -380,27 +375,17 @@ struct CoachConversationView: View {
         )
         .onAppear {
             if !coachViewModel.messages.isEmpty || coachViewModel.isLoading {
-                if let lastMessage = coachViewModel.messages.last {
-                    scrollToMessageID = lastMessage.id
-                }
+                scrollTranscriptToBottom(animated: false)
             }
         }
         .onChange(of: coachViewModel.messages.count) { oldCount, newCount in
-            if oldCount == 0, newCount > 0 {
-                if let firstMessage = coachViewModel.messages.first {
-                    scrollToMessageID = firstMessage.id
-                }
-            } else if newCount > oldCount {
-                if let lastMessage = coachViewModel.messages.last {
-                    scrollToMessageID = lastMessage.id
-                }
+            if newCount > oldCount {
+                scrollTranscriptToBottom()
             }
         }
         .onChange(of: scrollToMessageID) { _, targetID in
             guard let targetID, shouldAutoScrollToBottom else { return }
-            withAnimation(MangoxMotion.snappy) {
-                scrollPosition.scrollTo(id: targetID, anchor: .bottom)
-            }
+            scrollTranscriptToBottom()
         }
         .onChange(of: coachViewModel.isLoading) { _, _ in
             scrollTranscriptToBottom()
@@ -414,7 +399,9 @@ struct CoachConversationView: View {
             let now = Date()
             guard now.timeIntervalSince(lastStreamScrollAt) > 0.22 else { return }
             lastStreamScrollAt = now
-            scrollTranscriptToBottom()
+            // Instant scroll during streaming keeps the bottom edge pinned
+            // without the visual lag of chasing animated scrolls.
+            scrollTranscriptToBottom(animated: false)
         }
         .onChange(of: coachViewModel.generatingPlan) { _, g in
             if g {

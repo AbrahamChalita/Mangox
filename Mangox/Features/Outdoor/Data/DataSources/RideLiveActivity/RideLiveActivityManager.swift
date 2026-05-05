@@ -5,6 +5,13 @@ import os.log
 private let liveActivityLogger = Logger(
     subsystem: "com.abchalita.Mangox", category: "RideLiveActivity")
 
+private struct SendableRideActivity: @unchecked Sendable {
+    nonisolated(unsafe) let value: Activity<MangoxRideAttributes>
+    nonisolated init(_ value: Activity<MangoxRideAttributes>) {
+        self.value = value
+    }
+}
+
 /// Starts and updates a Live Activity while recording. Requires a Widget Extension target that declares
 /// `ActivityConfiguration(for: MangoxRideAttributes.self)` and embeds the `.appex` in the Mangox app.
 @MainActor
@@ -125,6 +132,7 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
     ) async {
         let now = Date()
         if let activeActivity = resolveExistingActivityIfNeeded() {
+            let activityBox = SendableRideActivity(activeActivity)
             let elapsed = now.timeIntervalSince(lastUpdate)
             guard elapsed >= RideLiveActivityConfiguration.minUpdateInterval else {
                 #if DEBUG
@@ -134,7 +142,7 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
                 #endif
                 return
             }
-            await activeActivity.update(
+            await activityBox.value.update(
                 ActivityContent(
                     state: state,
                     staleDate: now.addingTimeInterval(RideLiveActivityConfiguration.staleWindow)))
@@ -185,15 +193,15 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
 
     private func endIfNeeded() async {
         var activityIDs = Set<String>()
-        var activitiesToEnd: [Activity<MangoxRideAttributes>] = []
+        var activitiesToEnd: [SendableRideActivity] = []
 
         if let activity {
             activityIDs.insert(activity.id)
-            activitiesToEnd.append(activity)
+            activitiesToEnd.append(SendableRideActivity(activity))
         }
 
         for existing in Activity<MangoxRideAttributes>.activities where activityIDs.insert(existing.id).inserted {
-            activitiesToEnd.append(existing)
+            activitiesToEnd.append(SendableRideActivity(existing))
         }
 
         guard !activitiesToEnd.isEmpty else {
@@ -203,7 +211,7 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
         }
 
         for existing in activitiesToEnd {
-            await existing.end(nil, dismissalPolicy: .immediate)
+            await existing.value.end(nil, dismissalPolicy: .immediate)
         }
 
         self.activity = nil

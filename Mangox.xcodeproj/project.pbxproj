@@ -57,6 +57,7 @@
 		000345252F56648D004200FC /* MangoxTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MangoxTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0003452F2F56648D004200FC /* MangoxUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MangoxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		00FM00022F56648D004200FC /* FoundationModels.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = FoundationModels.framework; path = System/Library/Frameworks/FoundationModels.framework; sourceTree = SDKROOT; };
+		0C0D00012F900001004200FC /* App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = App.xcconfig; sourceTree = "<group>"; };
 		0B1A00012F56648D004200FC /* MangoxLiveActivityExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MangoxLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -149,6 +150,7 @@
 				0B1A00022F56648D004200FC /* MangoxLiveActivityExtension */,
 				000345282F56648D004200FC /* MangoxTests */,
 				000345322F56648D004200FC /* MangoxUITests */,
+				0C0D00022F900001004200FC /* Config */,
 				000345172F56648C004200FC /* Products */,
 				005050FE2F85CC52002A0529 /* Recovered References */,
 			);
@@ -171,6 +173,14 @@
 				00FM00022F56648D004200FC /* FoundationModels.framework */,
 			);
 			name = "Recovered References";
+			sourceTree = "<group>";
+		};
+		0C0D00022F900001004200FC /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				0C0D00012F900001004200FC /* App.xcconfig */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -528,6 +538,7 @@
 		};
 		0003453A2F56648D004200FC /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 0C0D00012F900001004200FC /* App.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -545,6 +556,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Mangox/Info.plist;
 				INFOPLIST_KEY_CFBundleURLTypes = "({CFBundleTypeRole=Editor;CFBundleURLName=$(PRODUCT_BUNDLE_IDENTIFIER).strava;CFBundleURLSchemes=(mangox);})";
+				INFOPLIST_KEY_RevenueCatAPIKey = "$(REVENUECAT_API_KEY)";
 				INFOPLIST_KEY_STRAVA_CLIENT_ID = "$(STRAVA_CLIENT_ID)";
 				INFOPLIST_KEY_STRAVA_CLIENT_SECRET = "$(STRAVA_CLIENT_SECRET)";
 				INFOPLIST_KEY_STRAVA_REDIRECT_URI = "$(STRAVA_REDIRECT_URI)";
@@ -570,27 +582,29 @@
 				PRODUCT_BUNDLE_IDENTIFIER = abchalita.Mangox;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				REVENUECAT_API_KEY = "$(inherited)";
 				SDKROOT = auto;
-				STRAVA_CLIENT_ID = 207587;
-				STRAVA_CLIENT_SECRET = 4fa95bca1c95ebe0d0c5a5fde96305d018bfc99b;
-				STRAVA_REDIRECT_URI = "mangox://localhost/strava-auth";
+				STRAVA_CLIENT_ID = "$(inherited)";
+				STRAVA_CLIENT_SECRET = "$(inherited)";
+				STRAVA_REDIRECT_URI = "$(inherited)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				WHOOP_CLIENT_ID = "8c9a9d3d-4c73-466e-8494-671b85bb2446";
-				WHOOP_CLIENT_SECRET = 03902822b9e745d14c8088ceb97bbc0db6360d8497ad99210baa701c01926086;
-				WHOOP_REDIRECT_URI = "mangox://localhost/whoop-auth";
+				WHOOP_CLIENT_ID = "$(inherited)";
+				WHOOP_CLIENT_SECRET = "$(inherited)";
+				WHOOP_REDIRECT_URI = "$(inherited)";
 				XROS_DEPLOYMENT_TARGET = 26.2;
 			};
 			name = Debug;
 		};
 		0003453B2F56648D004200FC /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 0C0D00012F900001004200FC /* App.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -608,6 +622,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Mangox/Info.plist;
 				INFOPLIST_KEY_CFBundleURLTypes = "({CFBundleTypeRole=Editor;CFBundleURLName=$(PRODUCT_BUNDLE_IDENTIFIER).strava;CFBundleURLSchemes=(mangox);})";
+				INFOPLIST_KEY_RevenueCatAPIKey = "$(REVENUECAT_API_KEY)";
 				INFOPLIST_KEY_STRAVA_CLIENT_ID = "$(STRAVA_CLIENT_ID)";
 				INFOPLIST_KEY_STRAVA_CLIENT_SECRET = "$(STRAVA_CLIENT_SECRET)";
 				INFOPLIST_KEY_STRAVA_REDIRECT_URI = "$(STRAVA_REDIRECT_URI)";
@@ -632,21 +647,22 @@
 				PRODUCT_BUNDLE_IDENTIFIER = abchalita.Mangox;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				REVENUECAT_API_KEY = "$(inherited)";
 				SDKROOT = auto;
-				STRAVA_CLIENT_ID = 207587;
-				STRAVA_CLIENT_SECRET = 4fa95bca1c95ebe0d0c5a5fde96305d018bfc99b;
-				STRAVA_REDIRECT_URI = "mangox://localhost/strava-auth";
+				STRAVA_CLIENT_ID = "$(inherited)";
+				STRAVA_CLIENT_SECRET = "$(inherited)";
+				STRAVA_REDIRECT_URI = "$(inherited)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				WHOOP_CLIENT_ID = "8c9a9d3d-4c73-466e-8494-671b85bb2446";
-				WHOOP_CLIENT_SECRET = 03902822b9e745d14c8088ceb97bbc0db6360d8497ad99210baa701c01926086;
-				WHOOP_REDIRECT_URI = "mangox://localhost/whoop-auth";
+				WHOOP_CLIENT_ID = "$(inherited)";
+				WHOOP_CLIENT_SECRET = "$(inherited)";
+				WHOOP_REDIRECT_URI = "$(inherited)";
 				XROS_DEPLOYMENT_TARGET = 26.2;
 			};
 			name = Release;
@@ -672,7 +688,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Mangox.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Mangox";
 				XROS_DEPLOYMENT_TARGET = 26.2;
@@ -700,7 +716,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Mangox.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Mangox";
 				XROS_DEPLOYMENT_TARGET = 26.2;
@@ -727,7 +743,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_TARGET_NAME = Mangox;
 				XROS_DEPLOYMENT_TARGET = 26.2;
@@ -754,7 +770,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_TARGET_NAME = Mangox;
 				XROS_DEPLOYMENT_TARGET = 26.2;
@@ -785,7 +801,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -815,7 +831,7 @@
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;

@@ -1,6 +1,7 @@
 import Mangox
 import Testing
 
+@MainActor
 struct GPXPrivacyTrimLogicTests {
 
     @Test func trimStartDropsEarlyPoints() {

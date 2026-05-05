@@ -1,6 +1,7 @@
 import Testing
 @testable import Mangox
 
+@MainActor
 struct RingBufferTests {
 
     @Test func appendAndAverageBeforeFull() {

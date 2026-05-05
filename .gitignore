@@ -8,6 +8,11 @@ DerivedData/
 *.xcscmblueprint
 xcuserdata/
 
+# Local app secrets / build overrides
+*.xcconfig
+!Config/App.xcconfig
+!Config/*.xcconfig.example
+
 # Local build output (custom paths)
 .derivedData/
 .derivedDataBuild/

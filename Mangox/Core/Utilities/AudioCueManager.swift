@@ -15,7 +15,7 @@ final class AudioCueManager: NSObject, AVSpeechSynthesizerDelegate {
 
     private let synth = AVSpeechSynthesizer()
     private var isEnabled: Bool { RidePreferences.shared.stepAudioCueEnabled }
-    private var audioInterruptionObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var audioInterruptionObserver: NSObjectProtocol?
 
     private override init() {
         super.init()
@@ -26,9 +26,13 @@ final class AudioCueManager: NSObject, AVSpeechSynthesizerDelegate {
             queue: .main
         ) { [weak self] notification in
             guard let self else { return }
-            // Delivered on `.main`; avoid `Task` so `Notification` is not captured in a `@Sendable` async hop.
+            let userInfo = notification.userInfo
+            let typeValue = userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            let optionsValue = userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
+
+            // Delivered on `.main`; avoid `Task` so non-Sendable notification payloads are not captured in an async hop.
             MainActor.assumeIsolated {
-                self.handleAudioInterruption(notification)
+                self.handleAudioInterruption(typeValue: typeValue, optionsValue: optionsValue)
             }
         }
     }
@@ -121,10 +125,9 @@ final class AudioCueManager: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
-    private func handleAudioInterruption(_ notification: Notification) {
+    private func handleAudioInterruption(typeValue: UInt?, optionsValue: UInt?) {
         guard
-            let userInfo = notification.userInfo,
-            let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+            let typeValue,
             let type = AVAudioSession.InterruptionType(rawValue: typeValue)
         else {
             return
@@ -137,7 +140,7 @@ final class AudioCueManager: NSObject, AVSpeechSynthesizerDelegate {
             }
         case .ended:
             configureAudioSessionIfNeeded()
-            if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt,
+            if let optionsValue,
                AVAudioSession.InterruptionOptions(rawValue: optionsValue).contains(.shouldResume),
                synth.isPaused {
                 synth.continueSpeaking()

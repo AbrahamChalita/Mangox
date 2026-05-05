@@ -22,9 +22,9 @@ final class OnboardingViewModel {
     var stravaStatus: String?
     var welcomeAppeared = false
     var finishCelebration = false
+    var actionInProgress = false
     var onboardingWeightKg: Double = RidePreferences.shared.riderWeightKg
-    var onboardingBirthYear: Int = RidePreferences.shared.riderBirthYear
-        ?? (Calendar.current.component(.year, from: .now) - 30)
+    var onboardingBirthYear: Int = OnboardingViewModel.initialBirthYear()
     var onboardingRiderDisplayName: String = RidePreferences.shared.riderDisplayName
 
     /// BLE trigger retained so CBCentralManager stays alive during permission polling.
@@ -51,6 +51,13 @@ final class OnboardingViewModel {
         self.healthKitService = healthKitService
         self.locationService = locationService
         self.stravaService = stravaService
+    }
+
+    private static func initialBirthYear() -> Int {
+        let currentYear = Calendar.current.component(.year, from: .now)
+        let maxYear = currentYear - 16
+        let year = RidePreferences.shared.riderBirthYear ?? (currentYear - 30)
+        return min(max(year, 1940), maxYear)
     }
 
     // MARK: - Button title
@@ -116,6 +123,7 @@ final class OnboardingViewModel {
     // MARK: - Permission requests
 
     func requestBluetooth() {
+        actionInProgress = true
         bleTrigger = CBCentralManager(delegate: nil, queue: nil)
         Task {
             for _ in 0..<30 {
@@ -124,16 +132,22 @@ final class OnboardingViewModel {
                 await MainActor.run { blePermissionGranted = granted }
                 if CBManager.authorization != .notDetermined { break }
             }
-            await MainActor.run { advance() }
+            await MainActor.run {
+                actionInProgress = false
+                advance()
+            }
         }
     }
 
     func requestHealthKit() async {
+        actionInProgress = true
         await healthKitService.requestAuthorization()
         healthKitGranted = healthKitService.isAuthorized
+        actionInProgress = false
     }
 
     func requestLocation() {
+        actionInProgress = true
         locationService.requestPermission()
         Task {
             for _ in 0..<40 {
@@ -142,11 +156,14 @@ final class OnboardingViewModel {
             }
             await MainActor.run {
                 locationGranted = locationService.isAuthorized
+                actionInProgress = false
             }
         }
     }
 
     func connectStrava() async {
+        actionInProgress = true
+        defer { actionInProgress = false }
         do {
             try await stravaService.connect()
             stravaStatus = "Connected as \(stravaService.athleteDisplayName ?? "Strava athlete")."
@@ -182,6 +199,8 @@ final class OnboardingViewModel {
     // MARK: - Action handler
 
     func handleAction(reduceMotion: Bool) {
+        guard !actionInProgress else { return }
+
         switch currentStep {
         case 1:
             if !blePermissionGranted {

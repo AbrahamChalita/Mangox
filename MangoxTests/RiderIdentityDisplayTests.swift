@@ -1,10 +1,13 @@
 import XCTest
 @testable import Mangox
 
+@MainActor
 final class RiderIdentityDisplayTests: XCTestCase {
 
     override func tearDown() {
-        RidePreferences.shared.riderDisplayName = ""
+        MainActor.assumeIsolated {
+            RidePreferences.shared.riderDisplayName = ""
+        }
         super.tearDown()
     }
 

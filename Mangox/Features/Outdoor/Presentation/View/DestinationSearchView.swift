@@ -2,6 +2,13 @@ import SwiftUI
 import MapKit
 import CoreLocation
 
+private struct SendableSearchCompletions: @unchecked Sendable {
+    nonisolated(unsafe) let value: [MKLocalSearchCompletion]
+    nonisolated init(_ value: [MKLocalSearchCompletion]) {
+        self.value = value
+    }
+}
+
 // MARK: - Stable ID for MKLocalSearchCompletion
 
 extension MKLocalSearchCompletion {
@@ -98,9 +105,9 @@ final class DestinationSearchCompleter: NSObject, MKLocalSearchCompleterDelegate
     // MARK: MKLocalSearchCompleterDelegate
 
     nonisolated func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
-        let results = completer.results
+        let results = SendableSearchCompletions(completer.results)
         Task { @MainActor in
-            self.completions = results
+            self.completions = results.value
             self.isSearching = false
         }
     }

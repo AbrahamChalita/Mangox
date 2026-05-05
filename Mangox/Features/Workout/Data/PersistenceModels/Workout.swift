@@ -5,7 +5,7 @@ import SwiftData
 /// Minimum active seconds for a workout to be considered valid.
 /// Workouts shorter than this are treated as accidental starts and
 /// will not count toward training plan completion.
-let minimumValidWorkoutSeconds: Int = 60
+nonisolated let minimumValidWorkoutSeconds: Int = 60
 
 @Model
 final class Workout {

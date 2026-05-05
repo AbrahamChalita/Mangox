@@ -2,7 +2,7 @@ import ActivityKit
 import Foundation
 
 /// Shared by the app (`Activity.request`) and the Widget Extension (Live Activity UI). Keep definitions in sync.
-struct MangoxRideAttributes: ActivityAttributes {
+nonisolated struct MangoxRideAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         var speedKmh: Double
         var distanceM: Double

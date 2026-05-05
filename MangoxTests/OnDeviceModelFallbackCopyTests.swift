@@ -2,6 +2,7 @@ import XCTest
 
 @testable import Mangox
 
+@MainActor
 final class OnDeviceModelFallbackCopyTests: XCTestCase {
 
     func testInstagramStoryCaptionRespectsMaxLength() {

@@ -5,9 +5,29 @@ nonisolated private let bleLogger = Logger(subsystem: "com.abchalita.Mangox", ca
 
 // CoreBluetooth types are Objective-C classes and are not `Sendable`; we only ever finish delegate
 // callbacks on the main actor. These wrappers silence Swift 6 diagnostics when crossing `@Sendable` boundaries.
-private struct SendablePeripheral: @unchecked Sendable { let value: CBPeripheral }
-private struct SendableService: @unchecked Sendable { let value: CBService }
-private struct SendableCharacteristic: @unchecked Sendable { let value: CBCharacteristic }
+private struct SendablePeripheral: @unchecked Sendable {
+    nonisolated(unsafe) let value: CBPeripheral
+
+    nonisolated init(value: CBPeripheral) {
+        self.value = value
+    }
+}
+
+private struct SendableService: @unchecked Sendable {
+    nonisolated(unsafe) let value: CBService
+
+    nonisolated init(value: CBService) {
+        self.value = value
+    }
+}
+
+private struct SendableCharacteristic: @unchecked Sendable {
+    nonisolated(unsafe) let value: CBCharacteristic
+
+    nonisolated init(value: CBCharacteristic) {
+        self.value = value
+    }
+}
 
 enum BLEConnectionState: Equatable {
     case disconnected
@@ -888,7 +908,7 @@ extension BLEManager: CBCentralManagerDelegate {
     ) {
         let restoredPeripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral]
             ?? []
-        let restoredScanningServices = dict[CBCentralManagerRestoredStateScanServicesKey] as? [CBUUID]
+        let didRestoreScanning = dict[CBCentralManagerRestoredStateScanServicesKey] != nil
 
         let boxedPeripherals = restoredPeripherals.map { SendablePeripheral(value: $0) }
         DispatchQueue.main.async { [weak self] in
@@ -943,7 +963,7 @@ extension BLEManager: CBCentralManagerDelegate {
                     }
                 }
 
-                self.isScanning = restoredScanningServices != nil
+                self.isScanning = didRestoreScanning
             }
         }
     }

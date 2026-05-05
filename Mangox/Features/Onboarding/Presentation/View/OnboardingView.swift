@@ -70,6 +70,8 @@ struct OnboardingView: View {
                     }
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.white.opacity(0.35))
+                    .disabled(viewModel.actionInProgress)
+                    .opacity(viewModel.actionInProgress ? 0.45 : 1)
                     .padding(.top, 16)
                     .padding(.bottom, 40)
                 } else {
@@ -185,10 +187,11 @@ struct OnboardingView: View {
                 .foregroundStyle(AppColor.bg)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
-                .background(AppColor.mango)
+                .background(viewModel.actionInProgress ? AppColor.mango.opacity(0.55) : AppColor.mango)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(MangoxPressStyle())
+        .disabled(viewModel.actionInProgress)
     }
 
     // MARK: - Pages
@@ -323,7 +326,7 @@ struct OnboardingView: View {
             hero: .sfSymbol("figure.outdoor.cycle"),
             title: "Your Rider Profile",
             subtitle:
-                "Add your name and an optional photo, plus weight and birth date for W/kg, calorie estimates, and coaching.",
+                "Add your name and an optional photo, plus weight and birth year for W/kg, calorie estimates, and coaching.",
             color: AppColor.blue,
             reduceMotion: reduceMotion,
             extraContent: {
@@ -362,18 +365,17 @@ struct OnboardingView: View {
 
                     riderInputCard(
                         icon: "calendar",
-                        title: "BIRTH DATE",
+                        title: "BIRTH YEAR",
                         value: "\(viewModel.onboardingBirthYear)  ·  Age \(onboardingAge)",
                         accent: AppColor.blue
                     ) {
-                        DatePicker(
-                            "Birth date",
-                            selection: onboardingBirthDateBinding,
-                            in: onboardingBirthDateRange,
-                            displayedComponents: .date
-                        )
+                        Picker("Birth year", selection: $viewModel.onboardingBirthYear) {
+                            ForEach(onboardingBirthYearPickerValues, id: \.self) { year in
+                                Text(String(year)).tag(year)
+                            }
+                        }
                         .labelsHidden()
-                        .datePickerStyle(.wheel)
+                        .pickerStyle(.wheel)
                         .tint(AppColor.blue)
                         .frame(maxWidth: .infinity)
                         .frame(height: 148)
@@ -526,7 +528,7 @@ struct OnboardingView: View {
                     HStack(spacing: MangoxSpacing.sm.rawValue) {
                         PhotosPicker(selection: $onboardingProfilePhotoItem, matching: .images) {
                             Label("Choose photo", systemImage: "photo")
-                                .mangoxFont(.callout)
+                                .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(.black)
                                 .labelStyle(.titleAndIcon)
                                 .padding(.horizontal, MangoxSpacing.md.rawValue)
@@ -570,25 +572,9 @@ struct OnboardingView: View {
         max(0, Calendar.current.component(.year, from: .now) - viewModel.onboardingBirthYear)
     }
 
-    private var onboardingBirthDateBinding: Binding<Date> {
-        Binding(
-            get: { dateFromBirthYear(viewModel.onboardingBirthYear) },
-            set: { newDate in
-                viewModel.onboardingBirthYear = Calendar.current.component(.year, from: newDate)
-            }
-        )
-    }
-
-    private var onboardingBirthDateRange: ClosedRange<Date> {
-        let calendar = Calendar.current
-        let currentYear = calendar.component(.year, from: .now)
-        let minimum = calendar.date(from: DateComponents(year: 1940, month: 1, day: 1)) ?? .distantPast
-        let maximum = calendar.date(from: DateComponents(year: currentYear - 16, month: 12, day: 31)) ?? .now
-        return minimum...maximum
-    }
-
-    private func dateFromBirthYear(_ year: Int) -> Date {
-        Calendar.current.date(from: DateComponents(year: year, month: 7, day: 1)) ?? .now
+    private var onboardingBirthYearPickerValues: [Int] {
+        let maxYear = Calendar.current.component(.year, from: .now) - 16
+        return Array((1940...maxYear).reversed())
     }
 
     private func riderInputCard<Content: View>(
@@ -695,73 +681,80 @@ private struct OnboardingWelcomePage<FeatureRows: View>: View {
     @ViewBuilder var featureRows: () -> FeatureRows
 
     var body: some View {
-        VStack(spacing: 20) {
-            Spacer()
+        GeometryReader { proxy in
+            ScrollView(.vertical) {
+                VStack(spacing: 20) {
+                    Spacer(minLength: 0)
 
-            ZStack {
-                ForEach(0..<6, id: \.self) { i in
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(AppColor.mango.opacity(0.12 - Double(i) * 0.015))
-                        .frame(width: 120 - CGFloat(i) * 14, height: 3)
-                        .offset(x: CGFloat(i) * 6 + 40, y: CGFloat(i) * 5 - 20)
-                        .rotationEffect(.degrees(-18))
-                        .opacity(welcomeLineOpacity(index: i))
-                        .animation(welcomeAnimation(delay: 0.02 + Double(i) * 0.03), value: welcomeAppeared)
-                }
+                    ZStack {
+                        ForEach(0..<6, id: \.self) { i in
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(AppColor.mango.opacity(0.12 - Double(i) * 0.015))
+                                .frame(width: 120 - CGFloat(i) * 14, height: 3)
+                                .offset(x: CGFloat(i) * 6 + 40, y: CGFloat(i) * 5 - 20)
+                                .rotationEffect(.degrees(-18))
+                                .opacity(welcomeLineOpacity(index: i))
+                                .animation(welcomeAnimation(delay: 0.02 + Double(i) * 0.03), value: welcomeAppeared)
+                        }
 
-                ZStack {
-                    Circle()
-                        .fill(AppColor.mango.opacity(0.1))
-                        .frame(width: 200, height: 200)
-                        .scaleEffect(heroHaloScale)
-                    Circle()
-                        .fill(AppColor.mango.opacity(0.05))
-                        .frame(width: 248, height: 248)
-                        .scaleEffect(heroHaloScale * 1.02)
+                        ZStack {
+                            Circle()
+                                .fill(AppColor.mango.opacity(0.1))
+                                .frame(width: 200, height: 200)
+                                .scaleEffect(heroHaloScale)
+                            Circle()
+                                .fill(AppColor.mango.opacity(0.05))
+                                .frame(width: 248, height: 248)
+                                .scaleEffect(heroHaloScale * 1.02)
 
-                    Image(systemName: "figure.outdoor.cycle")
-                        .font(.system(size: 76, weight: .thin))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [AppColor.mango, AppColor.yellow.opacity(0.9)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .shadow(color: AppColor.mango.opacity(0.35), radius: 18, y: 8)
+                            Image(systemName: "figure.outdoor.cycle")
+                                .font(.system(size: 76, weight: .thin))
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        colors: [AppColor.mango, AppColor.yellow.opacity(0.9)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .shadow(color: AppColor.mango.opacity(0.35), radius: 18, y: 8)
+                                .opacity(welcomeAppeared ? 1 : 0)
+                                .offset(y: welcomeAppeared ? 0 : 16)
+                                .animation(welcomeAnimation(delay: 0.06), value: welcomeAppeared)
+                        }
+                        .animation(welcomeAnimation(delay: 0.04), value: welcomeAppeared)
+                    }
+                    .padding(.bottom, 8)
+
+                    VStack(spacing: 10) {
+                        Text("Train smarter")
+                            .font(.largeTitle.weight(.bold))
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                            .opacity(welcomeAppeared ? 1 : 0)
+                            .offset(y: welcomeAppeared ? 0 : 16)
+                            .animation(welcomeAnimation(delay: 0.14), value: welcomeAppeared)
+
+                        Text("Indoor ERG, outdoor GPS, and plans — without juggling another bike computer app.")
+                            .font(.body)
+                            .foregroundStyle(.white.opacity(0.52))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 28)
+                            .opacity(welcomeAppeared ? 1 : 0)
+                            .offset(y: welcomeAppeared ? 0 : 16)
+                            .animation(welcomeAnimation(delay: 0.22), value: welcomeAppeared)
+                    }
+
+                    featureRows()
                         .opacity(welcomeAppeared ? 1 : 0)
-                        .offset(y: welcomeAppeared ? 0 : 16)
-                        .animation(welcomeAnimation(delay: 0.06), value: welcomeAppeared)
+                        .offset(y: welcomeAppeared ? 0 : 14)
+                        .animation(welcomeAnimation(delay: 0.3), value: welcomeAppeared)
+
+                    Spacer(minLength: 0)
                 }
-                .animation(welcomeAnimation(delay: 0.04), value: welcomeAppeared)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: proxy.size.height)
+                .padding(.vertical, 24)
             }
-            .padding(.bottom, 8)
-
-            VStack(spacing: 10) {
-                Text("Train smarter")
-                    .font(.largeTitle.weight(.bold))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .opacity(welcomeAppeared ? 1 : 0)
-                    .offset(y: welcomeAppeared ? 0 : 16)
-                    .animation(welcomeAnimation(delay: 0.14), value: welcomeAppeared)
-
-                Text("Indoor ERG, outdoor GPS, and plans — without juggling another bike computer app.")
-                    .font(.body)
-                    .foregroundStyle(.white.opacity(0.52))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 28)
-                    .opacity(welcomeAppeared ? 1 : 0)
-                    .offset(y: welcomeAppeared ? 0 : 16)
-                    .animation(welcomeAnimation(delay: 0.22), value: welcomeAppeared)
-            }
-
-            featureRows()
-                .opacity(welcomeAppeared ? 1 : 0)
-                .offset(y: welcomeAppeared ? 0 : 14)
-                .animation(welcomeAnimation(delay: 0.3), value: welcomeAppeared)
-
-            Spacer()
         }
     }
 
@@ -814,61 +807,67 @@ private struct OnboardingPageView<ExtraContent: View>: View {
     }
 
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
+        GeometryReader { proxy in
+            ScrollView(.vertical) {
+                VStack(spacing: 24) {
+                    Spacer(minLength: 0)
 
-            ZStack {
-                Circle()
-                    .fill(color.opacity(0.08))
-                    .frame(width: 160, height: 160)
-                    .scaleEffect(outerRingScale)
-                Circle()
-                    .fill(color.opacity(0.05))
-                    .frame(width: 200, height: 200)
-                    .scaleEffect(innerRingScale)
+                    ZStack {
+                        Circle()
+                            .fill(color.opacity(0.08))
+                            .frame(width: 160, height: 160)
+                            .scaleEffect(outerRingScale)
+                        Circle()
+                            .fill(color.opacity(0.05))
+                            .frame(width: 200, height: 200)
+                            .scaleEffect(innerRingScale)
 
-                heroView
-                    .accessibilityHidden(true)
+                        heroView
+                            .accessibilityHidden(true)
 
-                if granted {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(AppColor.success)
-                                .background(
-                                    Circle()
-                                        .fill(AppColor.bg)
-                                        .frame(width: 26, height: 26)
-                                )
-                                .scaleEffect(checkPop ? 1 : 0.2)
-                                .opacity(checkPop ? 1 : 0)
+                        if granted {
+                            VStack {
+                                HStack {
+                                    Spacer()
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.title2)
+                                        .foregroundStyle(AppColor.success)
+                                        .background(
+                                            Circle()
+                                                .fill(AppColor.bg)
+                                                .frame(width: 26, height: 26)
+                                        )
+                                        .scaleEffect(checkPop ? 1 : 0.2)
+                                        .opacity(checkPop ? 1 : 0)
+                                }
+                                Spacer()
+                            }
+                            .frame(width: 160, height: 160)
                         }
-                        Spacer()
                     }
-                    .frame(width: 160, height: 160)
+
+                    VStack(spacing: 12) {
+                        Text(title)
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+
+                        Text(subtitle)
+                            .font(.body)
+                            .foregroundStyle(.white.opacity(0.52))
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 32)
+
+                    extraContent()
+
+                    Spacer(minLength: 0)
                 }
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: proxy.size.height)
+                .padding(.vertical, 24)
             }
-
-            VStack(spacing: 12) {
-                Text(title)
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-
-                Text(subtitle)
-                    .font(.body)
-                    .foregroundStyle(.white.opacity(0.52))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(5)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 32)
-
-            extraContent()
-
-            Spacer()
         }
         .onAppear {
             startPulseIfNeeded()

@@ -143,6 +143,8 @@ final class StravaService: StravaServiceProtocol {
         case userCancelled
         case authPresentationFailed
         case missingAuthorizationCode
+        case oauthReturnedError(String)
+        case stateMismatch
         case networkUnavailable
         case requestTimedOut(String)
         case tokenExchangeFailed(String)
@@ -166,6 +168,10 @@ final class StravaService: StravaServiceProtocol {
                 return "Unable to open Strava login. Keep the app in foreground and try again."
             case .missingAuthorizationCode:
                 return "Strava did not return an authorization code."
+            case .oauthReturnedError(let message):
+                return "Strava authorization failed: \(message)"
+            case .stateMismatch:
+                return "Strava sign-in could not be verified. Try connecting again."
             case .networkUnavailable:
                 return "You appear to be offline. Check your connection and try again."
             case .requestTimedOut(let context):
@@ -217,6 +223,7 @@ final class StravaService: StravaServiceProtocol {
 
     private var session: Session?
     private var authSession: ASWebAuthenticationSession?
+    private var pendingOAuthState: String?
 
     /// Serializes concurrent token refresh attempts to prevent race conditions.
     /// Without this, two simultaneous API calls could both detect an expired
@@ -565,6 +572,13 @@ final class StravaService: StravaServiceProtocol {
             throw StravaError.invalidAuthURL
         }
 
+        guard presentationContextProvider.hasPresentationAnchor else {
+            throw StravaError.authPresentationFailed
+        }
+
+        let stateString = Self.makeOAuthState()
+        pendingOAuthState = stateString
+
         var components = URLComponents(url: Self.authorizeURL, resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "client_id", value: clientID),
@@ -572,6 +586,7 @@ final class StravaService: StravaServiceProtocol {
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "approval_prompt", value: "auto"),
             URLQueryItem(name: "scope", value: "activity:write,activity:read,profile:read_all"),
+            URLQueryItem(name: "state", value: stateString),
         ]
 
         guard let url = components?.url else {
@@ -588,6 +603,7 @@ final class StravaService: StravaServiceProtocol {
             ) { [self] callbackURL, error in
                 // Hold strong self so authSession stays alive through the redirect round-trip.
                 self.authSession = nil
+                defer { self.pendingOAuthState = nil }
 
                 if let error = error as? ASWebAuthenticationSessionError {
                     stravaLogger.error("ASWebAuthenticationSession error — code: \(error.code.rawValue), desc: \(error.localizedDescription)")
@@ -608,13 +624,34 @@ final class StravaService: StravaServiceProtocol {
                     return
                 }
 
-                stravaLogger.info("Auth callback received — URL: \(callbackURL?.absoluteString ?? "nil")")
+                guard let callbackURL else {
+                    stravaLogger.error("Auth callback missing URL")
+                    continuation.resume(throwing: StravaError.missingAuthorizationCode)
+                    return
+                }
 
-                guard let callbackURL,
-                      let code = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?
-                        .queryItems?.first(where: { $0.name == "code" })?.value,
+                let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
+
+                if let errorCode = items.first(where: { $0.name == "error" })?.value {
+                    let desc = items.first(where: { $0.name == "error_description" })?.value?
+                        .replacingOccurrences(of: "+", with: " ")
+                        .removingPercentEncoding ?? errorCode
+                    continuation.resume(throwing: StravaError.oauthReturnedError(desc))
+                    return
+                }
+
+                guard let returnedState = items.first(where: { $0.name == "state" })?.value,
+                      returnedState == stateString
+                else {
+                    continuation.resume(throwing: StravaError.stateMismatch)
+                    return
+                }
+
+                stravaLogger.info("Auth callback received and state verified.")
+
+                guard let code = items.first(where: { $0.name == "code" })?.value,
                       !code.isEmpty else {
-                    stravaLogger.error("Callback URL missing authorization code. URL: \(callbackURL?.absoluteString ?? "nil")")
+                    stravaLogger.error("Callback URL missing authorization code.")
                     continuation.resume(throwing: StravaError.missingAuthorizationCode)
                     return
                 }
@@ -629,6 +666,11 @@ final class StravaService: StravaServiceProtocol {
 
             let started = session.start()
             stravaLogger.info("ASWebAuthenticationSession.start() returned: \(started)")
+            if !started {
+                self.authSession = nil
+                self.pendingOAuthState = nil
+                continuation.resume(throwing: StravaError.authPresentationFailed)
+            }
         }
     }
 
@@ -996,6 +1038,10 @@ final class StravaService: StravaServiceProtocol {
         }
         return fallback
     }
+
+    private static func makeOAuthState() -> String {
+        UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16).lowercased()
+    }
 }
 
 private struct StravaGearDTO: Codable {
@@ -1009,7 +1055,23 @@ private struct StravaDetailedAthleteDTO: Codable {
 
 @MainActor
 private final class WebAuthenticationPresentationContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
+    var hasPresentationAnchor: Bool {
+        Self.currentPresentationAnchor() != nil
+    }
+
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        if let anchor = Self.currentPresentationAnchor() {
+            return anchor
+        }
+        stravaLogger.error("No presentation anchor for Strava OAuth")
+        #if canImport(UIKit)
+        return ASPresentationAnchor(frame: .zero)
+        #elseif canImport(AppKit)
+        return ASPresentationAnchor()
+        #endif
+    }
+
+    private static func currentPresentationAnchor() -> ASPresentationAnchor? {
         #if canImport(UIKit)
         let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = windowScenes.first(where: { $0.activationState == .foregroundActive }) ?? windowScenes.first
@@ -1033,11 +1095,11 @@ private final class WebAuthenticationPresentationContextProvider: NSObject, ASWe
         if let w = UIApplication.shared.delegate.flatMap({ $0.window }) {
             return w!
         }
-        fatalError("No presentation anchor for Strava OAuth — no UIWindowScene or delegate window")
+        return nil
         #elseif canImport(AppKit)
-        return NSApplication.shared.keyWindow ?? NSWindow()
+        return NSApplication.shared.keyWindow
         #else
-        fatalError("Unsupported platform for Strava OAuth")
+        return nil
         #endif
     }
 }

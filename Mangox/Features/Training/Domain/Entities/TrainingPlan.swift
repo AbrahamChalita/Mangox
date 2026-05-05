@@ -237,7 +237,7 @@ struct IntervalSegment: Codable, Identifiable, Sendable, Hashable {
     }
 
     /// Total time including all repeats and recovery between them
-    var totalSeconds: Int {
+    nonisolated var totalSeconds: Int {
         let workTime = durationSeconds * repeats
         let restTime = recoverySeconds * max(0, repeats - 1)
         return workTime + restTime
@@ -286,7 +286,7 @@ struct PlanDay: Codable, Identifiable, Sendable, Hashable {
     let isKeyWorkout: Bool          // highlight in UI
     let requiresFTPTest: Bool
 
-    init(
+    nonisolated init(
         id: String,
         weekNumber: Int,
         dayOfWeek: Int,

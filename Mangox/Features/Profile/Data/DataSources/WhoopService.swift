@@ -383,6 +383,10 @@ final class WhoopService: WhoopServiceProtocol {
             throw WhoopError.invalidAuthURL
         }
 
+        guard presentationContextProvider.hasPresentationAnchor else {
+            throw WhoopError.authPresentationFailed
+        }
+
         let state = UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16).lowercased()
         let stateString = String(state)
         pendingOAuthState = stateString
@@ -461,7 +465,12 @@ final class WhoopService: WhoopServiceProtocol {
             session.prefersEphemeralWebBrowserSession = false
             session.presentationContextProvider = presentationContextProvider
             authSession = session
-            _ = session.start()
+            let started = session.start()
+            if !started {
+                authSession = nil
+                pendingOAuthState = nil
+                continuation.resume(throwing: WhoopError.authPresentationFailed)
+            }
         }
     }
 
@@ -750,7 +759,23 @@ extension WhoopService {
 private final class WhoopWebAuthPresentationContextProvider: NSObject,
     ASWebAuthenticationPresentationContextProviding
 {
+    var hasPresentationAnchor: Bool {
+        Self.currentPresentationAnchor() != nil
+    }
+
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        if let anchor = Self.currentPresentationAnchor() {
+            return anchor
+        }
+        whoopLogger.error("No presentation anchor for WHOOP OAuth")
+        #if canImport(UIKit)
+        return ASPresentationAnchor(frame: .zero)
+        #elseif canImport(AppKit)
+        return ASPresentationAnchor()
+        #endif
+    }
+
+    private static func currentPresentationAnchor() -> ASPresentationAnchor? {
         #if canImport(UIKit)
         let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = windowScenes.first(where: { $0.activationState == .foregroundActive }) ?? windowScenes.first
@@ -771,11 +796,11 @@ private final class WhoopWebAuthPresentationContextProvider: NSObject,
         if let w = UIApplication.shared.delegate.flatMap({ $0.window }) {
             return w!
         }
-        fatalError("No presentation anchor for WHOOP OAuth — no UIWindowScene or delegate window")
+        return nil
         #elseif canImport(AppKit)
-        return NSApplication.shared.keyWindow ?? NSWindow()
+        return NSApplication.shared.keyWindow
         #else
-        fatalError("Unsupported platform for WHOOP OAuth")
+        return nil
         #endif
     }
 }

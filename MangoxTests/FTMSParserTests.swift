@@ -2,6 +2,7 @@ import Testing
 import Foundation
 @testable import Mangox
 
+@MainActor
 struct FTMSParserTests {
 
     // MARK: - Indoor Bike Data

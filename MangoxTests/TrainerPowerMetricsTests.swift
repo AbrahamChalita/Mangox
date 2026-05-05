@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import Mangox
 
+@MainActor
 struct TrainerPowerMetricsTests {
 
     @Test func meanInt_matchesArithmeticMean() {

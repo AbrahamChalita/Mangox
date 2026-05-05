@@ -4,9 +4,9 @@ import XCTest
 import UIKit
 @testable import Mangox
 
+@MainActor
 final class StoryCardSnapshotTest: XCTestCase {
 
-    @MainActor
     func testRenderStoryCardSnapshot() throws {
         let workout = makeMockWorkout()
         let zone = PowerZone.zone(for: Int(workout.avgPower.rounded()))

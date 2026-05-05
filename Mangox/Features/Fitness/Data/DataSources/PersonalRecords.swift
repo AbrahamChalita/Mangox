@@ -5,7 +5,7 @@ import SwiftData
 // MARK: - MMP Duration Buckets
 
 /// The canonical durations (in seconds) used for Mean Maximal Power tracking.
-enum MMPDuration: Int, CaseIterable, Identifiable {
+enum MMPDuration: Int, CaseIterable, Identifiable, Sendable {
     case five        = 5
     case thirty      = 30
     case sixty       = 60
@@ -34,7 +34,7 @@ enum MMPDuration: Int, CaseIterable, Identifiable {
 // MARK: - MMP Result
 
 /// Best average power held for a given duration within a single workout.
-struct MMPResult: Identifiable {
+struct MMPResult: Identifiable, Sendable {
     let duration: MMPDuration
     let watts: Int
     let workoutID: UUID
@@ -52,7 +52,7 @@ struct MMPResult: Identifiable {
 // MARK: - PR Entry
 
 /// A confirmed personal record: the best MMP across all workouts for a duration.
-struct PREntry: Identifiable {
+struct PREntry: Identifiable, Sendable {
     let duration: MMPDuration
     let watts: Int
     let workoutID: UUID
@@ -64,7 +64,7 @@ struct PREntry: Identifiable {
 // MARK: - Workout MMP
 
 /// All MMP results for a single workout.
-struct WorkoutMMP {
+struct WorkoutMMP: Sendable {
     let workoutID: UUID
     let results: [MMPResult]
 
@@ -76,7 +76,7 @@ struct WorkoutMMP {
 // MARK: - New PR Flag
 
 /// Marks that a specific duration is a new PR in the context of the just-completed workout.
-struct NewPRFlag: Identifiable {
+struct NewPRFlag: Identifiable, Sendable {
     let duration: MMPDuration
     let watts: Int
     var id: Int { duration.rawValue }
@@ -110,6 +110,13 @@ final class PersonalRecords: PersonalRecordsServiceProtocol {
     /// Persisted across load() calls so new workouts only need their own MMP computed.
     private var cachedMMPs: [UUID: WorkoutMMP] = [:]
 
+    private struct WorkoutSnapshot: Sendable {
+        let id: UUID
+        let startDate: Date
+        let isValid: Bool
+        let samples: [WorkoutSampleData]
+    }
+
     // MARK: - Init
 
     private init() {}
@@ -121,13 +128,30 @@ final class PersonalRecords: PersonalRecordsServiceProtocol {
     func load(from workouts: [Workout]) async {
         isLoaded = false
         let cached = self.cachedMMPs
+        let snapshots = workouts.map { workout in
+            WorkoutSnapshot(
+                id: workout.id,
+                startDate: workout.startDate,
+                isValid: workout.isValid,
+                samples: workout.samples.map {
+                    WorkoutSampleData(
+                        timestamp: $0.timestamp,
+                        elapsedSeconds: $0.elapsedSeconds,
+                        power: $0.power,
+                        cadence: $0.cadence,
+                        speed: $0.speed,
+                        heartRate: $0.heartRate
+                    )
+                }
+            )
+        }
         let prs = await withTaskGroup(
             of: (entries: [PREntry], updatedCache: [UUID: WorkoutMMP])?.self,
             returning: (entries: [PREntry], updatedCache: [UUID: WorkoutMMP])?.self
         ) { group in
             group.addTask(priority: .utility) {
                 guard !Task.isCancelled else { return nil }
-                return Self.computeAllTimePRsIncremental(from: workouts, cachedMMPs: cached)
+                return Self.computeAllTimePRsIncremental(from: snapshots, cachedMMPs: cached)
             }
             return await group.next() ?? nil
         }
@@ -218,7 +242,7 @@ final class PersonalRecords: PersonalRecordsServiceProtocol {
 
     /// Incremental: only compute MMP for new workouts, merge with cached results.
     nonisolated private static func computeAllTimePRsIncremental(
-        from workouts: [Workout],
+        from workouts: [WorkoutSnapshot],
         cachedMMPs: [UUID: WorkoutMMP]
     ) -> (entries: [PREntry], updatedCache: [UUID: WorkoutMMP]) {
         var mmpCache = cachedMMPs

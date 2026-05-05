@@ -743,8 +743,6 @@ struct CoachPendingReplyBubble: View {
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentTransition(.identity)
-                .transition(.opacity)
-                .id("body")
         } else if let status = statusText, !status.isEmpty {
             HStack(spacing: 8) {
                 ProgressView()
@@ -756,8 +754,6 @@ struct CoachPendingReplyBubble: View {
                     .lineLimit(2)
                 Spacer(minLength: 0)
             }
-            .transition(.opacity)
-            .id("status")
         } else {
             HStack(spacing: 5) {
                 ForEach(0..<3, id: \.self) { i in
@@ -766,8 +762,6 @@ struct CoachPendingReplyBubble: View {
                 Spacer(minLength: 0)
             }
             .frame(height: 18)
-            .transition(.opacity)
-            .id("typing")
         }
     }
 
@@ -791,10 +785,6 @@ struct CoachPendingReplyBubble: View {
                         .contentTransition(.identity)
                 }
                 inner
-                    .animation(
-                        accessibilityReduceMotion ? nil : .easeInOut(duration: 0.18),
-                        value: contentKey
-                    )
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)

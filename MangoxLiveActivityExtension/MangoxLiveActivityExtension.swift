@@ -6,7 +6,7 @@ import WidgetKit
 
 // MARK: - Must match main app (byte-for-byte same fields)
 
-struct MangoxRideAttributes: ActivityAttributes {
+nonisolated struct MangoxRideAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         var speedKmh: Double
         var distanceM: Double
@@ -161,6 +161,7 @@ private func deepLinkURL(for rideModeLabel: String) -> URL {
 
 // MARK: - Lock screen
 
+@MainActor
 private func lockScreenView(context: ActivityViewContext<MangoxRideAttributes>) -> some View {
     let s = context.state
     let accent = ZonePalette.dominantAccent(

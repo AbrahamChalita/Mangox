@@ -1,6 +1,7 @@
 import Testing
 @testable import Mangox
 
+@MainActor
 struct PowerCurveAnalyticsTests {
     @Test func rollingAverage_findsPlateau() {
         let p = Array(repeating: 200, count: 100)

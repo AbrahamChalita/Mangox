@@ -5,6 +5,7 @@ import Testing
 /// Verifies that WorkoutMetricsAggregator's O(1) ring-buffer implementation
 /// produces the same Normalized Power, Intensity Factor, and TSS as a naive
 /// reference calculation, and handles all edge cases correctly.
+@MainActor
 struct WorkoutMetricsAggregatorTests {
 
     // MARK: - Reference implementation (straightforward O(n²) for comparison)
