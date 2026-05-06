@@ -31,6 +31,7 @@ protocol BLEServiceProtocol: AnyObject {
     var trainerConnectionQuality: ConnectionQuality { get }
     var isDataStale: Bool { get }
     var isReconnecting: Bool { get }
+    var isHRReconnecting: Bool { get }
 
     // MARK: - FTMS Trainer Control
     var ftmsControlIsAvailable: Bool { get }

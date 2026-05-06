@@ -28,6 +28,12 @@ final class SocialViewModel {
     /// Set by the PhotosPicker in InstagramStoryStudioView. Cleared on reset or source change.
     var customBackgroundImage: UIImage? = nil
 
+    // MARK: - Template carousel thumbnails
+    /// Mini bitmap previews for the template carousel — keyed by template, valued by a downscaled card render.
+    var templateThumbnails: [InstagramStoryCardOptions.Template: UIImage] = [:]
+    private var thumbnailWorkoutID: UUID?
+    private var thumbnailJob: Task<Void, Never>?
+
     // MARK: - AI generation state
     var aiCaption: String?
     var isCaptionGenerating: Bool = false
@@ -65,7 +71,8 @@ final class SocialViewModel {
     func applySessionRecommendedOptionsIfDefault(
         workout: Workout,
         routeName: String?,
-        totalElevationGain: Double
+        totalElevationGain: Double,
+        personalRecordNames: [String] = []
     ) {
         guard storyOptions == InstagramStoryCardOptions.default else { return }
         let kind = InstagramStoryCardSessionKind.resolve(
@@ -73,16 +80,148 @@ final class SocialViewModel {
             routeName: routeName,
             totalElevationGain: totalElevationGain
         )
-        guard kind == .indoorTrainer else { return }
         var o = storyOptions
-        o.showElevation = false
+        if kind == .indoorTrainer {
+            o.template = .indoorPower
+            o.visualStyle = .analyst
+            o.showElevation = false
+            o.quickStatSlots = [.normalizedPower, .tss, .intensityFactor, .cadence]
+        } else if !personalRecordNames.isEmpty {
+            o.template = .prFlex
+            o.visualStyle = .raceBib
+            o.quickStatSlots = [.maxPower, .normalizedPower, .tss, .distance]
+        } else if workout.tss >= 90 || workout.intensityFactor >= 0.95 {
+            o.template = .raceEffort
+            o.visualStyle = .proBroadcast
+            o.quickStatSlots = [.tss, .intensityFactor, .normalizedPower, .heartRate]
+        } else if kind == .outdoor {
+            o.template = .routeDay
+            o.visualStyle = .topoMap
+            o.quickStatSlots = [.distance, .elevation, .movingTime, .speed]
+        } else if workout.tss > 0, workout.tss < 40 {
+            o.template = .recoveryRide
+            o.visualStyle = .cafeRide
+            o.quickStatSlots = [.movingTime, .heartRate, .cadence, .calories]
+        }
         saveStoryOptions(o)
     }
 
     func resetStoryOptions() {
         customBackgroundImage = nil
         previewReuseKey = nil
+        templateThumbnails = [:]
+        thumbnailWorkoutID = nil
+        thumbnailJob?.cancel()
+        thumbnailJob = nil
         saveStoryOptions(.default)
+    }
+
+    /// Applies the template plus its sensible per-template defaults (visual style + recommended quick-stat slots) and persists.
+    /// Lifted out of the view so the template carousel and the Customize sheet can both use it.
+    func applyTemplate(_ template: InstagramStoryCardOptions.Template) {
+        var opts = storyOptions
+        opts.template = template
+        Self.applyTemplateDefaults(template, to: &opts)
+        saveStoryOptions(opts)
+    }
+
+    static func applyTemplateDefaults(
+        _ template: InstagramStoryCardOptions.Template,
+        to options: inout InstagramStoryCardOptions
+    ) {
+        switch template {
+        case .cleanStats:
+            options.quickStatSlots = [.heartRate, .cadence, .elevation, .speed]
+        case .bigAchievement:
+            options.visualStyle = .proBroadcast
+            options.quickStatSlots = [.distance, .movingTime, .tss, .normalizedPower]
+        case .routeDay:
+            options.visualStyle = .topoMap
+            options.quickStatSlots = [.distance, .elevation, .movingTime, .speed]
+        case .indoorPower:
+            options.visualStyle = .analyst
+            options.quickStatSlots = [.normalizedPower, .tss, .intensityFactor, .cadence]
+        case .raceEffort:
+            options.visualStyle = .proBroadcast
+            options.quickStatSlots = [.tss, .intensityFactor, .normalizedPower, .heartRate]
+        case .recoveryRide:
+            options.visualStyle = .cafeRide
+            options.quickStatSlots = [.movingTime, .heartRate, .cadence, .calories]
+        case .prFlex:
+            options.visualStyle = .raceBib
+            options.quickStatSlots = [.maxPower, .normalizedPower, .tss, .distance]
+        case .minimalDark:
+            options.visualStyle = .mangoEditorial
+            options.quickStatSlots = [.distance, .movingTime, .speed, .calories]
+        case .photoFirst:
+            options.backgroundSource = options.backgroundSource == .none ? .preset : options.backgroundSource
+            options.quickStatSlots = [.distance, .elevation, .movingTime, .speed]
+        }
+    }
+
+    // MARK: - Template thumbnails
+
+    /// Renders mini bitmap previews for every `Template`, one at a time, yielding to the runloop between renders so UI stays responsive.
+    /// Cached by `workout.id`; re-opening the studio for the same ride does not re-render. Invalidate via `invalidateTemplateThumbnails()`.
+    @MainActor
+    func renderTemplateThumbnails(
+        workout: Workout,
+        dominantZone: PowerZone,
+        routeName: String?,
+        totalElevationGain: Double,
+        personalRecordNames: [String]
+    ) {
+        if thumbnailWorkoutID == workout.id, !templateThumbnails.isEmpty {
+            return
+        }
+        thumbnailWorkoutID = workout.id
+        templateThumbnails = [:]
+        thumbnailJob?.cancel()
+
+        let baseOptions = storyOptions
+        let bgImage = customBackgroundImage
+        let session = InstagramStoryCardSessionKind.resolve(
+            workout: workout,
+            routeName: routeName,
+            totalElevationGain: totalElevationGain
+        )
+        let whoop = whoopMetricsForStory()
+        let title = aiTitle
+
+        thumbnailJob = Task { @MainActor [weak self] in
+            for template in InstagramStoryCardOptions.Template.allCases {
+                if Task.isCancelled { return }
+                var opts = baseOptions
+                opts.template = template
+                SocialViewModel.applyTemplateDefaults(template, to: &opts)
+
+                let full = InstagramStoryShare.renderWorkoutStory(
+                    workout: workout,
+                    dominantZone: dominantZone,
+                    routeName: routeName,
+                    totalElevationGain: totalElevationGain,
+                    personalRecordNames: personalRecordNames,
+                    options: opts,
+                    sessionKind: session,
+                    whoopStrain: whoop.strain,
+                    whoopRecovery: whoop.recovery,
+                    aiTitle: title,
+                    backgroundImage: bgImage
+                )
+                let thumb = await full.byPreparingThumbnail(ofSize: CGSize(width: 256, height: 456)) ?? full
+                if Task.isCancelled { return }
+                self?.templateThumbnails[template] = thumb
+                await Task.yield()
+            }
+            self?.thumbnailJob = nil
+        }
+    }
+
+    func invalidateTemplateThumbnails() {
+        thumbnailJob?.cancel()
+        thumbnailJob = nil
+        thumbnailWorkoutID = nil
+        templateThumbnails = [:]
     }
 
     // MARK: - AI generation
@@ -218,13 +357,6 @@ final class SocialViewModel {
         onError: @escaping (String) -> Void,
         onDismiss: @escaping () -> Void
     ) async {
-        guard InstagramStoryShare.facebookAppID != nil else {
-            onError(
-                "Instagram Stories needs a Meta/Facebook App ID. Add a FacebookAppID key to Info.plist."
-            )
-            return
-        }
-
         isSharing = true
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         await Task.yield()
@@ -249,6 +381,34 @@ final class SocialViewModel {
         let reuseStudioPreview = !opts.layeredShare
             && previewReuseKey == shareKey
             && previewImage != nil
+
+        if opts.carouselExport {
+            let slides = renderCarouselSlides(
+                workout: workout,
+                dominantZone: dominantZone,
+                routeName: routeName,
+                totalElevationGain: totalElevationGain,
+                personalRecordNames: personalRecordNames,
+                baseOptions: opts,
+                session: session,
+                whoop: whoop,
+                aiTitle: title,
+                backgroundImage: bgImg
+            )
+            shareFallbackItems = slides
+            showShareFallback = true
+            InstagramStoryStudioPreferences.save(opts)
+            isSharing = false
+            return
+        }
+
+        guard InstagramStoryShare.facebookAppID != nil else {
+            isSharing = false
+            onError(
+                "Instagram Stories needs a Meta/Facebook App ID. Add a FacebookAppID key to Info.plist."
+            )
+            return
+        }
 
         // 1. Full composite card (reuse studio preview when inputs match — avoids duplicate raster for single-layer share)
         let full: UIImage
@@ -312,5 +472,53 @@ final class SocialViewModel {
         // Fallback: system share sheet
         shareFallbackItems = [full]
         showShareFallback = true
+    }
+
+    @MainActor
+    private func renderCarouselSlides(
+        workout: Workout,
+        dominantZone: PowerZone,
+        routeName: String?,
+        totalElevationGain: Double,
+        personalRecordNames: [String],
+        baseOptions: InstagramStoryCardOptions,
+        session: InstagramStoryCardSessionKind,
+        whoop: (strain: Double?, recovery: Double?),
+        aiTitle: String?,
+        backgroundImage: UIImage?
+    ) -> [UIImage] {
+        var hero = baseOptions
+        hero.carouselExport = false
+
+        var power = baseOptions
+        power.carouselExport = false
+        power.template = .indoorPower
+        power.visualStyle = .analyst
+        power.quickStatSlots = [.avgPower, .normalizedPower, .tss, .intensityFactor]
+        power.backgroundSource = baseOptions.backgroundSource
+
+        var detail = baseOptions
+        detail.carouselExport = false
+        detail.template = session == .outdoor ? .routeDay : .bigAchievement
+        detail.visualStyle = session == .outdoor ? .topoMap : .proBroadcast
+        detail.quickStatSlots = session == .outdoor
+            ? [.distance, .elevation, .movingTime, .speed]
+            : [.movingTime, .heartRate, .cadence, .calories]
+
+        return [hero, power, detail].map { options in
+            InstagramStoryShare.renderWorkoutStory(
+                workout: workout,
+                dominantZone: dominantZone,
+                routeName: routeName,
+                totalElevationGain: totalElevationGain,
+                personalRecordNames: personalRecordNames,
+                options: options,
+                sessionKind: session,
+                whoopStrain: whoop.strain,
+                whoopRecovery: whoop.recovery,
+                aiTitle: aiTitle,
+                backgroundImage: backgroundImage
+            )
+        }
     }
 }

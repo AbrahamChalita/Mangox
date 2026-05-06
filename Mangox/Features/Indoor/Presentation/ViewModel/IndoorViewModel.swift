@@ -91,6 +91,24 @@ final class IndoorViewModel {
     var hasRoute: Bool { routeService.hasRoute }
     var routeName: String? { routeService.routeName }
 
+    // Sensor lost banner
+    var showSensorLostBanner: Bool {
+        guard workoutManager.state.isLiveSessionActive else { return false }
+        return bleService.isReconnecting || bleService.isHRReconnecting
+    }
+
+    var sensorLostBannerMessage: String? {
+        guard workoutManager.state.isLiveSessionActive else { return nil }
+        if bleService.isReconnecting && bleService.isHRReconnecting {
+            return String(localized: "indoor.sensor.lost_both")
+        } else if bleService.isReconnecting {
+            return String(localized: "indoor.sensor.lost_trainer")
+        } else if bleService.isHRReconnecting {
+            return String(localized: "indoor.sensor.lost_hr")
+        }
+        return nil
+    }
+
     // MARK: - Init
 
     init(
@@ -455,6 +473,17 @@ final class IndoorViewModel {
         scheduleIndoorLiveActivitySync(isRecording: workoutManager.state == .recording)
     }
 
+    /// Triggered on scene-active (foreground) to recover dropped sensors if a ride is in progress.
+    func recoverConnectionsIfSessionActive() {
+        guard workoutManager.state.isLiveSessionActive else { return }
+        dataSourceService.updateActiveSource()
+        bleService.startScan() // Ensure scanning starts if anything is missing
+        
+        // Re-attempt instant cache reconnection for all slots.
+        // BLEManager's internal state prevents duplicate connections.
+        bleService.reconnectOrScan()
+    }
+
     func handleWorkoutStateChange(oldState: RecordingState, newState: RecordingState) -> String? {
         switch (oldState, newState) {
         case (.idle, .recording):
@@ -483,6 +512,15 @@ final class IndoorViewModel {
         liveActivitySyncTask?.cancel()
         liveActivitySyncTask = nil
         workoutManager.tearDown()
+    }
+
+    func persistRecordingCheckpointNow() {
+        guard workoutManager.state.isLiveSessionActive else { return }
+        workoutManager.persistRecordingCheckpointNow()
+        if dataSourceService.activeDataSource == .wifi {
+            workoutManager.pauseForUnsupportedBackgroundSource()
+        }
+        scheduleIndoorLiveActivitySync(isRecording: workoutManager.state == .recording)
     }
 
     func startWorkout() {

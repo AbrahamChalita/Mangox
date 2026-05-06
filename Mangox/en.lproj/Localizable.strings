@@ -79,6 +79,9 @@
 "indoor.intent.route_named" = "Route · %@";
 "indoor.header.goal_line" = "%@ · %@ / %@ %@";
 "indoor.sensor.trainer_stale" = "Trainer link quiet — keep pedaling";
+"indoor.sensor.lost_both" = "Sensors lost, trying to reconnect…";
+"indoor.sensor.lost_trainer" = "Trainer lost, trying to reconnect…";
+"indoor.sensor.lost_hr" = "Heart rate lost, trying to reconnect…";
 
 /* Guided target line (Ride hero) */
 "indoor.guided.hero.target_format" = "Target %lld–%lld W";

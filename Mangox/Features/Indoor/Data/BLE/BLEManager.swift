@@ -246,7 +246,9 @@ final class BLEManager: NSObject, BLEServiceProtocol {
     /// Set to true when a disconnect happens during an active workout.
     /// The UI can check this to show "Reconnecting..." instead of "Disconnected".
     var isReconnecting: Bool = false
+    var isHRReconnecting: Bool = false
     private var reconnectTask: Task<Void, Never>?
+    private var hrReconnectTask: Task<Void, Never>?
     private let reconnectTimeoutSeconds: UInt64 = 15
     /// The trainer peripheral UUID to attempt reconnection to.
     private var reconnectTrainerUUID: UUID?
@@ -277,18 +279,28 @@ final class BLEManager: NSObject, BLEServiceProtocol {
 
     // MARK: - Mid-Ride Recovery
 
-    /// Attempt to reconnect to the trainer after an unexpected disconnect.
+    /// Attempt to reconnect to a peripheral after an unexpected disconnect.
     /// Preserves last-known metrics during the reconnect window.
     /// If reconnection succeeds within `reconnectTimeoutSeconds`, metrics resume seamlessly.
-    /// If it fails, the trainer is fully disconnected and metrics are cleared.
+    /// If it fails, the device is fully disconnected and metrics are cleared.
     private func attemptReconnect(for role: DeviceType) {
-        guard role == .trainer else { return }
-        guard let uuid = savedTrainerUUID else { return }
+        let uuid: UUID?
+        switch role {
+        case .trainer: uuid = savedTrainerUUID
+        case .heartRateMonitor: uuid = savedHRUUID
+        default: return
+        }
+        guard let uuid else { return }
 
-        isReconnecting = true
-        reconnectTask?.cancel()
+        if role == .trainer {
+            isReconnecting = true
+            reconnectTask?.cancel()
+        } else if role == .heartRateMonitor {
+            isHRReconnecting = true
+            hrReconnectTask?.cancel()
+        }
 
-        reconnectTask = Task { [weak self] in
+        let task = Task { [weak self] in
             // BLEManager is @MainActor; closure inherits isolation — no hop needed
             guard let self else { return }
 
@@ -296,51 +308,98 @@ final class BLEManager: NSObject, BLEServiceProtocol {
             let cached = self.centralManager.retrievePeripherals(withIdentifiers: [uuid])
             guard let boxed = cached.first.map(SendablePeripheral.init) else {
                 // No cached peripheral — fall back to scan
-                self.finishReconnect(success: false)
+                self.finishReconnect(for: role, success: false)
                 return
             }
 
-            self.trainerPeripheral = boxed.value
-            self.peripheralRoles[boxed.value.identifier] = .trainer
-            self.trainerConnectionState = .connecting(boxed.value.name ?? "Unknown")
-            boxed.value.delegate = self
-            self.centralManager.connect(boxed.value, options: nil)
+            let peripheral = boxed.value
+            self.peripheralRoles[peripheral.identifier] = role
+            let name = peripheral.name ?? "Unknown"
+
+            if role == .trainer {
+                self.trainerPeripheral = peripheral
+                self.trainerConnectionState = .connecting(name)
+            } else if role == .heartRateMonitor {
+                self.hrPeripheral = peripheral
+                self.hrConnectionState = .connecting(name)
+            }
+
+            peripheral.delegate = self
+            self.centralManager.connect(peripheral, options: nil)
 
             // Wait for reconnect timeout
             try? await Task.sleep(nanoseconds: self.reconnectTimeoutSeconds * 1_000_000_000)
             guard !Task.isCancelled else { return }
 
             // If still not connected, give up
-            if !self.trainerConnectionState.isConnected {
-                self.centralManager.cancelPeripheralConnection(boxed.value)
-                self.finishReconnect(success: false)
+            let isConnected: Bool
+            if role == .trainer {
+                isConnected = self.trainerConnectionState.isConnected
+            } else {
+                isConnected = self.hrConnectionState.isConnected
             }
+
+            if !isConnected {
+                self.centralManager.cancelPeripheralConnection(peripheral)
+                self.finishReconnect(for: role, success: false)
+            }
+        }
+
+        if role == .trainer {
+            reconnectTask = task
+        } else {
+            hrReconnectTask = task
         }
     }
 
     /// Clean up after reconnect attempt succeeds or fails.
-    private func finishReconnect(success: Bool) {
-        reconnectTask?.cancel()
-        reconnectTask = nil
-        isReconnecting = false
+    private func finishReconnect(for role: DeviceType, success: Bool) {
+        if role == .trainer {
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            isReconnecting = false
+        } else if role == .heartRateMonitor {
+            hrReconnectTask?.cancel()
+            hrReconnectTask = nil
+            isHRReconnecting = false
+        }
 
         if !success {
-            // Full disconnect — clear everything
-            trainerPeripheral = nil
-            trainerConnectionState = .disconnected
-            ftmsControl.detach()
-            crankState.reset()
-            trainerFTMSService = nil
-            smoothedPower = 0
-            powerEMA = 0
-            smoothedHR = 0
-            hrEMA = 0
-            lastPacketReceived = nil
-            trainerRSSI = 0
+            if role == .trainer {
+                // Full disconnect — clear everything
+                trainerPeripheral = nil
+                trainerConnectionState = .disconnected
+                ftmsControl.detach()
+                crankState.reset()
+                trainerFTMSService = nil
+                smoothedPower = 0
+                powerEMA = 0
+                lastPacketReceived = nil
+                trainerRSSI = 0
 
-            if metrics.hrSource != .dedicated {
-                metrics.heartRate = 0
-                metrics.hrSource = .none
+                metrics.power = 0
+                metrics.cadence = 0
+                metrics.speed = 0
+                metrics.totalDistance = 0
+                metrics.includesTotalDistanceInPacket = false
+
+                if metrics.hrSource != .dedicated {
+                    metrics.heartRate = 0
+                    metrics.hrSource = .none
+                    smoothedHR = 0
+                    hrEMA = 0
+                }
+            } else if role == .heartRateMonitor {
+                hrPeripheral = nil
+                hrConnectionState = .disconnected
+                hrRSSI = 0
+
+                if metrics.hrSource == .dedicated {
+                    metrics.heartRate = 0
+                    metrics.hrSource = .none
+                    smoothedHR = 0
+                    hrEMA = 0
+                }
             }
         }
     }
@@ -1064,9 +1123,9 @@ extension BLEManager: CBCentralManagerDelegate {
                 self.cancelConnectTimeout(for: role)
 
                 if role == .trainer && self.isReconnecting {
-                    self.reconnectTask?.cancel()
-                    self.reconnectTask = nil
-                    self.isReconnecting = false
+                    self.finishReconnect(for: .trainer, success: true)
+                } else if role == .heartRateMonitor {
+                    self.finishReconnect(for: .heartRateMonitor, success: true)
                 }
 
                 switch role {
@@ -1139,7 +1198,9 @@ extension BLEManager: CBCentralManagerDelegate {
                         self.stopRSSIMonitoring()
                     }
 
-                    if self.metrics.power > 0 || self.metrics.cadence > 0 {
+                    // Attempt reconnect if we were in a live ride (recording or paused).
+                    // We use the observation gate as a proxy for "dashboard is active".
+                    if TrainerSensorLiveObservationGate.isLiveRouteActive {
                         self.attemptReconnect(for: .trainer)
                         return
                     }
@@ -1167,6 +1228,12 @@ extension BLEManager: CBCentralManagerDelegate {
                     }
 
                 case .heartRateMonitor:
+                    // Attempt reconnect if we were in a live ride (recording or paused).
+                    if TrainerSensorLiveObservationGate.isLiveRouteActive {
+                        self.attemptReconnect(for: .heartRateMonitor)
+                        return
+                    }
+
                     self.hrPeripheral = nil
                     self.hrConnectionState = .disconnected
 

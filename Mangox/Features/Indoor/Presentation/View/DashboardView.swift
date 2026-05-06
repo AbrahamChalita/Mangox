@@ -84,6 +84,7 @@ struct DashboardView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Environment(\.accessibilityReduceTransparency) private var accessibilityReduceTransparency
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.scenePhase) private var scenePhase
     // Delight state
     @State private var zonePulse = false
     @State private var zonePulseResetTask: Task<Void, Never>?
@@ -395,6 +396,7 @@ struct DashboardView: View {
                     isInPreRide: workoutManager.state == .idle
                 )
                 persistenceErrorMessage = viewModel.consumePersistenceError()
+                updateIndoorScreenAwakeState()
             }
             .onDisappear {
                 cancelTransientTasks()
@@ -403,6 +405,7 @@ struct DashboardView: View {
                 if workoutManager.state == .idle || workoutManager.state == .finished {
                     viewModel.tearDownWorkoutSession()
                 }
+                setIndoorScreenAwake(false)
             }
             .onChange(of: zone.id) { _, newZone in
                 if workoutManager.state == .recording {
@@ -446,6 +449,7 @@ struct DashboardView: View {
                 if persistenceErrorMessage == nil {
                     persistenceErrorMessage = viewModel.consumePersistenceError()
                 }
+                updateIndoorScreenAwakeState()
             }
             .onChange(of: workoutManager.currentLapNumber) { old, new in
                 if new > old { hapticManager.lapCompleted() }
@@ -471,6 +475,11 @@ struct DashboardView: View {
             .onChange(of: workoutManager.elapsedSeconds) { _, _ in
                 tickRideTipsIfNeeded()
             }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    viewModel.recoverConnectionsIfSessionActive()
+                }
+            }
             .overlay(alignment: .top) {
                 if viewModel.isMilestoneVisible, let text = viewModel.milestoneText {
                     milestoneToast(text)
@@ -484,6 +493,16 @@ struct DashboardView: View {
             }
         }
         .environment(viewModel)
+    }
+
+    private func updateIndoorScreenAwakeState() {
+        setIndoorScreenAwake(workoutManager.state.isLiveSessionActive)
+    }
+
+    private func setIndoorScreenAwake(_ shouldStayAwake: Bool) {
+        #if canImport(UIKit)
+            UIApplication.shared.isIdleTimerDisabled = shouldStayAwake
+        #endif
     }
 
     // MARK: - Header
@@ -900,6 +919,8 @@ struct DashboardView: View {
                         }
                         if !prefs.activeGoals.isEmpty {
                             goalProgressSection(fit: true)
+                        } else {
+                            compactDistanceMetric(dense: dense)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .top)
@@ -925,10 +946,61 @@ struct DashboardView: View {
                 }
                 if !prefs.activeGoals.isEmpty {
                     goalProgressSection(fit: true)
+                } else {
+                    compactDistanceMetric(dense: dense)
                 }
                 compactLiveNoticeBlock(dense: dense)
             }
         }
+    }
+
+    private var formattedActiveDistance: (value: String, unit: String) {
+        let display = AppFormat.distance(workoutManager.activeDistance, imperial: prefs.isImperial)
+        return (String(format: "%.2f", display.value), display.unit)
+    }
+
+    private func compactDistanceMetric(dense: Bool) -> some View {
+        let distance = formattedActiveDistance
+        return HStack(spacing: 10) {
+            Image(systemName: "road.lanes")
+                .font(.system(size: dense ? 15 : 17, weight: .semibold))
+                .foregroundStyle(AppColor.mango)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("DISTANCE")
+                    .mangoxFont(.micro)
+                    .fontWeight(.bold)
+                    .foregroundStyle(AppColor.fg3)
+                    .tracking(1.0)
+
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(distance.value)
+                        .font(DashboardViewFontToken.mono(size: dense ? 22 : 26, weight: .heavy))
+                        .foregroundStyle(AppColor.fg0)
+                        .contentTransition(.numericText())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text(distance.unit)
+                        .mangoxFont(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(AppColor.fg2)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, dense ? 9 : 11)
+        .background(AppColor.hair)
+        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue))
+        .overlay(
+            RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue)
+                .strokeBorder(AppColor.hair2, lineWidth: 1)
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Distance")
+        .accessibilityValue("\(distance.value) \(distance.unit)")
     }
 
     private func compactDetailsPage(isLandscape: Bool) -> some View {
@@ -1320,6 +1392,10 @@ struct DashboardView: View {
 
     @ViewBuilder
     private func compactLiveNoticeBlock(dense: Bool) -> some View {
+        if let msg = viewModel.sensorLostBannerMessage {
+            sensorLostBanner(message: msg, dense: dense)
+        }
+
         if workoutManager.showLowCadenceWarning {
             cadenceWarningBanner
         }
@@ -1386,7 +1462,7 @@ struct DashboardView: View {
                     label: "SPEED",
                     value: workoutManager.formattedSpeed,
                     unit: speedUnitLabel,
-                    tint: AppColor.fg3,
+                    tint: AppColor.fg0,
                     dense: dense
                 )
                 compactPrimaryMetricTile(
@@ -1443,7 +1519,7 @@ struct DashboardView: View {
                     label: "SPEED",
                     value: workoutManager.formattedSpeed,
                     unit: speedUnitLabel,
-                    tint: AppColor.fg3,
+                    tint: AppColor.fg0,
                     dense: dense
                 )
                 compactPrimaryMetricTile(
@@ -1882,6 +1958,42 @@ struct DashboardView: View {
             )
         }
         .cardStyle(cornerRadius: MangoxRadius.sharp.rawValue)
+    }
+
+    private func sensorLostBanner(message: String, dense: Bool) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: dense ? 16 : 18))
+                .foregroundStyle(AppColor.yellow)
+                .symbolEffect(.pulse, options: .repeating)
+
+            Text(message)
+                .mangoxFont(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(AppColor.fg1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                viewModel.recoverConnectionsIfSessionActive()
+            } label: {
+                Text("Reconnect")
+                    .mangoxFont(.micro)
+                    .fontWeight(.bold)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(AppColor.hair2)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, dense ? 8 : 10)
+        .background(AppColor.yellow.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue))
+        .overlay(
+            RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue)
+                .strokeBorder(AppColor.yellow.opacity(0.3), lineWidth: 1)
+        )
     }
 
     private func phoneMetricCell(label: String, value: String, unit: String, color: Color = .white)
@@ -2458,8 +2570,9 @@ struct DashboardView: View {
         case .resetRoot:
             navigationPath = NavigationPath()
         case .route(let route):
-            navigationPath = NavigationPath()
-            navigationPath.append(route)
+            var newPath = NavigationPath()
+            newPath.append(route)
+            navigationPath = newPath
         }
     }
 

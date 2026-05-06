@@ -527,14 +527,7 @@ struct OnboardingView: View {
 
                     HStack(spacing: MangoxSpacing.sm.rawValue) {
                         PhotosPicker(selection: $onboardingProfilePhotoItem, matching: .images) {
-                            Label("Choose photo", systemImage: "photo")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.black)
-                                .labelStyle(.titleAndIcon)
-                                .padding(.horizontal, MangoxSpacing.md.rawValue)
-                                .padding(.vertical, MangoxSpacing.sm.rawValue)
-                                .background(AppColor.mango)
-                                .clipShape(Capsule())
+                            choosePhotoLabel
                         }
                         .buttonStyle(MangoxPressStyle())
 
@@ -564,6 +557,17 @@ struct OnboardingView: View {
         }
         .padding(MangoxSpacing.lg.rawValue)
         .cardStyle(cornerRadius: MangoxRadius.card.rawValue)
+    }
+
+    private var choosePhotoLabel: some View {
+        Label("Choose photo", systemImage: "photo")
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(.black)
+            .labelStyle(.titleAndIcon)
+            .padding(.horizontal, MangoxSpacing.md.rawValue)
+            .padding(.vertical, MangoxSpacing.sm.rawValue)
+            .background(AppColor.mango)
+            .clipShape(Capsule())
     }
 
     // MARK: - Helper Views

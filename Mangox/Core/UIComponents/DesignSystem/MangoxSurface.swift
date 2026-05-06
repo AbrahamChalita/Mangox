@@ -6,6 +6,10 @@ enum MangoxSurface {
     case flat
     case flatSubtle
     case mapOverlay
+    /// Flat panel with explicit fill and border (hairlines, zone tint, CTAs). Prefer ``flat`` / ``flatSubtle`` when defaults match.
+    case flatCustom(fill: Color, border: Color)
+    /// Flat fill with a hairline using any ``ShapeStyle`` (e.g. ``LinearGradient`` for coach message shells).
+    case flatStyled(fill: Color, border: AnyShapeStyle)
 }
 
 enum MangoxSurfaceShape {
@@ -33,6 +37,10 @@ private struct MangoxSurfaceModifier: ViewModifier {
             applyFlat(content: content, fill: AppColor.bg1, border: AppColor.hair)
         case .mapOverlay:
             applyMapOverlay(content: content)
+        case .flatCustom(let fill, let border):
+            applyFlat(content: content, fill: fill, border: border)
+        case .flatStyled(let fill, let border):
+            applyFlatStyled(content: content, fill: fill, border: border)
         }
     }
 
@@ -141,6 +149,37 @@ private struct MangoxSurfaceModifier: ViewModifier {
                     if let border {
                         Rectangle().strokeBorder(border, lineWidth: 1)
                     }
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func applyFlatStyled(content: Content, fill: Color, border: AnyShapeStyle) -> some View {
+        switch shape {
+        case .rounded(let corner):
+            content
+                .background(fill, in: RoundedRectangle(cornerRadius: corner, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: corner, style: .continuous)
+                        .strokeBorder(border, lineWidth: 1)
+                }
+        case .capsule:
+            content
+                .background(fill, in: Capsule())
+                .overlay {
+                    Capsule().strokeBorder(border, lineWidth: 1)
+                }
+        case .circle:
+            content
+                .background(fill, in: Circle())
+                .overlay {
+                    Circle().strokeBorder(border, lineWidth: 1)
+                }
+        case .rectangle:
+            content
+                .background(fill)
+                .overlay {
+                    Rectangle().strokeBorder(border, lineWidth: 1)
                 }
         }
     }

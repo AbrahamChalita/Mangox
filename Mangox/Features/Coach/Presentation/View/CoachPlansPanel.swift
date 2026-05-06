@@ -331,24 +331,28 @@ struct CoachPlansPanel: View {
                 .foregroundStyle(AppColor.bg)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 13)
-                .background(AppColor.mango)
-                .overlay(Rectangle().stroke(AppColor.mango.opacity(0.45), lineWidth: 1))
+                .mangoxSurface(
+                    .flatCustom(fill: AppColor.mango, border: AppColor.mango.opacity(0.45)),
+                    shape: .rounded(MangoxRadius.sharp.rawValue)
+                )
             }
             .buttonStyle(MangoxPressStyle())
         }
         .padding(16)
-        .background(AppColor.bg2)
-        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1)))
+        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
+        )
     }
 
     // MARK: - Card Helpers
 
     private func planCardGlyph(systemName: String, color: Color) -> some View {
         ZStack {
-            Rectangle()
-                .fill(AppColor.bg1)
+            Color.clear
                 .frame(width: 42, height: 42)
-                .overlay(Rectangle().stroke(color.opacity(0.32), lineWidth: 1))
+                .mangoxSurface(
+                    .flatCustom(fill: AppColor.bg1, border: color.opacity(0.32)),
+                    shape: .rounded(MangoxRadius.sharp.rawValue)
+                )
             Image(systemName: systemName)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(color)
@@ -367,8 +371,7 @@ struct CoachPlansPanel: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(AppColor.bg1)
-        .overlay(Rectangle().stroke(AppColor.hair, lineWidth: 1))
+        .mangoxSurface(.flatSubtle, shape: .rounded(MangoxRadius.sharp.rawValue))
     }
 
     // MARK: - Data Actions

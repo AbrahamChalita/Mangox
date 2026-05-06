@@ -183,8 +183,10 @@ struct TrainingPlanView: View {
                     .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
                     .frame(width: 32, height: 32)
             }
-            .background(AppColor.bg1)
-            .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+            .mangoxSurface(
+                .flatCustom(fill: AppColor.bg1, border: AppColor.hair2),
+                shape: .rounded(MangoxRadius.sharp.rawValue)
+            )
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("PLAN · W\(viewModel.selectedWeek) / W\(plan.totalWeeks)")
@@ -266,8 +268,10 @@ struct TrainingPlanView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(MangoxSpacing.lg.rawValue)
-                .background(AppColor.bg2)
-                .overlay(Rectangle().stroke(AppColor.yellow.opacity(0.2), lineWidth: 1))
+                .mangoxSurface(
+                    .flatCustom(fill: AppColor.bg2, border: AppColor.yellow.opacity(0.2)),
+                    shape: .rounded(MangoxRadius.sharp.rawValue)
+                )
 
                 // Description
                 Text(plan.description)
@@ -296,8 +300,7 @@ struct TrainingPlanView: View {
                 }
                 .padding(MangoxSpacing.lg.rawValue)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(AppColor.bg2)
-                .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+                .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
 
                 // Start button
                 Button {
@@ -313,8 +316,10 @@ struct TrainingPlanView: View {
                     .foregroundStyle(.black)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, MangoxSpacing.lg.rawValue)
-                    .background(AppColor.mango)
-                    .overlay(Rectangle().stroke(AppColor.mango, lineWidth: 1))
+                    .mangoxSurface(
+                        .flatCustom(fill: AppColor.mango, border: AppColor.mango),
+                        shape: .rounded(MangoxRadius.sharp.rawValue)
+                    )
                 }
 
                 if viewModel.shouldShowUpgradeCTA {
@@ -476,8 +481,7 @@ struct TrainingPlanView: View {
             }
         }
         .padding(MangoxSpacing.lg.rawValue)
-        .background(AppColor.bg2)
-        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
     }
 
     private func inlineStat(label: String, value: String, color: Color) -> some View {
@@ -505,7 +509,10 @@ struct TrainingPlanView: View {
         }
         .padding(.horizontal, MangoxSpacing.sm.rawValue)
         .padding(.vertical, 4)
-        .overlay(Rectangle().stroke(AppColor.whoop.opacity(0.32), lineWidth: 1))
+        .mangoxSurface(
+            .flatCustom(fill: Color.clear, border: AppColor.whoop.opacity(0.32)),
+            shape: .rounded(MangoxRadius.sharp.rawValue)
+        )
     }
 
     // MARK: - Expansion state
@@ -582,14 +589,18 @@ struct TrainingPlanView: View {
                 .foregroundStyle(.black)
                 .padding(.horizontal, MangoxSpacing.lg.rawValue)
                 .padding(.vertical, MangoxSpacing.md.rawValue)
-                .background(AppColor.mango)
-                .overlay(Rectangle().stroke(AppColor.mango, lineWidth: 1))
+                .mangoxSurface(
+                    .flatCustom(fill: AppColor.mango, border: AppColor.mango),
+                    shape: .rounded(MangoxRadius.sharp.rawValue)
+                )
             }
         }
         .padding(.horizontal, MangoxSpacing.lg.rawValue)
         .padding(.vertical, MangoxSpacing.md.rawValue)
-        .background(AppColor.bg1)
-        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+        .mangoxSurface(
+            .flatCustom(fill: AppColor.bg1, border: AppColor.hair2),
+            shape: .rounded(MangoxRadius.sharp.rawValue)
+        )
     }
 
     // MARK: - Week Selector
@@ -634,13 +645,14 @@ struct TrainingPlanView: View {
                             }
                             .frame(width: 54)
                             .padding(.vertical, 8)
-                            .background(isSelected ? AppColor.bg2 : AppColor.bg1)
-                            .overlay(
-                                Rectangle()
-                                    .stroke(
-                                        isSelected ? phaseColor(week.phase).opacity(0.4) : Color.white.opacity(0.06),
-                                        lineWidth: 1
-                                    )
+                            .mangoxSurface(
+                                .flatCustom(
+                                    fill: isSelected ? AppColor.bg2 : AppColor.bg1,
+                                    border: isSelected
+                                        ? phaseColor(week.phase).opacity(0.4)
+                                        : Color.white.opacity(0.06)
+                                ),
+                                shape: .rounded(MangoxRadius.sharp.rawValue)
                             )
                         }
                         .id(week.weekNumber)
@@ -722,13 +734,12 @@ struct TrainingPlanView: View {
                 .buttonStyle(.plain)
             }
         }
-        .background(isToday ? AppColor.mango.opacity(0.04) : AppColor.bg2)
-        .overlay(
-            Rectangle()
-                .stroke(
-                    isToday ? AppColor.mango.opacity(0.35) : AppColor.hair,
-                    lineWidth: 1
-                )
+        .mangoxSurface(
+            .flatCustom(
+                fill: isToday ? AppColor.mango.opacity(0.04) : AppColor.bg2,
+                border: isToday ? AppColor.mango.opacity(0.35) : AppColor.hair
+            ),
+            shape: .rounded(MangoxRadius.sharp.rawValue)
         )
         .animation(.easeInOut(duration: 0.18), value: expandedDayIDs)
     }
@@ -901,8 +912,10 @@ struct TrainingPlanView: View {
                             .foregroundStyle(day.zone.color)
                             .padding(.horizontal, MangoxSpacing.sm.rawValue)
                             .padding(.vertical, 2)
-                            .background(AppColor.bg1)
-                            .overlay(Rectangle().stroke(day.zone.color.opacity(0.35), lineWidth: 1))
+                            .mangoxSurface(
+                                .flatCustom(fill: AppColor.bg1, border: day.zone.color.opacity(0.35)),
+                                shape: .rounded(MangoxRadius.sharp.rawValue)
+                            )
                     }
 
                     if day.hasStructuredIntervals {
@@ -958,8 +971,7 @@ struct TrainingPlanView: View {
         }
         .padding(MangoxSpacing.md.rawValue)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppColor.bg1)
-        .overlay(Rectangle().stroke(AppColor.hair, lineWidth: 1))
+        .mangoxSurface(.flatSubtle, shape: .rounded(MangoxRadius.sharp.rawValue))
     }
 
     private func dayWorkoutProfile(day: PlanDay) -> some View {
@@ -1030,8 +1042,7 @@ struct TrainingPlanView: View {
             }
         }
         .padding(MangoxSpacing.md.rawValue)
-        .background(AppColor.bg1)
-        .overlay(Rectangle().stroke(AppColor.hair, lineWidth: 1))
+        .mangoxSurface(.flatSubtle, shape: .rounded(MangoxRadius.sharp.rawValue))
     }
 
     // MARK: - Day Actions
@@ -1045,7 +1056,7 @@ struct TrainingPlanView: View {
     @ViewBuilder
     private func actionButton(_ title: String, icon: String, style: ActionStyle, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: MangoxSpacing.xs.rawValue) {
+            let label = HStack(spacing: MangoxSpacing.xs.rawValue) {
                 Image(systemName: icon)
                     .font(.system(size: 10, weight: .semibold))
                 Text(title)
@@ -1054,8 +1065,21 @@ struct TrainingPlanView: View {
             .padding(.horizontal, MangoxSpacing.md.rawValue)
             .padding(.vertical, MangoxSpacing.sm.rawValue)
             .foregroundStyle(actionFg(style))
-            .background(actionBg(style))
-            .overlay(Rectangle().stroke(actionBorder(style), lineWidth: 1))
+
+            switch style {
+            case .ghost:
+                label.mangoxSurface(.flatSubtle, shape: .rounded(MangoxRadius.sharp.rawValue))
+            case .primary(let color):
+                label.mangoxSurface(
+                    .flatCustom(fill: color, border: color),
+                    shape: .rounded(MangoxRadius.sharp.rawValue)
+                )
+            case .secondary(let color):
+                label.mangoxSurface(
+                    .flatCustom(fill: color.opacity(0.08), border: color.opacity(0.3)),
+                    shape: .rounded(MangoxRadius.sharp.rawValue)
+                )
+            }
         }
     }
 
@@ -1064,22 +1088,6 @@ struct TrainingPlanView: View {
         case .primary: return .black
         case .secondary(let c): return c
         case .ghost: return AppColor.fg2
-        }
-    }
-
-    private func actionBg(_ style: ActionStyle) -> Color {
-        switch style {
-        case .primary(let c): return c
-        case .secondary(let c): return c.opacity(0.08)
-        case .ghost: return AppColor.bg1
-        }
-    }
-
-    private func actionBorder(_ style: ActionStyle) -> Color {
-        switch style {
-        case .primary(let c): return c
-        case .secondary(let c): return c.opacity(0.3)
-        case .ghost: return AppColor.hair
         }
     }
 
@@ -1231,8 +1239,7 @@ struct TrainingPlanView: View {
                         }
                         .padding(MangoxSpacing.lg.rawValue)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(AppColor.bg2)
-                        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+                        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
 
                         Button {
                             startPlan()
@@ -1248,8 +1255,10 @@ struct TrainingPlanView: View {
                             .foregroundStyle(.black)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, MangoxSpacing.lg.rawValue)
-                            .background(AppColor.mango)
-                            .overlay(Rectangle().stroke(AppColor.mango, lineWidth: 1))
+                            .mangoxSurface(
+                                .flatCustom(fill: AppColor.mango, border: AppColor.mango),
+                                shape: .rounded(MangoxRadius.sharp.rawValue)
+                            )
                         }
                     }
                     .padding(MangoxSpacing.xl.rawValue)

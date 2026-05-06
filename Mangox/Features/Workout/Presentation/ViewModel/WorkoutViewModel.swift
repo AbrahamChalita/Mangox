@@ -112,6 +112,7 @@ final class WorkoutViewModel {
     var shareItems: [Any] = []
     var lastExportedFileURL: URL?
     var showShareSheet = false
+    var pendingShareOnExportDismiss = false
     var showDeleteConfirmation = false
     var showExportModal = false
     var actionError: String?
@@ -219,7 +220,11 @@ final class WorkoutViewModel {
     func presentExportedFile(_ fileURL: URL) {
         lastExportedFileURL = fileURL
         shareItems = [fileURL]
-        showShareSheet = true
+        if showExportModal {
+            pendingShareOnExportDismiss = true
+        } else {
+            showShareSheet = true
+        }
     }
 
     func presentShareItems(_ items: [Any]) {

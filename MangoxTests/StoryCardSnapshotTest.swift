@@ -31,6 +31,66 @@ final class StoryCardSnapshotTest: XCTestCase {
         print("✅ Wrote snapshot to \(url.path)")
     }
 
+    func testStoryOptionsDecodeOldPreferencesWithNewDefaults() throws {
+        let legacyJSON = """
+        {
+          "accent": "dominantZone",
+          "backgroundSource": "none",
+          "selectedPreset": "darkAtmospheric",
+          "layeredShare": false,
+          "showHeader": true,
+          "showHeroTitle": true,
+          "showRouteName": true,
+          "showTrainingLoad": true,
+          "showSummaryCards": true,
+          "showBottomStrip": true,
+          "showElevation": true,
+          "showBrandBadge": true,
+          "showQuickStatHeartRate": true,
+          "showQuickStatCadence": true,
+          "showQuickStatThird": true,
+          "showQuickStatSpeed": true,
+          "showWhoopReadiness": true
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(InstagramStoryCardOptions.self, from: legacyJSON)
+
+        XCTAssertEqual(decoded.template, .cleanStats)
+        XCTAssertEqual(decoded.visualStyle, .mangoEditorial)
+        XCTAssertEqual(decoded.quickStatSlots, [.heartRate, .cadence, .elevation, .speed])
+        XCTAssertFalse(decoded.carouselExport)
+        XCTAssertFalse(decoded.privacyHidePower)
+    }
+
+    func testAllStoryTemplatesRenderStorySizedImages() throws {
+        let workout = makeMockWorkout()
+        let zone = PowerZone.zone(for: Int(workout.avgPower.rounded()))
+
+        for template in InstagramStoryCardOptions.Template.allCases {
+            var options = InstagramStoryCardOptions.default
+            options.template = template
+            options.visualStyle = template == .cleanStats ? .mangoEditorial : .analyst
+            options.quickStatSlots = [.distance, .movingTime, .normalizedPower, .tss]
+
+            let image = InstagramStoryCardRenderer.render(
+                workout: workout,
+                dominantZone: zone,
+                routeName: "Col du Galibier",
+                totalElevationGain: 824,
+                personalRecordNames: ["20 min"],
+                options: options,
+                sessionKind: .outdoor,
+                whoopStrain: 12.4,
+                whoopRecovery: 68,
+                aiTitle: "Climb Day"
+            )
+
+            XCTAssertEqual(image.size, InstagramStoryCardRenderer.cardSize, "Failed template \(template.rawValue)")
+            XCTAssertGreaterThan(try XCTUnwrap(image.jpegData(compressionQuality: 0.7)).count, 1000)
+        }
+    }
+
     private func makeMockWorkout() -> Workout {
         let workout = Workout(startDate: Date())
         workout.duration = 7868

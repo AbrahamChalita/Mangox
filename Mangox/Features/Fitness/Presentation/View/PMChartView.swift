@@ -369,8 +369,7 @@ struct PMChartView: View {
             Spacer(minLength: 0)
         }
         .padding(14)
-        .background(AppColor.bg2)
-        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
         .animation(.snappy, value: snap.fraction)
     }
 
@@ -456,8 +455,7 @@ struct PMChartView: View {
             }
         }
         .padding(14)
-        .background(AppColor.bg2)
-        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
     }
 
     private var scopeInfoPopover: some View {
@@ -727,8 +725,7 @@ struct PMChartView: View {
             .frame(height: 180)
         }
         .padding(14)
-        .background(AppColor.bg2)
-        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
     }
 
     /// Axis tick positions at conventional duration breakpoints that intersect

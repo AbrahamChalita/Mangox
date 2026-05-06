@@ -11,6 +11,7 @@ nonisolated struct MangoxRideAttributes: ActivityAttributes {
         var speedKmh: Double
         var distanceM: Double
         var durationSeconds: Double
+        var startedAt: Date
         var nextTurnShort: String?
         var heartRateBpm: Int
         var powerWatts: Int
@@ -48,15 +49,8 @@ private enum ZonePalette {
 
 // MARK: - Formatting
 
-private func formatDuration(_ seconds: TimeInterval) -> String {
-    let s = max(0, Int(seconds))
-    let h = s / 3600
-    let m = (s % 3600) / 60
-    let sec = s % 60
-    if h > 0 {
-        return String(format: "%d:%02d:%02d", h, m, sec)
-    }
-    return String(format: "%d:%02d", m, sec)
+private func liveDurationText(_ state: MangoxRideAttributes.ContentState) -> Text {
+    Text(state.startedAt, style: .timer)
 }
 
 private func formatDistance(_ m: Double, imperial: Bool) -> String {
@@ -205,7 +199,7 @@ private func lockScreenView(context: ActivityViewContext<MangoxRideAttributes>) 
             }
             Text("·")
                 .foregroundStyle(.tertiary)
-            Text(formatDuration(s.durationSeconds))
+            liveDurationText(s)
                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .contentTransition(.numericText())
@@ -346,7 +340,7 @@ private func expandedBottom(context: ActivityViewContext<MangoxRideAttributes>) 
                 .contentTransition(.numericText())
             Text("·")
                 .foregroundStyle(.tertiary)
-            Text(formatDuration(s.durationSeconds))
+            liveDurationText(s)
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .contentTransition(.numericText())
         }

@@ -222,6 +222,24 @@ private enum StoryCardDrawing {
             backgroundImage: backgroundImage
         )
 
+        if options.template != .cleanStats {
+            drawStudioTemplate(
+                in: cg,
+                size: size,
+                workout: workout,
+                dominantZone: dominantZone,
+                routeName: routeName,
+                totalElevationGain: totalElevationGain,
+                personalRecordNames: personalRecordNames,
+                options: options,
+                sessionKind: sessionKind,
+                whoopStrain: whoopStrain,
+                whoopRecovery: whoopRecovery,
+                aiTitle: aiTitle
+            )
+            return
+        }
+
         let heroTitle = resolvedHeroTitle(
             from: aiTitle,
             workout: workout,
@@ -248,7 +266,7 @@ private enum StoryCardDrawing {
             titleLines: heroLines,
             workout: workout,
             routeName: routeName,
-            showRouteName: options.showRouteName,
+            showRouteName: options.showRouteName && !options.privacyHideRoute,
             sessionKind: sessionKind,
             dominantZone: dominantZone,
             accent: accent,
@@ -313,6 +331,7 @@ private enum StoryCardDrawing {
             drawBottomSummaryCards(
                 workout: workout,
                 accent: accent,
+                options: options,
                 y: cursor,
                 width: size.width,
                 cg: cg
@@ -370,13 +389,13 @@ private enum StoryCardDrawing {
         fillRadial(
             center: CGPoint(x: size.width * 0.82, y: size.height * 0.88),
             radius: 340,
-            color: accent.withAlphaComponent(0.24),
+            color: accent.withAlphaComponent(options.visualStyle == .neonNight ? 0.36 : 0.24),
             cg: cg
         )
         fillRadial(
             center: CGPoint(x: size.width * 0.20, y: size.height * 0.15),
             radius: 260,
-            color: StoryCardDesign.accentBlue.withAlphaComponent(0.14),
+            color: secondaryAtmosphereColor(for: options.visualStyle).withAlphaComponent(0.16),
             cg: cg
         )
         fillRadial(
@@ -562,36 +581,16 @@ private enum StoryCardDrawing {
         width: CGFloat,
         cg: CGContext
     ) {
-        let elevDisplayM = max(workout.elevationGain, totalElevationGain)
-        var slots: [(label: String, value: String)] = []
-        if options.showQuickStatHeartRate {
-            slots.append(("HR AVG", metricText(averageHeartRate(from: workout), fallback: "—")))
-        }
-        if options.showQuickStatCadence {
-            slots.append(("RPM", metricText(Int(workout.avgCadence.rounded()), fallback: "—")))
-        }
-        if options.showQuickStatThird {
-            if options.showElevation {
-                slots.append(("ELEV M", metricText(Int(elevDisplayM.rounded()), fallback: "—")))
-            } else {
-                slots.append(("NP W", metricText(Int(workout.normalizedPower.rounded()), fallback: "—")))
-            }
-        }
-        if options.showQuickStatSpeed {
-            slots.append(("KM/H", String(format: "%.1f", max(0, workout.displayAverageSpeedKmh))))
-        }
+        var slots = options.quickStatSlots
+            .prefix(4)
+            .compactMap { metricSlot($0, workout: workout, totalElevationGain: totalElevationGain, options: options) }
         if slots.isEmpty {
             slots = [
-                ("HR AVG", metricText(averageHeartRate(from: workout), fallback: "—")),
-                ("RPM", metricText(Int(workout.avgCadence.rounded()), fallback: "—")),
-                (
-                    options.showElevation ? "ELEV M" : "NP W",
-                    options.showElevation
-                        ? metricText(Int(elevDisplayM.rounded()), fallback: "—")
-                        : metricText(Int(workout.normalizedPower.rounded()), fallback: "—")
-                ),
-                ("KM/H", String(format: "%.1f", max(0, workout.displayAverageSpeedKmh))),
-            ]
+                metricSlot(.distance, workout: workout, totalElevationGain: totalElevationGain, options: options),
+                metricSlot(.movingTime, workout: workout, totalElevationGain: totalElevationGain, options: options),
+                metricSlot(.elevation, workout: workout, totalElevationGain: totalElevationGain, options: options),
+                metricSlot(.speed, workout: workout, totalElevationGain: totalElevationGain, options: options),
+            ].compactMap { $0 }
         }
 
         let gap: CGFloat = 18
@@ -817,6 +816,7 @@ private enum StoryCardDrawing {
     private static func drawBottomSummaryCards(
         workout: Workout,
         accent: UIColor,
+        options: InstagramStoryCardOptions,
         y: CGFloat,
         width: CGFloat,
         cg: CGContext
@@ -830,7 +830,8 @@ private enum StoryCardDrawing {
         drawPanel(in: leftRect, cornerRadius: StoryCardDesign.panelRadius, cg: cg)
         drawPanel(in: rightRect, cornerRadius: StoryCardDesign.panelRadius, cg: cg)
 
-        "AVG POWER".draw(
+        let leftTitle = options.privacyHidePower ? "MOVING TIME" : "AVG POWER"
+        leftTitle.draw(
             at: CGPoint(x: leftRect.minX + 24, y: leftRect.minY + 22),
             withAttributes: [
                 .font: StoryCardFontToken.mono(size: 18, weight: .medium),
@@ -839,24 +840,32 @@ private enum StoryCardDrawing {
             ]
         )
 
-        let powerValue = metricText(Int(workout.avgPower.rounded()), fallback: "—")
+        let powerValue = options.privacyHidePower
+            ? AppFormat.duration(workout.duration)
+            : metricText(Int(workout.avgPower.rounded()), fallback: "—")
         let powerAttrs: [NSAttributedString.Key: Any] = [
-            .font: StoryCardFontToken.mono(size: 68, weight: .heavy),
+            .font: StoryCardFontToken.mono(size: options.privacyHidePower ? 52 : 68, weight: .heavy),
             .foregroundColor: StoryCardDesign.textPrimary,
             .kern: -2.6,
         ]
         let powerSize = powerValue.size(withAttributes: powerAttrs)
         powerValue.draw(at: CGPoint(x: leftRect.minX + 24, y: leftRect.minY + 66), withAttributes: powerAttrs)
-        "w".draw(
-            at: CGPoint(x: leftRect.minX + 24 + powerSize.width + 10, y: leftRect.minY + 109),
-            withAttributes: [
-                .font: StoryCardFontToken.ui(size: 28, weight: .medium),
-                .foregroundColor: StoryCardDesign.textMuted,
-            ]
-        )
+        if !options.privacyHidePower {
+            "w".draw(
+                at: CGPoint(x: leftRect.minX + 24 + powerSize.width + 10, y: leftRect.minY + 109),
+                withAttributes: [
+                    .font: StoryCardFontToken.ui(size: 28, weight: .medium),
+                    .foregroundColor: StoryCardDesign.textMuted,
+                ]
+            )
+        }
 
-        let npText = "NP \(metricText(Int(workout.normalizedPower.rounded()), fallback: "—"))w"
-        let ifText = "IF \(String(format: "%.2f", max(0, workout.intensityFactor)))"
+        let npText = options.privacyHidePower
+            ? String(format: "%.1f km", workout.distance / 1000)
+            : "NP \(metricText(Int(workout.normalizedPower.rounded()), fallback: "—"))w"
+        let ifText = options.privacyHidePower
+            ? "\(estimatedCalories(for: workout)) kcal"
+            : "IF \(String(format: "%.2f", max(0, workout.intensityFactor)))"
         "\(npText)  •  \(ifText)".draw(
             at: CGPoint(x: leftRect.minX + 24, y: leftRect.maxY - 44),
             withAttributes: [
@@ -1039,6 +1048,407 @@ private enum StoryCardDrawing {
         let first = words.prefix(midpoint).joined(separator: " ")
         let second = words.suffix(words.count - midpoint).joined(separator: " ")
         return [first, second + "."]
+    }
+
+    private static func drawStudioTemplate(
+        in cg: CGContext,
+        size: CGSize,
+        workout: Workout,
+        dominantZone: PowerZone,
+        routeName: String?,
+        totalElevationGain: Double,
+        personalRecordNames: [String],
+        options: InstagramStoryCardOptions,
+        sessionKind: InstagramStoryCardSessionKind,
+        whoopStrain: Double?,
+        whoopRecovery: Double?,
+        aiTitle: String?
+    ) {
+        let accent = StoryCardDesign.accentColor(for: options.accent, dominantZone: dominantZone)
+        let title = resolvedTemplateTitle(
+            from: aiTitle,
+            template: options.template,
+            workout: workout,
+            routeName: routeName,
+            dominantZone: dominantZone,
+            personalRecordNames: personalRecordNames
+        )
+        let eyebrow = heroEyebrowText(
+            routeName: routeName,
+            showRouteName: options.showRouteName && !options.privacyHideRoute,
+            sessionKind: sessionKind,
+            dominantZone: dominantZone
+        )
+
+        switch options.template {
+        case .bigAchievement, .prFlex, .raceEffort:
+            drawPosterTemplate(
+                title: title,
+                eyebrow: eyebrow,
+                workout: workout,
+                totalElevationGain: totalElevationGain,
+                personalRecordNames: personalRecordNames,
+                options: options,
+                accent: accent,
+                size: size,
+                cg: cg
+            )
+        case .photoFirst, .routeDay, .recoveryRide, .minimalDark:
+            drawEditorialTemplate(
+                title: title,
+                eyebrow: eyebrow,
+                workout: workout,
+                totalElevationGain: totalElevationGain,
+                options: options,
+                accent: accent,
+                size: size,
+                cg: cg
+            )
+        case .indoorPower:
+            drawPowerTemplate(
+                title: title,
+                eyebrow: eyebrow,
+                workout: workout,
+                dominantZone: dominantZone,
+                totalElevationGain: totalElevationGain,
+                options: options,
+                whoopStrain: whoopStrain,
+                whoopRecovery: whoopRecovery,
+                accent: accent,
+                size: size,
+                cg: cg
+            )
+        case .cleanStats:
+            break
+        }
+    }
+
+    private static func drawPosterTemplate(
+        title: String,
+        eyebrow: String,
+        workout: Workout,
+        totalElevationGain: Double,
+        personalRecordNames: [String],
+        options: InstagramStoryCardOptions,
+        accent: UIColor,
+        size: CGSize,
+        cg: CGContext
+    ) {
+        drawStyleMotif(options.visualStyle, accent: accent, size: size, date: workout.startDate, cg: cg)
+        if options.showHeader {
+            drawHeader(
+                brandTitle: options.showBrandBadge ? "MANGOX" : "RIDE SHARE",
+                dateTitle: dateFormatter.string(from: workout.startDate).uppercased(),
+                accent: accent,
+                y: 100,
+                width: size.width,
+                cg: cg
+            )
+        }
+
+        eyebrow.draw(at: CGPoint(x: sidePad, y: 260), withAttributes: templateEyebrowAttrs(accent: accent))
+        drawWrappedTitle(title.uppercased(), in: CGRect(x: sidePad, y: 320, width: size.width - sidePad * 2, height: 440), fontSize: 118)
+
+        let heroMetric = primaryTemplateMetric(workout: workout, template: options.template, personalRecordNames: personalRecordNames)
+        drawHugeMetric(label: heroMetric.label, value: heroMetric.value, unit: heroMetric.unit, y: 820, accent: accent, width: size.width)
+
+        if options.showBottomStrip {
+            drawQuickStatsRow(workout: workout, totalElevationGain: totalElevationGain, options: options, y: 1220, width: size.width, cg: cg)
+        }
+        if options.showSummaryCards {
+            drawBottomSummaryCards(workout: workout, accent: accent, options: options, y: 1410, width: size.width, cg: cg)
+        }
+    }
+
+    private static func drawEditorialTemplate(
+        title: String,
+        eyebrow: String,
+        workout: Workout,
+        totalElevationGain: Double,
+        options: InstagramStoryCardOptions,
+        accent: UIColor,
+        size: CGSize,
+        cg: CGContext
+    ) {
+        drawStyleMotif(options.visualStyle, accent: accent, size: size, date: workout.startDate, cg: cg)
+        let titleY: CGFloat = options.template == .photoFirst ? 1010 : 265
+        let panelY: CGFloat = options.template == .photoFirst ? 1320 : 1110
+
+        eyebrow.draw(at: CGPoint(x: sidePad, y: titleY - 66), withAttributes: templateEyebrowAttrs(accent: accent))
+        drawWrappedTitle(
+            title.uppercased(),
+            in: CGRect(x: sidePad, y: titleY, width: size.width - sidePad * 2, height: 330),
+            fontSize: options.template == .minimalDark ? 86 : 104
+        )
+
+        if options.showBottomStrip {
+            drawQuickStatsRow(workout: workout, totalElevationGain: totalElevationGain, options: options, y: panelY, width: size.width, cg: cg)
+        }
+        if options.showSummaryCards {
+            drawBottomSummaryCards(workout: workout, accent: accent, options: options, y: panelY + 170, width: size.width, cg: cg)
+        }
+    }
+
+    private static func drawPowerTemplate(
+        title: String,
+        eyebrow: String,
+        workout: Workout,
+        dominantZone: PowerZone,
+        totalElevationGain: Double,
+        options: InstagramStoryCardOptions,
+        whoopStrain: Double?,
+        whoopRecovery: Double?,
+        accent: UIColor,
+        size: CGSize,
+        cg: CGContext
+    ) {
+        drawStyleMotif(options.visualStyle, accent: accent, size: size, date: workout.startDate, cg: cg)
+        eyebrow.draw(at: CGPoint(x: sidePad, y: 190), withAttributes: templateEyebrowAttrs(accent: accent))
+        drawWrappedTitle(title.uppercased(), in: CGRect(x: sidePad, y: 250, width: size.width - sidePad * 2, height: 300), fontSize: 96)
+        drawHugeMetric(
+            label: options.privacyHidePower ? "MOVING TIME" : "NORMALIZED POWER",
+            value: options.privacyHidePower ? AppFormat.duration(workout.duration) : metricText(Int(workout.normalizedPower.rounded()), fallback: "—"),
+            unit: options.privacyHidePower ? "" : "w",
+            y: 640,
+            accent: accent,
+            width: size.width
+        )
+        if options.showTrainingLoad {
+            drawTrainingLoadCard(
+                workout: workout,
+                dominantZone: dominantZone,
+                accent: accent,
+                y: 965,
+                width: size.width,
+                height: trainingLoadCardHeight(options: options, whoopStrain: whoopStrain, whoopRecovery: whoopRecovery),
+                options: options,
+                whoopStrain: whoopStrain,
+                whoopRecovery: whoopRecovery,
+                cg: cg
+            )
+        }
+        if options.showBottomStrip {
+            drawQuickStatsRow(workout: workout, totalElevationGain: totalElevationGain, options: options, y: 1335, width: size.width, cg: cg)
+        }
+        if options.showSummaryCards {
+            drawBottomSummaryCards(workout: workout, accent: accent, options: options, y: 1515, width: size.width, cg: cg)
+        }
+    }
+
+    private static func drawStyleMotif(
+        _ style: InstagramStoryCardOptions.VisualStyle,
+        accent: UIColor,
+        size: CGSize,
+        date: Date,
+        cg: CGContext
+    ) {
+        switch style {
+        case .raceBib:
+            let rect = CGRect(x: sidePad, y: 104, width: size.width - sidePad * 2, height: 126)
+            drawPanel(in: rect, cornerRadius: 24, cg: cg)
+            "RIDE / \(Calendar.current.component(.day, from: date))".draw(
+                at: CGPoint(x: rect.minX + 28, y: rect.minY + 38),
+                withAttributes: [
+                    .font: StoryCardFontToken.mono(size: 42, weight: .bold),
+                    .foregroundColor: StoryCardDesign.textPrimary,
+                    .kern: 2.0,
+                ]
+            )
+        case .proBroadcast:
+            cg.setFillColor(accent.withAlphaComponent(0.18).cgColor)
+            cg.fill(CGRect(x: 0, y: size.height - 360, width: size.width, height: 10))
+            cg.fill(CGRect(x: 0, y: size.height - 324, width: size.width, height: 4))
+        case .cafeRide:
+            cg.setFillColor(UIColor(red: 0.98, green: 0.84, blue: 0.44, alpha: 0.08).cgColor)
+            cg.fill(CGRect(x: 0, y: 0, width: size.width, height: size.height))
+        case .neonNight:
+            fillRadial(center: CGPoint(x: size.width * 0.5, y: size.height * 0.2), radius: 520, color: UIColor.systemPink.withAlphaComponent(0.18), cg: cg)
+        case .topoMap:
+            drawTopoLines(size: size, accent: accent, cg: cg)
+        case .analyst:
+            drawAnalysisGrid(size: size, cg: cg)
+        case .mangoEditorial:
+            break
+        }
+    }
+
+    private static func drawTopoLines(size: CGSize, accent: UIColor, cg: CGContext) {
+        cg.saveGState()
+        cg.setStrokeColor(accent.withAlphaComponent(0.16).cgColor)
+        cg.setLineWidth(2)
+        for i in 0..<9 {
+            let y = CGFloat(240 + i * 150)
+            cg.move(to: CGPoint(x: -40, y: y))
+            cg.addCurve(
+                to: CGPoint(x: size.width + 40, y: y + CGFloat((i % 3) * 18)),
+                control1: CGPoint(x: size.width * 0.28, y: y - 68),
+                control2: CGPoint(x: size.width * 0.68, y: y + 82)
+            )
+            cg.strokePath()
+        }
+        cg.restoreGState()
+    }
+
+    private static func drawAnalysisGrid(size: CGSize, cg: CGContext) {
+        cg.saveGState()
+        cg.setStrokeColor(StoryCardDesign.divider.withAlphaComponent(0.22).cgColor)
+        cg.setLineWidth(1)
+        for x in stride(from: CGFloat(64), through: size.width - 64, by: 96) {
+            cg.move(to: CGPoint(x: x, y: 120))
+            cg.addLine(to: CGPoint(x: x, y: size.height - 120))
+        }
+        for y in stride(from: CGFloat(160), through: size.height - 160, by: 96) {
+            cg.move(to: CGPoint(x: 64, y: y))
+            cg.addLine(to: CGPoint(x: size.width - 64, y: y))
+        }
+        cg.strokePath()
+        cg.restoreGState()
+    }
+
+    private static func drawWrappedTitle(_ title: String, in rect: CGRect, fontSize: CGFloat) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineHeightMultiple = 0.86
+        paragraph.lineBreakMode = .byWordWrapping
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: StoryCardFontToken.ui(size: fontSize, weight: .heavy),
+            .foregroundColor: StoryCardDesign.textPrimary,
+            .paragraphStyle: paragraph,
+        ]
+        title.draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attrs, context: nil)
+    }
+
+    private static func drawHugeMetric(label: String, value: String, unit: String, y: CGFloat, accent: UIColor, width: CGFloat) {
+        label.draw(at: CGPoint(x: sidePad, y: y), withAttributes: templateEyebrowAttrs(accent: accent))
+        let maxValueWidth = width - sidePad * 2 - (unit.isEmpty ? 0 : 150)
+        let fontSize = fittingFontSize(
+            for: value,
+            startingAt: 150,
+            minimum: 88,
+            maxWidth: maxValueWidth
+        )
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: StoryCardFontToken.mono(size: fontSize, weight: .heavy),
+            .foregroundColor: StoryCardDesign.textPrimary,
+            .kern: -5.0,
+        ]
+        let valueSize = value.size(withAttributes: attrs)
+        value.draw(at: CGPoint(x: sidePad, y: y + 48), withAttributes: attrs)
+        if !unit.isEmpty {
+            unit.draw(
+                at: CGPoint(x: min(width - sidePad - 130, sidePad + valueSize.width + 16), y: y + 48 + fontSize * 0.62),
+                withAttributes: [
+                    .font: StoryCardFontToken.ui(size: 48, weight: .medium),
+                    .foregroundColor: StoryCardDesign.textMuted,
+                ]
+            )
+        }
+    }
+
+    private static func fittingFontSize(
+        for text: String,
+        startingAt start: CGFloat,
+        minimum: CGFloat,
+        maxWidth: CGFloat
+    ) -> CGFloat {
+        var size = start
+        while size > minimum {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: StoryCardFontToken.mono(size: size, weight: .heavy),
+                .kern: -5.0,
+            ]
+            if text.size(withAttributes: attrs).width <= maxWidth {
+                return size
+            }
+            size -= 4
+        }
+        return minimum
+    }
+
+    private static func templateEyebrowAttrs(accent: UIColor) -> [NSAttributedString.Key: Any] {
+        [
+            .font: StoryCardFontToken.mono(size: 24, weight: .medium),
+            .foregroundColor: accent.withAlphaComponent(0.94),
+            .kern: 2.0,
+        ]
+    }
+
+    private static func resolvedTemplateTitle(
+        from aiTitle: String?,
+        template: InstagramStoryCardOptions.Template,
+        workout: Workout,
+        routeName: String?,
+        dominantZone: PowerZone,
+        personalRecordNames: [String]
+    ) -> String {
+        if template == .prFlex, let first = personalRecordNames.first {
+            return "New \(first)"
+        }
+        if template == .recoveryRide {
+            return "Easy work counts"
+        }
+        if template == .indoorPower {
+            return "Power session"
+        }
+        return resolvedHeroTitle(from: aiTitle, workout: workout, routeName: routeName, dominantZone: dominantZone, personalRecordNames: personalRecordNames)
+    }
+
+    private static func primaryTemplateMetric(
+        workout: Workout,
+        template: InstagramStoryCardOptions.Template,
+        personalRecordNames: [String]
+    ) -> (label: String, value: String, unit: String) {
+        if template == .prFlex, !personalRecordNames.isEmpty {
+            return ("PERSONAL RECORDS", "\(personalRecordNames.count)", "PR")
+        }
+        if template == .raceEffort {
+            return ("TRAINING STRESS", metricText(Int(workout.tss.rounded()), fallback: "—"), "tss")
+        }
+        return ("DISTANCE", String(format: "%.1f", workout.distance / 1000), "km")
+    }
+
+    private static func metricSlot(
+        _ slot: InstagramStoryCardOptions.MetricSlot,
+        workout: Workout,
+        totalElevationGain: Double,
+        options: InstagramStoryCardOptions
+    ) -> (label: String, value: String)? {
+        switch slot {
+        case .distance: return ("KM", String(format: "%.1f", workout.distance / 1000))
+        case .movingTime: return ("TIME", AppFormat.duration(workout.duration))
+        case .avgPower:
+            return options.privacyHidePower ? nil : ("AVG W", metricText(Int(workout.avgPower.rounded()), fallback: "—"))
+        case .normalizedPower:
+            return options.privacyHidePower ? nil : ("NP W", metricText(Int(workout.normalizedPower.rounded()), fallback: "—"))
+        case .tss:
+            return options.privacyHidePower ? nil : ("TSS", metricText(Int(workout.tss.rounded()), fallback: "—"))
+        case .intensityFactor:
+            return options.privacyHidePower ? nil : ("IF", String(format: "%.2f", max(0, workout.intensityFactor)))
+        case .heartRate:
+            return options.privacyHideHeartRate ? nil : ("HR AVG", metricText(averageHeartRate(from: workout), fallback: "—"))
+        case .cadence: return ("RPM", metricText(Int(workout.avgCadence.rounded()), fallback: "—"))
+        case .elevation:
+            return ("ELEV M", metricText(Int(max(workout.elevationGain, totalElevationGain).rounded()), fallback: "—"))
+        case .calories: return ("KCAL", "\(estimatedCalories(for: workout))")
+        case .speed: return ("KM/H", String(format: "%.1f", max(0, workout.displayAverageSpeedKmh)))
+        case .maxPower:
+            return options.privacyHidePower ? nil : ("MAX W", metricText(workout.maxPower, fallback: "—"))
+        }
+    }
+
+    private static func estimatedCalories(for workout: Workout) -> Int {
+        WorkoutExportService.estimateCalories(avgPower: workout.avgPower, durationSeconds: workout.duration)
+    }
+
+    private static func secondaryAtmosphereColor(for style: InstagramStoryCardOptions.VisualStyle) -> UIColor {
+        switch style {
+        case .neonNight: return UIColor.systemPink
+        case .cafeRide: return UIColor(red: 0.92, green: 0.68, blue: 0.30, alpha: 1)
+        case .topoMap: return UIColor.systemGreen
+        case .analyst: return UIColor.systemTeal
+        case .raceBib: return UIColor.white
+        case .proBroadcast: return StoryCardDesign.accentBlue
+        case .mangoEditorial: return StoryCardDesign.accentBlue
+        }
     }
 
     private static func metricText(_ value: Int, fallback: String) -> String {

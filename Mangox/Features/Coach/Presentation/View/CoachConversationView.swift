@@ -128,8 +128,7 @@ struct CoachConversationView: View {
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(AppColor.fg2)
                         .frame(width: 42, height: 42)
-                        .background(AppColor.bg2)
-                        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+                        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -144,8 +143,7 @@ struct CoachConversationView: View {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.system(size: 17, weight: .medium))
                             .frame(width: 40, height: 40)
-                            .background(AppColor.bg2)
-                            .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+                            .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -158,8 +156,10 @@ struct CoachConversationView: View {
                         Image(systemName: "calendar.badge.plus")
                             .font(.system(size: 17, weight: .medium))
                             .frame(width: 40, height: 40)
-                            .background(AppColor.bg2)
-                            .overlay(Rectangle().stroke(AppColor.mango.opacity(0.35), lineWidth: 1))
+                            .mangoxSurface(
+                                .flatCustom(fill: AppColor.bg2, border: AppColor.mango.opacity(0.35)),
+                                shape: .rounded(MangoxRadius.sharp.rawValue)
+                            )
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -173,8 +173,7 @@ struct CoachConversationView: View {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 17, weight: .medium))
                             .frame(width: 40, height: 40)
-                            .background(AppColor.bg2)
-                            .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+                            .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -285,8 +284,7 @@ struct CoachConversationView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(AppColor.bg2)
-        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
     }
 
     // MARK: Messages

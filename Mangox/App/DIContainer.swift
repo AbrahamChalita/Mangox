@@ -115,6 +115,10 @@ final class DIContainer {
         retainedIndoorViewModel = vm
         return vm
     }
+
+    func persistIndoorRecordingCheckpointNow() {
+        retainedIndoorViewModel?.persistRecordingCheckpointNow()
+    }
     func makeOutdoorViewModel() -> OutdoorViewModel {
         OutdoorViewModel(
             locationService: locationManager,

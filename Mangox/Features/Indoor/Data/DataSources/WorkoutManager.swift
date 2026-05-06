@@ -13,6 +13,20 @@ private struct PendingWorkoutSample {
     let heartRate: Int
 }
 
+private struct BufferedTrainerPacket {
+    let timestamp: Date
+    let metrics: CyclingMetrics
+}
+
+private struct SecondTelemetry {
+    let power: Int
+    let maxPower: Int
+    let cadence: Double
+    let speed: Double
+    let heartRate: Int
+    let distanceMeters: Double?
+}
+
 private struct IndoorRouteSnapshot {
     let routeName: String?
     let plannedDistanceMeters: Double
@@ -287,6 +301,7 @@ final class WorkoutManager {
     /// Pending 1 Hz samples — flushed in batches to reduce SwiftData insert churn during long rides.
     private var pendingSamples: [PendingWorkoutSample] = []
     private let sampleBatchSize = 5
+    private var bufferedTrainerPackets: [BufferedTrainerPacket] = []
 
     /// Base unscaled ERG target.
     private var baseErgTarget: Int?
@@ -312,6 +327,34 @@ final class WorkoutManager {
         onStateChange = nil
         bleService?.unsubscribe(id: Self.subscriberID)
         dataSource?.unsubscribeCyclingMetrics(id: Self.subscriberID)
+    }
+
+    func persistRecordingCheckpointNow() {
+        guard state.isLiveSessionActive else { return }
+        if state == .recording {
+            processSecondSample()
+        }
+        flushPendingSamples()
+        do {
+            try modelContext.save()
+        } catch {
+            workoutLogger.error("indoor checkpoint save failed: \(error)")
+        }
+    }
+
+    func pauseForUnsupportedBackgroundSource() {
+        guard state == .recording else { return }
+        flushPendingSamples()
+        state = .paused
+        stopTimer()
+        workout?.status = .paused
+        markPauseStartedIfNeeded()
+        autoPauseSuppressedUntilElapsed = nil
+        do {
+            try modelContext.save()
+        } catch {
+            workoutLogger.error("background source pause save failed: \(error)")
+        }
     }
 
     // MARK: - Lifecycle
@@ -641,6 +684,9 @@ final class WorkoutManager {
         guard state == .recording || state == .autoPaused else { return }
 
         lastIngestedMetrics = metrics
+        bufferedTrainerPackets.append(
+            BufferedTrainerPacket(timestamp: metrics.lastUpdate ?? Date(), metrics: metrics)
+        )
 
         powerAccumulator.append(metrics.power)
         cadenceAccumulator.append(metrics.cadence)
@@ -696,51 +742,138 @@ final class WorkoutManager {
         let previousElapsed = elapsedSeconds
         let elapsedDelta = refreshElapsedFromWallClock(now: now)
         guard elapsedDelta > 0 else { return }
-        let rawDt = lastSampleDate.map { max(0, now.timeIntervalSince($0)) } ?? 1.0
-        let dt = min(rawDt, Self.distanceIntegrationMaxDt)
         lastSampleDate = now
 
-        // Detect BLE dropout: if no packets arrived for > 5 seconds, it's a dropout.
-        // During short gaps (< 5s), carry over the last power.
+        powerAccumulator.removeAll(keepingCapacity: true)
+        cadenceAccumulator.removeAll(keepingCapacity: true)
+        speedAccumulator.removeAll(keepingCapacity: true)
+        hrAccumulator.removeAll(keepingCapacity: true)
+        latestDistanceInWindow = nil
+
+        let packetsBySecond = drainBufferedPackets(
+            previousElapsed: previousElapsed,
+            currentElapsed: elapsedSeconds
+        )
+        var latestTelemetry = SecondTelemetry(
+            power: 0,
+            maxPower: 0,
+            cadence: 0,
+            speed: 0,
+            heartRate: lastIngestedMetrics?.heartRate ?? bleService?.metrics.heartRate ?? 0,
+            distanceMeters: nil
+        )
+
+        for sampleElapsed in (previousElapsed + 1)...elapsedSeconds {
+            let telemetry = telemetryForSecond(
+                packets: packetsBySecond[sampleElapsed] ?? [],
+                sampleElapsed: sampleElapsed,
+                now: now
+            )
+            latestTelemetry = telemetry
+            let shouldContinue = applySecondTelemetry(telemetry, sampleElapsed: sampleElapsed)
+            guard shouldContinue else { return }
+        }
+
+        peakPowers = Self.peakWindows.compactMap { window in
+            guard let best = peakBests[window] else { return nil }
+            return PeakPowerEntry(
+                windowSeconds: window, watts: best.watts, atElapsed: best.atElapsed)
+        }
+
+        currentLapDuration = TimeInterval(lapElapsedSeconds)
+        currentLapAvgPower = lapSampleCount > 0 ? lapPowerSum / Double(lapSampleCount) : 0
+        currentLapAvgHR = lapSampleCount > 0 ? lapHRSum / Double(lapSampleCount) : 0
+
+        // Drive guided session (if active)
+        onTick?(elapsedSeconds, displayPower)
+
+        // --- Pre-format display strings once per second (match 1 Hz sampled averages, not raw ~4 Hz BLE) ---
+        metricsSpeed = latestTelemetry.speed
+        formattedSpeed = String(format: "%.1f", latestTelemetry.speed)
+        formattedCadence = "\(Int(latestTelemetry.cadence.rounded()))"
+        displayCadenceRpm = latestTelemetry.cadence
+        formattedDistanceKm = String(format: "%.2f", activeDistance / 1000)
+        formattedDistanceKm1dp = String(format: "%.1f", activeDistance / 1000)
+        formattedEnergyKJ = String(format: "%.0f", kilojoules)
+        formattedLiveNP = String(format: "%.0f", liveNP)
+        formattedLiveIF = String(format: "%.2f", liveIF)
+        formattedLiveTSS = String(format: "%.0f", liveTSS)
+        formattedVI = String(format: "%.2f", variabilityIndex)
+        formattedAvgPower = String(format: "%.0f", averagePower)
+        formattedEfficiency = String(format: "%.2f", efficiencyFactor)
+        formattedKJ = String(format: "%.0f", kilojoules)
+
+        // --- Ride Goals ---
+        updateGoalProgress(avgCadence: latestTelemetry.cadence)
+
+        // --- Cadence Warning ---
+        updateCadenceWarning(avgCadence: latestTelemetry.cadence)
+    }
+
+    private func drainBufferedPackets(previousElapsed: Int, currentElapsed: Int) -> [Int: [CyclingMetrics]] {
+        guard currentElapsed > previousElapsed else { return [:] }
+        var grouped: [Int: [CyclingMetrics]] = [:]
+        let packets = bufferedTrainerPackets
+        bufferedTrainerPackets.removeAll(keepingCapacity: true)
+
+        for packet in packets {
+            guard let packetElapsed = activeElapsedSecond(for: packet.timestamp) else { continue }
+            let sampleElapsed = min(max(packetElapsed, previousElapsed + 1), currentElapsed)
+            grouped[sampleElapsed, default: []].append(packet.metrics)
+        }
+
+        return grouped
+    }
+
+    private func activeElapsedSecond(for timestamp: Date) -> Int? {
+        guard let recordingStartWallClock else { return nil }
+        let activeSeconds = timestamp.timeIntervalSince(recordingStartWallClock) - pausedWallClockDuration
+        guard activeSeconds >= 0 else { return nil }
+        return max(1, Int(activeSeconds.rounded(.down)) + 1)
+    }
+
+    private func telemetryForSecond(
+        packets: [CyclingMetrics],
+        sampleElapsed: Int,
+        now: Date
+    ) -> SecondTelemetry {
         let timeSinceLastPacket: TimeInterval
-        if let lastPacket = bleService?.lastPacketReceived {
-            timeSinceLastPacket = Date().timeIntervalSince(lastPacket)
+        if let latestPacketDate = packets.compactMap(\.lastUpdate).max() {
+            timeSinceLastPacket = now.timeIntervalSince(latestPacketDate)
+        } else if let lastPacket = lastIngestedMetrics?.lastUpdate ?? bleService?.lastPacketReceived {
+            timeSinceLastPacket = now.timeIntervalSince(lastPacket)
         } else {
             timeSinceLastPacket = .infinity
         }
-        let isDropout = timeSinceLastPacket > 5.0
-        let isShortGap = timeSinceLastPacket > 1.0 && timeSinceLastPacket <= 5.0
+        let isShortGap = packets.isEmpty && timeSinceLastPacket > 1.0 && timeSinceLastPacket <= 5.0
 
-        // Average the accumulated BLE readings for this 1-second window.
         let avgPower: Int
-        let maxPowerThisSecond: Int
-        if powerAccumulator.isEmpty {
+        let maxPower: Int
+        if packets.isEmpty {
             avgPower = isShortGap ? lastNonZeroPower : 0
-            maxPowerThisSecond = isShortGap ? lastNonZeroPower : 0
+            maxPower = avgPower
         } else {
-            avgPower = TrainerPowerMetrics.meanInt(samples: powerAccumulator)
-            maxPowerThisSecond = TrainerPowerMetrics.peakInt(samples: powerAccumulator)
-            lastNonZeroPower = avgPower
+            let powers = packets.map(\.power)
+            avgPower = TrainerPowerMetrics.meanInt(samples: powers)
+            maxPower = TrainerPowerMetrics.peakInt(samples: powers)
+            if avgPower > 0 {
+                lastNonZeroPower = avgPower
+            }
         }
 
-        let avgCadence: Double
-        let validCadence = cadenceAccumulator.filter { $0 > 0 }
-        if validCadence.isEmpty {
-            avgCadence = 0
-        } else {
-            avgCadence = validCadence.reduce(0.0, +) / Double(validCadence.count)
-        }
+        let validCadence = packets.map(\.cadence).filter { $0 > 0 }
+        let avgCadence = validCadence.isEmpty
+            ? 0
+            : validCadence.reduce(0.0, +) / Double(validCadence.count)
 
         let avgSpeed: Double
-        if speedAccumulator.isEmpty {
+        let speeds = packets.map(\.speed)
+        if speeds.isEmpty {
             avgSpeed = 0
         } else {
-            var sum = 0.0
-            for v in speedAccumulator { sum += v }
-            avgSpeed = sum / Double(speedAccumulator.count)
+            avgSpeed = speeds.reduce(0.0, +) / Double(speeds.count)
         }
 
-        // When using computed speed source in free ride, derive speed from power
         let effectiveSpeed: Double
         if RidePreferences.shared.indoorSpeedSource == .computed,
             trainerMode == .none,
@@ -756,29 +889,32 @@ final class WorkoutManager {
             effectiveSpeed = avgSpeed
         }
 
-        let avgHR: Int
-        let validHR = hrAccumulator.filter { $0 > 0 }
-        if validHR.isEmpty {
-            // Prefer unified coordinator snapshot (WiFi sessions), then BLE.
-            avgHR = lastIngestedMetrics?.heartRate ?? bleService?.metrics.heartRate ?? 0
-        } else {
-            avgHR = validHR.reduce(0, +) / validHR.count
+        let validHR = packets.map(\.heartRate).filter { $0 > 0 }
+        let avgHR = validHR.isEmpty
+            ? (lastIngestedMetrics?.heartRate ?? bleService?.metrics.heartRate ?? 0)
+            : validHR.reduce(0, +) / validHR.count
+
+        let distanceMeters = packets
+            .filter(\.includesTotalDistanceInPacket)
+            .map(\.totalDistance)
+            .max()
+
+        return SecondTelemetry(
+            power: avgPower,
+            maxPower: maxPower,
+            cadence: avgCadence,
+            speed: effectiveSpeed,
+            heartRate: avgHR,
+            distanceMeters: distanceMeters
+        )
+    }
+
+    private func applySecondTelemetry(_ telemetry: SecondTelemetry, sampleElapsed: Int) -> Bool {
+        if let distanceMeters = telemetry.distanceMeters {
+            lastRecordedDistance = max(lastRecordedDistance, distanceMeters)
         }
 
-        // Use latest FTMS distance if reported this window
-        if let dist = latestDistanceInWindow {
-            lastRecordedDistance = max(lastRecordedDistance, dist)
-        }
-
-        // Clear accumulators for next second
-        powerAccumulator.removeAll(keepingCapacity: true)
-        cadenceAccumulator.removeAll(keepingCapacity: true)
-        speedAccumulator.removeAll(keepingCapacity: true)
-        hrAccumulator.removeAll(keepingCapacity: true)
-        latestDistanceInWindow = nil
-
-        // Distance: integrate speed as fallback when FTMS omits total distance
-        let integratedDistanceIncrement = (max(0, effectiveSpeed) / 3.6) * dt  // km/h → m/s
+        let integratedDistanceIncrement = (max(0, telemetry.speed) / 3.6)
         integratedDistance += integratedDistanceIncrement
         let sensorDistance = max(0, lastRecordedDistance - workoutStartDistance)
         if sensorDistance > integratedDistanceAnchor {
@@ -787,167 +923,119 @@ final class WorkoutManager {
         }
         activeDistance = max(sensorDistance, integratedDistanceAnchor + integratedDistance)
 
-        // --- Route simulation: update grade from GPX every N seconds ---
-        // Skip until trainerEngageDelay has passed so the trainer doesn't
-        // immediately lock resistance before the rider is ready.
-        if elapsedSeconds >= trainerEngageDelay,
-            elapsedSeconds % gradeUpdateInterval == 0
+        if sampleElapsed >= trainerEngageDelay,
+            sampleElapsed % gradeUpdateInterval == 0
         {
             updateRouteGrade()
         }
 
-        // Feed ring buffers for every elapsed second that passed while timer delivery was delayed.
-        for secondOffset in 1...elapsedDelta {
-            ring3s.append(avgPower)
-            ring5s.append(avgPower)
-            ring30s.append(avgPower)
-            if ring30s.isFull {
-                let a = ring30s.average
-                let a2 = a * a
-                rollingPower4thSum += a2 * a2
-                rollingPower4thCount += 1
-            }
-
-            // Peak power curve: use peak sample within each second so short spikes count toward best 5s/15s/…
-            // Skip BLE dropout zeros — they would artificially deflate best-effort averages.
-            if !isDropout || maxPowerThisSecond > 0 {
-                for (window, var buffer) in peakBuffers {
-                    buffer.append(maxPowerThisSecond)
-                    peakBuffers[window] = buffer
-                    if buffer.isFull {
-                        let avg = Int(buffer.average.rounded())
-                        let current = peakBests[window]
-                        if current == nil || avg > current!.watts {
-                            let sampleElapsed = previousElapsed + secondOffset
-                            peakBests[window] = (watts: avg, atElapsed: sampleElapsed)
-                        }
-                    }
-                }
-            }
+        ring3s.append(telemetry.power)
+        ring5s.append(telemetry.power)
+        ring30s.append(telemetry.power)
+        if ring30s.isFull {
+            let a = ring30s.average
+            let a2 = a * a
+            rollingPower4thSum += a2 * a2
+            rollingPower4thCount += 1
         }
         avg3s = ring3s.average
         avg5s = ring5s.average
         avg30s = ring30s.average
 
-        // Hero readout + zones: user-chosen 1 s mean vs 3 s rolling mean of those seconds (recording stays 1 s mean).
+        if telemetry.power > 0 || telemetry.maxPower > 0 {
+            for (window, var buffer) in peakBuffers {
+                buffer.append(telemetry.maxPower)
+                peakBuffers[window] = buffer
+                if buffer.isFull {
+                    let avg = Int(buffer.average.rounded())
+                    let current = peakBests[window]
+                    if current == nil || avg > current!.watts {
+                        peakBests[window] = (watts: avg, atElapsed: sampleElapsed)
+                    }
+                }
+            }
+        }
+
         switch RidePreferences.shared.indoorPowerHeroMode {
         case .oneSecond:
-            displayPower = avgPower
+            displayPower = telemetry.power
         case .threeSecond:
             displayPower = Int(avg3s.rounded())
         }
 
-        // ERG Visual Smoothing: If in ERG mode and actual power is close to target (±5%), lock display to target.
         if case .erg = trainerMode, let target = ergTarget {
-            let threshold = max(5.0, Double(target) * 0.05)  // at least 5W or 5%
+            let threshold = max(5.0, Double(target) * 0.05)
             if abs(Double(displayPower) - Double(target)) <= threshold {
                 displayPower = target
             }
         }
 
         let zoneForHistogram = PowerZone.zone(for: displayPower)
-        zoneSecondsByZoneID[zoneForHistogram.id, default: 0] += elapsedDelta
+        zoneSecondsByZoneID[zoneForHistogram.id, default: 0] += 1
 
-        // Rebuild peakPowers array from current bests
-        peakPowers = Self.peakWindows.compactMap { window in
-            guard let best = peakBests[window] else { return nil }
-            return PeakPowerEntry(
-                windowSeconds: window, watts: best.watts, atElapsed: best.atElapsed)
-        }
-
-        // --- Live performance metrics ---
-        totalPowerSum += Double(avgPower) * Double(elapsedDelta)
-        totalPowerSampleCount += elapsedDelta
-        totalEnergyJoules += Double(avgPower) * Double(elapsedDelta)  // 1 watt × 1 second = 1 joule
-
-        // Average power
+        totalPowerSum += Double(telemetry.power)
+        totalPowerSampleCount += 1
+        totalEnergyJoules += Double(telemetry.power)
         averagePower = totalPowerSum / Double(totalPowerSampleCount)
-
-        // Kilojoules
         kilojoules = totalEnergyJoules / 1000.0
 
-        // Live NP, IF, TSS
         let ftp = Double(PowerZone.ftp)
         if rollingPower4thCount > 0 {
             liveNP = sqrt(sqrt(rollingPower4thSum / Double(rollingPower4thCount)))
-
             if ftp > 0 {
                 liveIF = liveNP / ftp
                 liveTSS = (Double(elapsedSeconds) * liveNP * liveIF) / (ftp * 3600) * 100
             }
-
-            // Variability Index: NP / avg (1.0 = perfectly even pacing)
             if averagePower > 0 {
                 variabilityIndex = liveNP / averagePower
             }
         }
 
-        // Efficiency Factor: watts per heartbeat (aerobic decoupling indicator)
-        if avgHR > 0, averagePower > 0 {
-            efficiencyFactor = averagePower / Double(avgHR)
+        if telemetry.heartRate > 0, averagePower > 0 {
+            efficiencyFactor = averagePower / Double(telemetry.heartRate)
         }
 
-        // Queue one sample per elapsed second — maintains timeline continuity after background stalls.
-        for secondOffset in 1...elapsedDelta {
-            let sampleElapsed = previousElapsed + secondOffset
-            pendingSamples.append(
-                PendingWorkoutSample(
-                    elapsedSeconds: sampleElapsed,
-                    power: avgPower,
-                    cadence: avgCadence,
-                    speed: effectiveSpeed,
-                    heartRate: avgHR
-                )
+        pendingSamples.append(
+            PendingWorkoutSample(
+                elapsedSeconds: sampleElapsed,
+                power: telemetry.power,
+                cadence: telemetry.cadence,
+                speed: telemetry.speed,
+                heartRate: telemetry.heartRate
             )
-            if pendingSamples.count >= sampleBatchSize {
-                flushPendingSamples()
-            }
-            if sampleElapsed % 30 == 0 {
-                flushPendingSamples()
-                do { try modelContext.save() } catch {
-                    workoutLogger.error("periodic save failed: \(error)")
-                }
+        )
+        if pendingSamples.count >= sampleBatchSize {
+            flushPendingSamples()
+        }
+        if sampleElapsed % 30 == 0 {
+            flushPendingSamples()
+            do { try modelContext.save() } catch {
+                workoutLogger.error("periodic save failed: \(error)")
             }
         }
 
-        // Power history for chart (keep last 60) — use circular buffer approach for O(1) amortized
-        // Instead of removing elements one-by-one (O(n)), we rebuild the array when it grows
-        // past 2x capacity to maintain O(1) amortized time.
-        for secondOffset in 1...elapsedDelta {
-            powerHistory.append(
-                PowerSample(elapsed: previousElapsed + secondOffset, power: avgPower)
-            )
-        }
+        powerHistory.append(PowerSample(elapsed: sampleElapsed, power: telemetry.power))
         if powerHistory.count > 120 {
-            // Batch compaction: O(n) but only every 60 insertions → amortized O(1)
             powerHistory.removeFirst(powerHistory.count - 60)
         }
-        // Update running chart max — no need to scan the array in the view
-        let chartPeak = max(avgPower, maxPowerThisSecond)
+        let chartPeak = max(telemetry.power, telemetry.maxPower)
         if chartPeak > powerHistoryMax {
             powerHistoryMax = chartPeak
         } else if powerHistory.count == 60 || chartPeak < powerHistoryMax {
-            // Only rescan when at capacity or old max may have been evicted
-            // Use max(by:) to avoid allocating an intermediate [Int] array
             powerHistoryMax = max(powerHistory.max(by: { $0.power < $1.power })?.power ?? 100, 100)
         }
 
-        // Lap accumulation
-        lapPowerSum += Double(avgPower) * Double(elapsedDelta)
-        lapSampleCount += elapsedDelta
-        lapMaxPower = max(lapMaxPower, maxPowerThisSecond)
-        lapCadenceSum += avgCadence * Double(elapsedDelta)
-        lapSpeedSum += effectiveSpeed * Double(elapsedDelta)
-        lapHRSum += Double(avgHR) * Double(elapsedDelta)
-        lapElapsedSeconds += elapsedDelta
-        currentLapDuration = TimeInterval(lapElapsedSeconds)
-        currentLapAvgPower = lapSampleCount > 0 ? lapPowerSum / Double(lapSampleCount) : 0
-        currentLapAvgHR = lapSampleCount > 0 ? lapHRSum / Double(lapSampleCount) : 0
+        lapPowerSum += Double(telemetry.power)
+        lapSampleCount += 1
+        lapMaxPower = max(lapMaxPower, telemetry.maxPower)
+        lapCadenceSum += telemetry.cadence
+        lapSpeedSum += telemetry.speed
+        lapHRSum += Double(telemetry.heartRate)
+        lapElapsedSeconds += 1
 
-        // Auto-pause: trigger after N consecutive seconds of zero averaged power AND zero speed
-        let autoPauseAllowed = autoPauseSuppressedUntilElapsed.map { elapsedSeconds >= $0 } ?? true
-        if autoPauseAllowed, avgPower == 0 && effectiveSpeed < 1.0 {
-            zeroPowerSeconds += elapsedDelta
+        let autoPauseAllowed = autoPauseSuppressedUntilElapsed.map { sampleElapsed >= $0 } ?? true
+        if autoPauseAllowed, telemetry.power == 0 && telemetry.speed < 1.0 {
+            zeroPowerSeconds += 1
             if zeroPowerSeconds >= autoPauseThreshold {
                 flushPendingSamples()
                 do { try modelContext.save() } catch {
@@ -957,36 +1045,13 @@ final class WorkoutManager {
                 stopTimer()
                 workout?.status = .paused
                 markPauseStartedIfNeeded()
-                return
+                return false
             }
         } else {
             zeroPowerSeconds = 0
         }
 
-        // Drive guided session (if active)
-        onTick?(elapsedSeconds, displayPower)
-
-        // --- Pre-format display strings once per second (match 1 Hz sampled averages, not raw ~4 Hz BLE) ---
-        metricsSpeed = effectiveSpeed
-        formattedSpeed = String(format: "%.1f", effectiveSpeed)
-        formattedCadence = "\(Int(avgCadence.rounded()))"
-        displayCadenceRpm = avgCadence
-        formattedDistanceKm = String(format: "%.2f", activeDistance / 1000)
-        formattedDistanceKm1dp = String(format: "%.1f", activeDistance / 1000)
-        formattedEnergyKJ = String(format: "%.0f", kilojoules)
-        formattedLiveNP = String(format: "%.0f", liveNP)
-        formattedLiveIF = String(format: "%.2f", liveIF)
-        formattedLiveTSS = String(format: "%.0f", liveTSS)
-        formattedVI = String(format: "%.2f", variabilityIndex)
-        formattedAvgPower = String(format: "%.0f", averagePower)
-        formattedEfficiency = String(format: "%.2f", efficiencyFactor)
-        formattedKJ = String(format: "%.0f", kilojoules)
-
-        // --- Ride Goals ---
-        updateGoalProgress(avgCadence: avgCadence)
-
-        // --- Cadence Warning ---
-        updateCadenceWarning(avgCadence: avgCadence)
+        return true
     }
 
     // MARK: - Goal & Warning Helpers
@@ -1198,6 +1263,7 @@ final class WorkoutManager {
         latestDistanceInWindow = nil
         lastIngestedMetrics = nil
         pendingSamples.removeAll(keepingCapacity: false)
+        bufferedTrainerPackets.removeAll(keepingCapacity: false)
         lastSampleDate = nil
         recordingStartWallClock = nil
         pausedWallClockDuration = 0

@@ -7,6 +7,8 @@ nonisolated struct MangoxRideAttributes: ActivityAttributes {
         var speedKmh: Double
         var distanceM: Double
         var durationSeconds: Double
+        /// Wall-clock anchor for the current active duration. Widget uses this for live timer text.
+        var startedAt: Date
         var nextTurnShort: String?
         /// Smoothed / live heart rate from BLE (0 = none).
         var heartRateBpm: Int

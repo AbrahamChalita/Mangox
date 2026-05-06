@@ -289,8 +289,10 @@ struct CoachUserBubble: View {
             .foregroundStyle(AppColor.bg0)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(AppColor.mango)
-            .overlay(Rectangle().stroke(AppColor.mango.opacity(0.5), lineWidth: 1))
+            .mangoxSurface(
+                .flatCustom(fill: AppColor.mango, border: AppColor.mango.opacity(0.5)),
+                shape: .rounded(MangoxRadius.sharp.rawValue)
+            )
             .frame(maxWidth: bubbleMaxWidth, alignment: .trailing)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Your message")
@@ -421,8 +423,7 @@ struct CoachAssistantBubble: View {
                                     .foregroundStyle(AppColor.fg2)
                                     .padding(.horizontal, 9)
                                     .padding(.vertical, 5)
-                                    .background(AppColor.bg1)
-                                    .overlay(Rectangle().stroke(AppColor.hair, lineWidth: 1))
+                                    .mangoxSurface(.flatSubtle, shape: .rounded(MangoxRadius.sharp.rawValue))
                                     .accessibilityLabel(CoachTagPillFormatting.displayLabel(for: tag))
                             }
                         }
@@ -471,12 +472,9 @@ struct CoachAssistantBubble: View {
                 }
             }
         }
-        .background(
-            AppColor.bg2
-        )
-        .overlay(
-            Rectangle()
-                .stroke(responseAppearance.bubbleStroke, lineWidth: 1)
+        .mangoxSurface(
+            .flatStyled(fill: AppColor.bg2, border: AnyShapeStyle(responseAppearance.bubbleStroke)),
+            shape: .rectangle
         )
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
         .accessibilityElement(children: .ignore)
@@ -547,15 +545,19 @@ struct CoachErrorBubble: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .frame(minHeight: 44)
-                .background(AppColor.red.opacity(0.82))
-                .overlay(Rectangle().stroke(AppColor.red.opacity(0.28), lineWidth: 1))
+                .mangoxSurface(
+                    .flatCustom(fill: AppColor.red.opacity(0.82), border: AppColor.red.opacity(0.28)),
+                    shape: .rounded(MangoxRadius.sharp.rawValue)
+                )
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(AppColor.red.opacity(0.1))
-        .overlay(Rectangle().stroke(AppColor.red.opacity(0.22), lineWidth: 1))
+        .mangoxSurface(
+            .flatCustom(fill: AppColor.red.opacity(0.1), border: AppColor.red.opacity(0.22)),
+            shape: .rounded(MangoxRadius.sharp.rawValue)
+        )
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
     }
 }
@@ -622,8 +624,10 @@ struct CoachStreamStatusRow: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(style.statusFill)
-        .overlay(Rectangle().stroke(style.statusStroke, lineWidth: 1))
+        .mangoxSurface(
+            .flatCustom(fill: style.statusFill, border: style.statusStroke),
+            shape: .rounded(MangoxRadius.sharp.rawValue)
+        )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Coach status: \(text)")
     }
@@ -703,12 +707,9 @@ struct CoachStreamingBubble: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            AppColor.bg2
-        )
-        .overlay(
-            Rectangle()
-                .stroke(responseAppearance.bubbleStroke, lineWidth: 1)
+        .mangoxSurface(
+            .flatStyled(fill: AppColor.bg2, border: AnyShapeStyle(responseAppearance.bubbleStroke)),
+            shape: .rectangle
         )
         .accessibilityLabel(
             style == .onDevice ? "On-device coach is writing a reply" : "Coach is writing a reply")
@@ -791,12 +792,9 @@ struct CoachPendingReplyBubble: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            AppColor.bg2
-        )
-        .overlay(
-            Rectangle()
-                .stroke(responseAppearance.bubbleStroke, lineWidth: 1)
+        .mangoxSurface(
+            .flatStyled(fill: AppColor.bg2, border: AnyShapeStyle(responseAppearance.bubbleStroke)),
+            shape: .rectangle
         )
         .accessibilityLabel(accessibilityDescription)
     }
@@ -1021,7 +1019,10 @@ struct CoachEmptyStartersPanel: View {
                                         .foregroundStyle(AppColor.fg2)
                                         .padding(.horizontal, MangoxSpacing.sm.rawValue)
                                         .padding(.vertical, 6)
-                                        .overlay(Rectangle().stroke(AppColor.blue.opacity(0.35), lineWidth: 1))
+                                        .mangoxSurface(
+                                            .flatCustom(fill: Color.clear, border: AppColor.blue.opacity(0.35)),
+                                            shape: .rounded(MangoxRadius.sharp.rawValue)
+                                        )
                                         .transition(tagAppearTransition)
                                 }
                             }
@@ -1077,8 +1078,10 @@ struct CoachEmptyStartersPanel: View {
             }
         }
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
-        .background(AppColor.bg2)
-        .overlay(Rectangle().stroke(AppColor.mango.opacity(0.28), lineWidth: 1))
+        .mangoxSurface(
+            .flatCustom(fill: AppColor.bg2, border: AppColor.mango.opacity(0.28)),
+            shape: .rounded(MangoxRadius.sharp.rawValue)
+        )
         .accessibilityElement(children: .contain)
     }
 }
@@ -1286,8 +1289,10 @@ struct CoachFollowUpRepliesPanel: View {
             }
         }
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
-        .background(AppColor.bg2)
-        .overlay(Rectangle().stroke(sourceAppearance.accent.opacity(0.28), lineWidth: 1))
+        .mangoxSurface(
+            .flatCustom(fill: AppColor.bg2, border: sourceAppearance.accent.opacity(0.28)),
+            shape: .rounded(MangoxRadius.sharp.rawValue)
+        )
         .accessibilityElement(children: .contain)
     }
 

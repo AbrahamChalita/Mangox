@@ -265,7 +265,12 @@ struct SummaryView: View {
                     + "Share this image to save it to Photos or add it from the Strava app."
             )
         }
-        .sheet(isPresented: binding(\.showExportModal)) {
+        .sheet(isPresented: binding(\.showExportModal), onDismiss: {
+            if viewModel.pendingShareOnExportDismiss {
+                viewModel.pendingShareOnExportDismiss = false
+                viewModel.showShareSheet = true
+            }
+        }) {
             if let workout {
                 exportSheet(for: workout)
             }
@@ -654,8 +659,9 @@ struct SummaryView: View {
         case .resetRoot:
             navigationPath = NavigationPath()
         case .route(let route):
-            navigationPath = NavigationPath()
-            navigationPath.append(route)
+            var newPath = NavigationPath()
+            newPath.append(route)
+            navigationPath = newPath
         }
     }
 }
@@ -761,8 +767,10 @@ private struct SummaryContentView: View {
             }
         }
         .padding(14)
-        .background(AppColor.bg1)
-        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+        .mangoxSurface(
+            .flatCustom(fill: AppColor.bg1, border: AppColor.hair2),
+            shape: .rounded(MangoxRadius.sharp.rawValue)
+        )
     }
 
     private func appleHealthSyncWarningBanner(message: String) -> some View {
@@ -782,12 +790,11 @@ private struct SummaryContentView: View {
             Spacer(minLength: 0)
         }
         .padding(14)
-        .background(Color.orange.opacity(0.12))
-        .accessibilityIdentifier("summary.health.warning")
-        .overlay(
-            Rectangle()
-                .strokeBorder(Color.orange.opacity(0.25), lineWidth: 1)
+        .mangoxSurface(
+            .flatCustom(fill: Color.orange.opacity(0.12), border: Color.orange.opacity(0.25)),
+            shape: .rounded(MangoxRadius.sharp.rawValue)
         )
+        .accessibilityIdentifier("summary.health.warning")
     }
 
     var body: some View {
@@ -1027,8 +1034,10 @@ private struct SummaryContentView: View {
             }
         }
         .padding(isWide ? 16 : 12)
-        .background(AppColor.bg2)
-        .overlay(Rectangle().stroke(dominantZone.color.opacity(0.22), lineWidth: 1))
+        .mangoxSurface(
+            .flatCustom(fill: AppColor.bg2, border: dominantZone.color.opacity(0.22)),
+            shape: .rounded(MangoxRadius.sharp.rawValue)
+        )
         .sensoryFeedback(.selection, trigger: rpeRating)
         .animation(.snappy, value: rpeRating)
         .onChange(of: rpeRating) { _, newValue in
@@ -1201,8 +1210,10 @@ private struct SummaryOverviewPanel: View {
                             .foregroundStyle(badge.color)
                             .padding(.horizontal, isWide ? 12 : 10)
                             .padding(.vertical, isWide ? 6 : 5)
-                            .background(AppColor.bg1)
-                            .overlay(Rectangle().strokeBorder(badge.color.opacity(0.35), lineWidth: 1))
+                            .mangoxSurface(
+                                .flatCustom(fill: AppColor.bg1, border: badge.color.opacity(0.35)),
+                                shape: .rounded(MangoxRadius.sharp.rawValue)
+                            )
                         }
                     }
                 }
@@ -1238,8 +1249,10 @@ private struct SummaryOverviewPanel: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(isWide ? 20 : 14)
-        .background(AppColor.bg2)
-        .overlay(Rectangle().stroke(accent.opacity(0.22), lineWidth: 1))
+        .mangoxSurface(
+            .flatCustom(fill: AppColor.bg2, border: accent.opacity(0.22)),
+            shape: .rounded(MangoxRadius.sharp.rawValue)
+        )
     }
 }
 
@@ -1278,8 +1291,10 @@ private struct SummaryOverviewMetric: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(isWide ? 16 : 12)
-                .background(AppColor.bg1)
-                .overlay(Rectangle().stroke(accent.opacity(0.3), lineWidth: 1))
+                .mangoxSurface(
+                    .flatCustom(fill: AppColor.bg1, border: accent.opacity(0.3)),
+                    shape: .rounded(MangoxRadius.sharp.rawValue)
+                )
             } else {
                 VStack(alignment: .leading, spacing: isWide ? 5 : 4) {
                     Text(metric.label.uppercased())
@@ -1301,8 +1316,10 @@ private struct SummaryOverviewMetric: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(isWide ? 12 : 10)
-                .background(AppColor.bg1)
-                .overlay(Rectangle().stroke(accent.opacity(0.25), lineWidth: 1))
+                .mangoxSurface(
+                    .flatCustom(fill: AppColor.bg1, border: accent.opacity(0.25)),
+                    shape: .rounded(MangoxRadius.sharp.rawValue)
+                )
             }
         }
         .accessibilityIdentifier(metric.accessibilityIdentifier)
@@ -1356,8 +1373,7 @@ private struct SummaryAnalysisDisclosure<Content: View>: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .background(AppColor.bg2)
-        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
         .sensoryFeedback(.impact(weight: .light), trigger: isExpanded)
     }
 }
@@ -1488,8 +1504,7 @@ private struct SummaryMetricCard<Content: View>: View {
         }
         .padding(isWide ? 20 : 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppColor.bg2)
-        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
     }
 }
 

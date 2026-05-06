@@ -287,8 +287,7 @@ struct HomeView: View {
             }
             .padding(16)
         }
-        .background(AppColor.bg2)
-        .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
     }
 
     private func snapshotMetricCell(label: String, value: String, detail: String, color: Color) -> some View {
@@ -420,8 +419,7 @@ struct HomeView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
-                    .background(AppColor.bg2)
-                    .overlay(Rectangle().stroke(AppColor.hair2, lineWidth: 1))
+                    .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
                 }
                 .buttonStyle(MangoxPressStyle())
                 .accessibilityLabel("Next workout: \(nw.day.title)")
@@ -555,8 +553,10 @@ struct HomeView: View {
                 }
             }
             .padding(16)
-            .background(AppColor.bg2)
-            .overlay(Rectangle().stroke(AppColor.orange.opacity(0.22), lineWidth: 1))
+            .mangoxSurface(
+                .flatCustom(fill: AppColor.bg2, border: AppColor.orange.opacity(0.22)),
+                shape: .rounded(MangoxRadius.sharp.rawValue)
+            )
         }
         .buttonStyle(MangoxPressStyle())
     }
