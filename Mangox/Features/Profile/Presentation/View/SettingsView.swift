@@ -3,6 +3,7 @@ import SwiftUI
 // MARK: - Settings-internal navigation
 
 private enum SettingsRoute: Hashable {
+    case account
     case riderProfile
     case powerZones
     case heartRate
@@ -20,6 +21,7 @@ private enum SettingsRoute: Hashable {
 // MARK: - SettingsView
 
 struct SettingsView: View {
+    @Environment(AuthState.self) private var auth
     @State private var viewModel: ProfileViewModel
     @Binding var navigationPath: NavigationPath
     @State private var riderAvatarRefreshToken = UUID()
@@ -47,8 +49,24 @@ struct SettingsView: View {
                         identityHeader(ftp: ftp, isPro: isPro)
                             .padding(.bottom, 24)
 
+                        // MARK: Account & Cloud
+                        sectionLabel("Account & Cloud")
+                        settingsGroup {
+                            navRow(
+                                icon: "icloud",
+                                iconColor: AppColor.mango,
+                                title: "Cloud Sync",
+                                value: auth.isSignedIn
+                                    ? (auth.email ?? "Signed in")
+                                    : "Off — local only",
+                                valueColor: auth.isSignedIn ? AppColor.success : .white.opacity(0.35),
+                                route: .account
+                            )
+                        }
+
                         // MARK: Training
                         sectionLabel("Training")
+                            .padding(.top, 24)
                         settingsGroup {
                             let prefs = RidePreferences.shared
                             let riderProfileValue: String = {
@@ -274,6 +292,7 @@ struct SettingsView: View {
                 .keyboardDismissToolbar()
                 .navigationDestination(for: SettingsRoute.self) { route in
                     switch route {
+                    case .account: AccountView()
                     case .riderProfile: RiderProfileSettingsView()
                     case .powerZones: PowerZonesSettingsView(viewModel: viewModel)
                     case .heartRate: HeartRateSettingsView(viewModel: viewModel)

@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0044ACEB2FABE8F000A73C76 /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 0044ACEA2FABE8F000A73C76 /* Auth */; };
+		0044ACED2FABE8F000A73C76 /* Functions in Frameworks */ = {isa = PBXBuildFile; productRef = 0044ACEC2FABE8F000A73C76 /* Functions */; };
+		0044ACEF2FABE8F000A73C76 /* PostgREST in Frameworks */ = {isa = PBXBuildFile; productRef = 0044ACEE2FABE8F000A73C76 /* PostgREST */; };
+		0044ACF12FABE8F000A73C76 /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = 0044ACF02FABE8F000A73C76 /* Storage */; };
+		0044ACF32FABE8F000A73C76 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 0044ACF22FABE8F000A73C76 /* Supabase */; };
 		005AA5F52F7B62320013DB45 /* FitDataProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = AABB00022F56648D004200FC /* FitDataProtocol */; };
 		005AA79A2F7B73A70013DB45 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 005AA7992F7B73A70013DB45 /* RevenueCat */; };
 		005AA79C2F7B73A70013DB45 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 005AA79B2F7B73A70013DB45 /* RevenueCatUI */; };
@@ -57,8 +62,8 @@
 		000345252F56648D004200FC /* MangoxTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MangoxTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0003452F2F56648D004200FC /* MangoxUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MangoxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		00FM00022F56648D004200FC /* FoundationModels.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = FoundationModels.framework; path = System/Library/Frameworks/FoundationModels.framework; sourceTree = SDKROOT; };
-		0C0D00012F900001004200FC /* App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = App.xcconfig; sourceTree = "<group>"; };
 		0B1A00012F56648D004200FC /* MangoxLiveActivityExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MangoxLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		0C0D00012F900001004200FC /* App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = App.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -112,9 +117,14 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0044ACED2FABE8F000A73C76 /* Functions in Frameworks */,
 				00FM00012F56648D004200FC /* FoundationModels.framework in Frameworks */,
+				0044ACEF2FABE8F000A73C76 /* PostgREST in Frameworks */,
 				005AA79A2F7B73A70013DB45 /* RevenueCat in Frameworks */,
+				0044ACF12FABE8F000A73C76 /* Storage in Frameworks */,
+				0044ACF32FABE8F000A73C76 /* Supabase in Frameworks */,
 				005AA5F52F7B62320013DB45 /* FitDataProtocol in Frameworks */,
+				0044ACEB2FABE8F000A73C76 /* Auth in Frameworks */,
 				005AA79C2F7B73A70013DB45 /* RevenueCatUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -208,6 +218,11 @@
 				AABB00022F56648D004200FC /* FitDataProtocol */,
 				005AA7992F7B73A70013DB45 /* RevenueCat */,
 				005AA79B2F7B73A70013DB45 /* RevenueCatUI */,
+				0044ACEA2FABE8F000A73C76 /* Auth */,
+				0044ACEC2FABE8F000A73C76 /* Functions */,
+				0044ACEE2FABE8F000A73C76 /* PostgREST */,
+				0044ACF02FABE8F000A73C76 /* Storage */,
+				0044ACF22FABE8F000A73C76 /* Supabase */,
 			);
 			productName = Mangox;
 			productReference = 000345162F56648C004200FC /* Mangox.app */;
@@ -320,6 +335,7 @@
 			packageReferences = (
 				AABB00012F56648D004200FC /* XCRemoteSwiftPackageReference "FitDataProtocol" */,
 				005AA7982F7B73A70013DB45 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
+				0044ACE92FABE8F000A73C76 /* XCRemoteSwiftPackageReference "supabase-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 000345172F56648C004200FC /* Products */;
@@ -887,6 +903,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		0044ACE92FABE8F000A73C76 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
 		005AA7982F7B73A70013DB45 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
@@ -906,6 +930,31 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		0044ACEA2FABE8F000A73C76 /* Auth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0044ACE92FABE8F000A73C76 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Auth;
+		};
+		0044ACEC2FABE8F000A73C76 /* Functions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0044ACE92FABE8F000A73C76 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Functions;
+		};
+		0044ACEE2FABE8F000A73C76 /* PostgREST */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0044ACE92FABE8F000A73C76 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = PostgREST;
+		};
+		0044ACF02FABE8F000A73C76 /* Storage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0044ACE92FABE8F000A73C76 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Storage;
+		};
+		0044ACF22FABE8F000A73C76 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0044ACE92FABE8F000A73C76 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
 		005AA7992F7B73A70013DB45 /* RevenueCat */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 005AA7982F7B73A70013DB45 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;

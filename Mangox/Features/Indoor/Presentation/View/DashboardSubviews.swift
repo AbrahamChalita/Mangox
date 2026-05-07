@@ -887,40 +887,67 @@ struct IndoorRideHeartRateCard: View {
 
     private var tint: Color { heartRateBpm > 0 ? zone.color : AppColor.fg4 }
 
-    var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: "heart.fill")
-                .font(MangoxFont.title.value)
-                .foregroundStyle(tint.opacity(0.9))
+    private var pctMax: Double {
+        HeartRateZone.percentOfMax(bpm: heartRateBpm)
+    }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(String(localized: "indoor.dashboard.heart_card.title"))
-                    .mangoxFont(.micro)
-                    .fontWeight(.bold)
-                    .foregroundStyle(AppColor.fg3)
-                    .tracking(1.0)
-                if heartRateBpm > 0 {
-                    Text(zone.name.uppercased())
+    private var zoneLabel: String {
+        heartRateBpm > 0
+            ? String(format: String(localized: "indoor.dashboard.heart_card.zone_format"), zone.id)
+            : String(localized: "indoor.dashboard.heart_card.no_zone")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: dynamicTypeSize.isAccessibilitySize ? 12 : 10) {
+            HStack(alignment: .center, spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(tint.opacity(heartRateBpm > 0 ? 0.18 : 0.10))
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(tint)
+                }
+                .frame(width: 36, height: 36)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "indoor.dashboard.heart_card.current_zone"))
+                        .mangoxFont(.micro)
+                        .fontWeight(.bold)
+                        .foregroundStyle(AppColor.fg3)
+                        .tracking(1.0)
+                    Text(heartRateBpm > 0 ? zone.name.uppercased() : String(localized: "indoor.dashboard.heart_card.waiting"))
                         .mangoxFont(.caption)
                         .fontWeight(.semibold)
-                        .foregroundStyle(tint.opacity(0.95))
+                        .foregroundStyle(heartRateBpm > 0 ? tint.opacity(0.95) : AppColor.fg4)
                         .lineLimit(1)
-                } else {
-                    Text(String(localized: "indoor.dashboard.heart_card.waiting"))
-                        .mangoxFont(.caption)
-                        .foregroundStyle(AppColor.fg4)
+                }
+
+                Spacer(minLength: 0)
+
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(zoneLabel)
+                        .font(
+                            DashboardFontToken.mono(
+                                size: dynamicTypeSize.isAccessibilitySize ? 28 : 24,
+                                weight: .heavy
+                            )
+                        )
+                        .foregroundStyle(tint)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text(heartRateBpm > 0 ? "\(Int((pctMax * 100).rounded()))% max" : "")
+                        .font(DashboardFontToken.mono(size: 9, weight: .semibold))
+                        .foregroundStyle(AppColor.fg3)
                         .lineLimit(1)
                 }
             }
 
-            Spacer(minLength: 0)
-
-            if heartRateBpm > 0 {
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("\(heartRateBpm)")
+                    Text(heartRateBpm > 0 ? "\(heartRateBpm)" : "—")
                         .font(
                             DashboardFontToken.mono(
-                                size: dynamicTypeSize.isAccessibilitySize ? 32 : 28,
+                                size: dynamicTypeSize.isAccessibilitySize ? 34 : 30,
                                 weight: .bold
                             )
                         )
@@ -930,27 +957,83 @@ struct IndoorRideHeartRateCard: View {
                         .minimumScaleFactor(0.75)
                     Text("bpm")
                         .mangoxFont(.micro)
+                        .fontWeight(.semibold)
                         .foregroundStyle(AppColor.fg3)
                 }
-            } else {
-                Text("—")
-                    .font(DashboardFontToken.mono(size: 24, weight: .semibold))
-                    .foregroundStyle(AppColor.fg4)
+
+                Spacer(minLength: 0)
+
+                HStack(spacing: 3) {
+                    ForEach(HeartRateZone.zones) { z in
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .fill(z.color.opacity(heartRateBpm > 0 && z.id == zone.id ? 1.0 : 0.22))
+                            .frame(width: 20, height: heartRateBpm > 0 && z.id == zone.id ? 10 : 6)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                    .strokeBorder(
+                                        heartRateBpm > 0 && z.id == zone.id ? Color.white.opacity(0.45) : Color.clear,
+                                        lineWidth: 1
+                                    )
+                            )
+                    }
+                }
+                .accessibilityHidden(true)
             }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    HStack(spacing: 2) {
+                        ForEach(HeartRateZone.zones) { z in
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .fill(z.color.opacity(0.20))
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    if heartRateBpm > 0 {
+                        Capsule()
+                            .fill(tint)
+                            .frame(width: max(8, geo.size.width * min(max(pctMax, 0), 1)))
+                            .shadow(color: tint.opacity(0.35), radius: 5, x: 0, y: 0)
+                            .animation(.easeInOut(duration: 0.35), value: heartRateBpm)
+                        Circle()
+                            .fill(tint)
+                            .frame(width: 10, height: 10)
+                            .offset(x: max(0, geo.size.width * min(max(pctMax, 0), 1) - 5))
+                            .shadow(color: tint.opacity(0.6), radius: 5, x: 0, y: 0)
+                            .animation(.easeInOut(duration: 0.35), value: heartRateBpm)
+                    } else {
+                        Text(String(localized: "indoor.dashboard.heart_card.waiting_short"))
+                            .mangoxFont(.micro)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(AppColor.fg3)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+            }
+            .frame(height: 12)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 14 : 10)
-        .background(AppColor.bg2)
+        .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 14 : 12)
+        .background(
+            LinearGradient(
+                colors: [
+                    tint.opacity(heartRateBpm > 0 ? 0.16 : 0.06),
+                    AppColor.bg2,
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
         .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue))
         .overlay(
             RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue)
-                .strokeBorder(AppColor.hair2, lineWidth: 1)
+                .strokeBorder(heartRateBpm > 0 ? tint.opacity(0.30) : AppColor.hair2, lineWidth: 1)
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel(String(localized: "indoor.dashboard.hero.hr.a11y"))
         .accessibilityValue(
             heartRateBpm > 0
-                ? "\(heartRateBpm) bpm" : String(localized: "indoor.dashboard.heart_card.waiting_a11y"))
+                ? "\(heartRateBpm) bpm, \(zoneLabel), \(zone.name)" : String(localized: "indoor.dashboard.heart_card.waiting_a11y"))
     }
 }
 

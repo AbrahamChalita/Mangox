@@ -8,8 +8,12 @@
 "indoor.header.a11y.session_state" = "Session state";
 "indoor.header.a11y.session_recording" = "Recording";
 "indoor.dashboard.heart_card.title" = "HEART RATE";
+"indoor.dashboard.heart_card.current_zone" = "CURRENT HR ZONE";
+"indoor.dashboard.heart_card.no_zone" = "Z—";
+"indoor.dashboard.heart_card.waiting_short" = "Waiting for HR";
 "indoor.dashboard.heart_card.waiting" = "Waiting for sensor";
 "indoor.dashboard.heart_card.waiting_a11y" = "No heart rate";
+"indoor.dashboard.heart_card.zone_format" = "Z%d";
 "indoor.dashboard.zones.title" = "TIME IN ZONE";
 "indoor.dashboard.zones.empty" = "—";
 "indoor.dashboard.zones.empty_caption" = "Fills in as you ride";

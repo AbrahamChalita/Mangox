@@ -1331,7 +1331,7 @@ extension BLEManager: CBPeripheralDelegate {
             return
         }
         for service in services {
-            #if DEBUG
+            #if BLE_VERBOSE
             bleLogger.debug("Discovered service \(service.uuid.uuidString, privacy: .public) (\(self.serviceName(for: service.uuid), privacy: .public)) on \(peripheral.name ?? "Unknown", privacy: .public)")
             #endif
 
@@ -1374,7 +1374,7 @@ extension BLEManager: CBPeripheralDelegate {
 
         for characteristic in characteristics {
             let props = characteristicPropertiesDescription(characteristic.properties)
-            #if DEBUG
+            #if BLE_VERBOSE
             bleLogger.debug("Characteristic \(characteristic.uuid.uuidString, privacy: .public) (\(self.characteristicName(for: characteristic.uuid), privacy: .public)) properties: \(props, privacy: .public)")
             #endif
 
@@ -1386,7 +1386,7 @@ extension BLEManager: CBPeripheralDelegate {
                 let canSubscribe = characteristic.properties.contains(.notify)
                     || characteristic.properties.contains(.indicate)
                 if canSubscribe {
-                    #if DEBUG
+                    #if BLE_VERBOSE
                     bleLogger.debug("Subscribing to \(self.characteristicName(for: characteristic.uuid), privacy: .public) notify/indicate")
                     #endif
                     peripheral.setNotifyValue(true, for: characteristic)

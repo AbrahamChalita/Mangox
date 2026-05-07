@@ -636,9 +636,15 @@ struct OutdoorDashboardView: View {
     }
 
     private func runOutdoorMapPrewarmTask() async {
+        guard MangoxFeatureFlags.allowsOutdoorMapPrewarm else { return }
+        guard !MangoxFeatureFlags.hasCompletedOutdoorMapPrewarm else { return }
         try? await Task.sleep(for: .milliseconds(280))
         guard !Task.isCancelled else { return }
         mapKitPreWarmActive = true
+        MangoxFeatureFlags.hasCompletedOutdoorMapPrewarm = true
+        try? await Task.sleep(for: .milliseconds(500))
+        guard !Task.isCancelled else { return }
+        mapKitPreWarmActive = false
     }
 
     private func handleSetupModeChange(_ mode: OutdoorSetupMode) {

@@ -768,10 +768,10 @@ private final class WhoopWebAuthPresentationContextProvider: NSObject,
             return anchor
         }
         whoopLogger.error("No presentation anchor for WHOOP OAuth")
-        #if canImport(UIKit)
-        return ASPresentationAnchor(frame: .zero)
-        #elseif canImport(AppKit)
+        #if canImport(AppKit)
         return ASPresentationAnchor()
+        #else
+        preconditionFailure("Missing presentation anchor for WHOOP OAuth")
         #endif
     }
 

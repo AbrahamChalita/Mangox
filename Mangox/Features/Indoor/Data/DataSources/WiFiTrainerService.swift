@@ -191,7 +191,10 @@ final class WiFiTrainerService: NSObject, NetServiceBrowserDelegate, NetServiceD
                 }
 
                 guard result == 0 else { continue }
-                let ip = String(cString: hostname)
+                let ipBytes = hostname
+                    .prefix { $0 != 0 }
+                    .map { UInt8(bitPattern: $0) }
+                let ip = String(decoding: ipBytes, as: UTF8.self)
 
                 guard !ip.isEmpty, !ip.hasPrefix("fe80") else { continue }
 

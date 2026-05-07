@@ -912,10 +912,7 @@ struct DashboardView: View {
                         compactPowerStageCard()
                         if showExtendedRideSecondaryUI {
                             compactRideEffortHintRow()
-                            IndoorZoneDistributionStrip(
-                                zoneSecondsByZoneID: workoutManager.zoneSecondsByZoneID,
-                                compact: dense
-                            )
+                            IndoorRideHeartRateCard(heartRateBpm: viewModel.liveHeartRateBpm)
                         }
                         if !prefs.activeGoals.isEmpty {
                             goalProgressSection(fit: true)
@@ -939,10 +936,7 @@ struct DashboardView: View {
                 compactPrimaryMetricsGrid(dense: dense)
                 if showExtendedRideSecondaryUI {
                     compactRideEffortHintRow()
-                    IndoorZoneDistributionStrip(
-                        zoneSecondsByZoneID: workoutManager.zoneSecondsByZoneID,
-                        compact: dense
-                    )
+                    IndoorRideHeartRateCard(heartRateBpm: viewModel.liveHeartRateBpm)
                 }
                 if !prefs.activeGoals.isEmpty {
                     goalProgressSection(fit: true)

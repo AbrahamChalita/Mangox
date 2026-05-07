@@ -282,7 +282,7 @@ struct InstagramStoryStudioView: View {
 
     private var topToolbar: some View {
         HStack {
-            circularToolButton(systemName: "xmark") {
+            circularToolButton(systemName: "xmark", accessibilityLabel: "Close story studio") {
                 InstagramStoryStudioPreferences.save(viewModel.storyOptions)
                 onDismiss()
             }
@@ -291,7 +291,7 @@ struct InstagramStoryStudioView: View {
 
             accentSwatchButton
 
-            circularToolButton(systemName: "ellipsis") {
+            circularToolButton(systemName: "ellipsis", accessibilityLabel: "Customize story") {
                 showCustomizeSheet = true
             }
         }
@@ -314,9 +314,14 @@ struct InstagramStoryStudioView: View {
         }
         .buttonStyle(MangoxPressStyle())
         .accessibilityLabel("Accent color")
+        .accessibilityValue(viewModel.storyOptions.accent.pickerTitle)
     }
 
-    private func circularToolButton(systemName: String, action: @escaping () -> Void) -> some View {
+    private func circularToolButton(
+        systemName: String,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             action()
@@ -324,31 +329,35 @@ struct InstagramStoryStudioView: View {
             Image(systemName: systemName)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
+                .frame(width: 44, height: 44)
                 .background(.ultraThinMaterial, in: Circle())
                 .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
         }
         .buttonStyle(MangoxPressStyle())
+        .accessibilityLabel(accessibilityLabel)
     }
 
     // MARK: - Side rail
 
     private var sideRail: some View {
-        VStack(spacing: 10) {
+        let hasCustomBackgroundImage = viewModel.customBackgroundImage != nil
+
+        return VStack(spacing: 10) {
             ZStack(alignment: .topTrailing) {
                 PhotosPicker(
                     selection: $selectedPhotoItem,
                     matching: .images,
                     photoLibrary: .shared()
                 ) {
-                    Image(systemName: viewModel.customBackgroundImage != nil ? "photo.fill" : "photo.badge.plus")
+                    Image(systemName: hasCustomBackgroundImage ? "photo.fill" : "photo.badge.plus")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
+                        .frame(width: 44, height: 44)
                         .background(.ultraThinMaterial, in: Circle())
                         .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
                 }
-                if viewModel.customBackgroundImage != nil {
+                .accessibilityLabel(hasCustomBackgroundImage ? "Change background photo" : "Add background photo")
+                if hasCustomBackgroundImage {
                     Button {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         viewModel.customBackgroundImage = nil
@@ -358,9 +367,11 @@ struct InstagramStoryStudioView: View {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 14))
                             .foregroundStyle(.white, .black)
+                            .frame(width: 44, height: 44)
                     }
                     .offset(x: 4, y: -4)
                     .buttonStyle(MangoxPressStyle())
+                    .accessibilityLabel("Remove background photo")
                 }
             }
 
@@ -383,12 +394,13 @@ struct InstagramStoryStudioView: View {
                             .foregroundStyle(.white)
                     }
                 }
-                .frame(width: 40, height: 40)
+                .frame(width: 44, height: 44)
                 .background(.ultraThinMaterial, in: Circle())
                 .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
             }
             .buttonStyle(MangoxPressStyle())
             .disabled(viewModel.isTitleGenerating)
+            .accessibilityLabel("Regenerate story title")
 
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -399,11 +411,13 @@ struct InstagramStoryStudioView: View {
                 Image(systemName: viewModel.storyOptions.showBrandBadge ? "m.square.fill" : "m.square")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(viewModel.storyOptions.showBrandBadge ? AppColor.mango : .white)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
                     .background(.ultraThinMaterial, in: Circle())
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
             }
             .buttonStyle(MangoxPressStyle())
+            .accessibilityLabel("Mangox brand badge")
+            .accessibilityValue(viewModel.storyOptions.showBrandBadge ? "Visible" : "Hidden")
         }
     }
 
@@ -466,6 +480,8 @@ struct InstagramStoryStudioView: View {
             Text(viewModel.storyOptions.template.displayName)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(AppColor.fg1)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity)
                 .animation(.easeInOut(duration: 0.18), value: viewModel.storyOptions.template)
             shareButton
@@ -563,8 +579,12 @@ struct InstagramStoryStudioView: View {
                 )
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
             }
             .frame(maxWidth: .infinity)
+            .frame(minHeight: 52)
             .padding(.vertical, 14)
             .background(
                 Capsule().fill(Color(red: 0.88, green: 0.19, blue: 0.42))
@@ -633,12 +653,22 @@ struct InstagramStoryStudioView: View {
 
     private var backgroundControls: some View {
         VStack(spacing: 16) {
-            Picker("Source", selection: optionBinding(\.backgroundSource)) {
-                ForEach(InstagramStoryCardOptions.BackgroundSource.allCases) { src in
-                    Text(src.pickerTitle).tag(src)
+            ViewThatFits(in: .vertical) {
+                Picker("Source", selection: optionBinding(\.backgroundSource)) {
+                    ForEach(InstagramStoryCardOptions.BackgroundSource.allCases) { src in
+                        Text(src.pickerTitle).tag(src)
+                    }
                 }
+                .pickerStyle(.segmented)
+
+                Picker("Source", selection: optionBinding(\.backgroundSource)) {
+                    ForEach(InstagramStoryCardOptions.BackgroundSource.allCases) { src in
+                        Text(src.pickerTitle).tag(src)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(AppColor.mango)
             }
-            .pickerStyle(.segmented)
             .onChange(of: viewModel.storyOptions.backgroundSource) { _, _ in
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
             }
@@ -677,6 +707,8 @@ struct InstagramStoryStudioView: View {
 
                                     Text(preset.displayName)
                                         .font(.system(size: 10, weight: .medium))
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.center)
                                         .foregroundStyle(
                                             viewModel.storyOptions.selectedPreset == preset
                                                 ? AppColor.mango
@@ -809,6 +841,8 @@ struct InstagramStoryStudioView: View {
                 Text(selected.displayName)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.white.opacity(0.88))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(AppColor.mango)

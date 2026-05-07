@@ -30,6 +30,10 @@
 	<string>$(WHOOP_CLIENT_SECRET)</string>
 	<key>WHOOP_REDIRECT_URI</key>
 	<string>$(WHOOP_REDIRECT_URI)</string>
+	<key>SUPABASE_URL_HOST</key>
+	<string>$(SUPABASE_URL_HOST)</string>
+	<key>SUPABASE_PUBLISHABLE_KEY</key>
+	<string>$(SUPABASE_PUBLISHABLE_KEY)</string>
 	<key>FacebookAppID</key>
 	<string>986008587288900</string>
 	<key>UIBackgroundModes</key>

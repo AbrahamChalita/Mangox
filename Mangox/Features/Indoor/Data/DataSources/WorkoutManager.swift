@@ -22,7 +22,10 @@ private struct SecondTelemetry {
     let power: Int
     let maxPower: Int
     let cadence: Double
-    let speed: Double
+    /// Speed shown to the rider and saved on the 1 Hz sample, in km/h.
+    let displaySpeed: Double
+    /// Speed used only when distance must be integrated from speed, in km/h.
+    let distanceSpeed: Double
     let heartRate: Int
     let distanceMeters: Double?
 }
@@ -163,8 +166,8 @@ final class WorkoutManager {
     /// Standard cycling intervals: 5s, 15s, 30s, 1m, 5m, 20m.
     static let peakWindows = [5, 15, 30, 60, 300, 1200]
 
-    /// Caps speed–distance integration when the main run loop stalls (pause/end still clear `lastSampleDate`).
-    private static let distanceIntegrationMaxDt: TimeInterval = 2.0
+    /// Guardrail for physics-derived indoor speed so bad profile inputs cannot inflate distance wildly.
+    private static let computedIndoorSpeedCapKmh: Double = 80.0
 
     /// Best effort recorded for each peak window.
     /// Updated live during the ride; can be shown in a post-ride summary or a live "best efforts" card.
@@ -725,8 +728,6 @@ final class WorkoutManager {
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
-        // Avoid integrating speed across idle time (pause / auto-pause / end).
-        lastSampleDate = nil
     }
 
     private func tick() {
@@ -736,13 +737,10 @@ final class WorkoutManager {
 
     /// Averages all high-rate trainer power samples from the past second into one 1 Hz value,
     /// feeds ring buffers, records to SwiftData, and updates UI-facing state.
-    private var lastSampleDate: Date?
-
     private func processSecondSample(now: Date = Date()) {
         let previousElapsed = elapsedSeconds
         let elapsedDelta = refreshElapsedFromWallClock(now: now)
         guard elapsedDelta > 0 else { return }
-        lastSampleDate = now
 
         powerAccumulator.removeAll(keepingCapacity: true)
         cadenceAccumulator.removeAll(keepingCapacity: true)
@@ -758,7 +756,8 @@ final class WorkoutManager {
             power: 0,
             maxPower: 0,
             cadence: 0,
-            speed: 0,
+            displaySpeed: 0,
+            distanceSpeed: 0,
             heartRate: lastIngestedMetrics?.heartRate ?? bleService?.metrics.heartRate ?? 0,
             distanceMeters: nil
         )
@@ -788,8 +787,8 @@ final class WorkoutManager {
         onTick?(elapsedSeconds, displayPower)
 
         // --- Pre-format display strings once per second (match 1 Hz sampled averages, not raw ~4 Hz BLE) ---
-        metricsSpeed = latestTelemetry.speed
-        formattedSpeed = String(format: "%.1f", latestTelemetry.speed)
+        metricsSpeed = latestTelemetry.displaySpeed
+        formattedSpeed = String(format: "%.1f", latestTelemetry.displaySpeed)
         formattedCadence = "\(Int(latestTelemetry.cadence.rounded()))"
         displayCadenceRpm = latestTelemetry.cadence
         formattedDistanceKm = String(format: "%.2f", activeDistance / 1000)
@@ -874,19 +873,23 @@ final class WorkoutManager {
             avgSpeed = speeds.reduce(0.0, +) / Double(speeds.count)
         }
 
-        let effectiveSpeed: Double
+        let displaySpeed: Double
+        let distanceSpeed: Double
         if RidePreferences.shared.indoorSpeedSource == .computed,
-            trainerMode == .none,
             avgPower > 0
         {
-            effectiveSpeed = PowerToSpeed.speedKmh(
+            let computedSpeed = PowerToSpeed.speedKmh(
                 fromPower: Double(avgPower),
                 totalMassKg: RidePreferences.shared.totalMassKg,
                 gradePercent: currentGrade,
                 cda: RidePreferences.shared.riderCda
             )
+            let guardedSpeed = min(max(0, computedSpeed), Self.computedIndoorSpeedCapKmh)
+            displaySpeed = guardedSpeed
+            distanceSpeed = guardedSpeed
         } else {
-            effectiveSpeed = avgSpeed
+            displaySpeed = avgSpeed
+            distanceSpeed = avgSpeed
         }
 
         let validHR = packets.map(\.heartRate).filter { $0 > 0 }
@@ -903,7 +906,8 @@ final class WorkoutManager {
             power: avgPower,
             maxPower: maxPower,
             cadence: avgCadence,
-            speed: effectiveSpeed,
+            displaySpeed: displaySpeed,
+            distanceSpeed: distanceSpeed,
             heartRate: avgHR,
             distanceMeters: distanceMeters
         )
@@ -914,7 +918,7 @@ final class WorkoutManager {
             lastRecordedDistance = max(lastRecordedDistance, distanceMeters)
         }
 
-        let integratedDistanceIncrement = (max(0, telemetry.speed) / 3.6)
+        let integratedDistanceIncrement = (max(0, telemetry.distanceSpeed) / 3.6)
         integratedDistance += integratedDistanceIncrement
         let sensorDistance = max(0, lastRecordedDistance - workoutStartDistance)
         if sensorDistance > integratedDistanceAnchor {
@@ -1000,7 +1004,7 @@ final class WorkoutManager {
                 elapsedSeconds: sampleElapsed,
                 power: telemetry.power,
                 cadence: telemetry.cadence,
-                speed: telemetry.speed,
+                speed: telemetry.displaySpeed,
                 heartRate: telemetry.heartRate
             )
         )
@@ -1029,12 +1033,12 @@ final class WorkoutManager {
         lapSampleCount += 1
         lapMaxPower = max(lapMaxPower, telemetry.maxPower)
         lapCadenceSum += telemetry.cadence
-        lapSpeedSum += telemetry.speed
+        lapSpeedSum += telemetry.displaySpeed
         lapHRSum += Double(telemetry.heartRate)
         lapElapsedSeconds += 1
 
         let autoPauseAllowed = autoPauseSuppressedUntilElapsed.map { sampleElapsed >= $0 } ?? true
-        if autoPauseAllowed, telemetry.power == 0 && telemetry.speed < 1.0 {
+        if autoPauseAllowed, telemetry.power == 0 && telemetry.displaySpeed < 1.0 {
             zeroPowerSeconds += 1
             if zeroPowerSeconds >= autoPauseThreshold {
                 flushPendingSamples()
@@ -1264,7 +1268,6 @@ final class WorkoutManager {
         lastIngestedMetrics = nil
         pendingSamples.removeAll(keepingCapacity: false)
         bufferedTrainerPackets.removeAll(keepingCapacity: false)
-        lastSampleDate = nil
         recordingStartWallClock = nil
         pausedWallClockDuration = 0
         pauseStartedAtWallClock = nil

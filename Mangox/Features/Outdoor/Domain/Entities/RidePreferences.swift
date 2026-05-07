@@ -166,7 +166,7 @@ enum IndoorPowerHeroMode: String, CaseIterable, Codable {
 
 // MARK: - Indoor Speed Source
 
-/// Where speed comes from during a free ride.
+/// Where speed comes from during an indoor ride.
 enum IndoorSpeedSource: String, CaseIterable, Codable {
     case sensor    // trainer-reported (FTMS characteristic)
     case computed  // physics model: power → speed

@@ -56,6 +56,11 @@ final class DIContainer {
     let workoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol
     let trainingPlanPersistenceRepository: TrainingPlanPersistenceRepositoryProtocol
 
+    // MARK: - Cloud sync (Supabase)
+
+    let authState: AuthState
+    let syncCoordinator: SyncCoordinator
+
     // MARK: - ViewModels (lazily vended; each VM owns its own lifecycle)
 
     /// Reused while an indoor workout is recording or paused so Live Activity / Dynamic Island deep links
@@ -189,6 +194,23 @@ final class DIContainer {
         )
         trainingPlanPersistenceRepository = TrainingPlanPersistenceRepository(
             modelContext: PersistenceContainer.shared.mainContext
+        )
+
+        let auth = AuthState()
+        authState = auth
+        syncCoordinator = SyncCoordinator(
+            auth: auth,
+            context: PersistenceContainer.shared.mainContext,
+            domains: [
+                ProfileSyncDomain(),
+                UserSettingsSyncDomain(),
+                WorkoutSyncDomain(),
+                ChatSyncDomain(),
+                AIGeneratedPlanSyncDomain(),
+                TrainingPlanProgressSyncDomain(),
+                ZoneSnapshotSyncDomain(),
+                CustomWorkoutTemplateSyncDomain(),
+            ]
         )
     }
 }

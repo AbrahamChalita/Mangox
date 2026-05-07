@@ -149,6 +149,77 @@ struct WorkoutManagerTests {
     }
 
     @MainActor
+    @Test func computedSpeedAdvancesDistanceWhenTrainerSpeedMissing() async throws {
+        let prefs = RidePreferences.shared
+        let originalSource = prefs.indoorSpeedSource
+        let originalRiderWeight = prefs.riderWeightKg
+        let originalBikeWeight = prefs.bikeWeightKg
+        let originalCda = prefs.riderCda
+        defer {
+            prefs.indoorSpeedSource = originalSource
+            prefs.riderWeightKg = originalRiderWeight
+            prefs.bikeWeightKg = originalBikeWeight
+            prefs.riderCda = originalCda
+        }
+        prefs.indoorSpeedSource = .computed
+        prefs.riderWeightKg = 75
+        prefs.bikeWeightKg = 8
+        prefs.riderCda = PowerToSpeed.defaultCdA
+
+        let manager = WorkoutManager()
+        let bleManager = BLEManager()
+        manager.configure(bleService: bleManager)
+        manager.startWorkout()
+
+        let start = Date()
+        manager.debugConfigureWallClock(recordingStart: start)
+        for second in 1...10 {
+            manager.ingest(sample(power: 200, distance: 0, speed: 0))
+            manager.debugProcessSecondSample(at: start.addingTimeInterval(Double(second)))
+        }
+
+        manager.endWorkout()
+
+        let expectedSpeed = PowerToSpeed.speedKmh(
+            fromPower: 200,
+            totalMassKg: 83,
+            gradePercent: 0,
+            cda: PowerToSpeed.defaultCdA
+        )
+        let expectedDistance = expectedSpeed / 3.6 * 10
+        let workout = try #require(manager.workout)
+        #expect(abs(workout.distance - expectedDistance) < 5)
+        #expect(workout.avgSpeed > 0)
+    }
+
+    @MainActor
+    @Test func computedSpeedAppliesWhileTrainerControlModeIsActive() async throws {
+        let prefs = RidePreferences.shared
+        let originalSource = prefs.indoorSpeedSource
+        defer { prefs.indoorSpeedSource = originalSource }
+        prefs.indoorSpeedSource = .computed
+
+        let manager = WorkoutManager()
+        let bleManager = BLEManager()
+        manager.configure(bleService: bleManager)
+        manager.startWorkout()
+        manager.trainerMode = .erg(watts: 200)
+
+        let start = Date()
+        manager.debugConfigureWallClock(recordingStart: start)
+        for second in 1...5 {
+            manager.ingest(sample(power: 200, distance: 0, speed: 0))
+            manager.debugProcessSecondSample(at: start.addingTimeInterval(Double(second)))
+        }
+
+        manager.endWorkout()
+
+        let workout = try #require(manager.workout)
+        #expect(workout.distance > 0)
+        #expect(workout.samples.allSatisfy { $0.speed > 0 })
+    }
+
+    @MainActor
     @Test func elapsedBackfillsAfterDelayedTickUsingWallClock() async throws {
         let manager = WorkoutManager()
         let bleManager = BLEManager()

@@ -125,8 +125,9 @@ struct ContentView: View {
         .background(AppColor.bg0.ignoresSafeArea())
         .overlay {
             RideFABView(showFloatingButton: showFloatingButton) { route in
-                selectedTab = 0
-                homePath.append(route)
+                Task { @MainActor in
+                    await navigateToHome(route)
+                }
             }
         }
         .background {
@@ -153,21 +154,40 @@ struct ContentView: View {
         }
         .onOpenURL { url in
             guard isRideLiveActivityURL(url) else { return }
-            selectedTab = 0
-            // Never clear `homePath` here: that pops the in-memory indoor stack and builds a new
-            // `DashboardView`, which used to vend a fresh `IndoorViewModel` and restart the ride.
-            if isIndoorLiveActivityURL(url) {
-                if homePath.isEmpty {
-                    homePath.append(AppRoute.dashboard)
+            Task { @MainActor in
+                // Never clear `homePath` here: that pops the in-memory indoor stack and builds a new
+                // `DashboardView`, which used to vend a fresh `IndoorViewModel` and restart the ride.
+                if isIndoorLiveActivityURL(url) {
+                    await navigateToHomeIfNeeded(.dashboard)
+                } else {
+                    await navigateToHomeIfNeeded(.outdoorDashboard)
                 }
-            } else if homePath.isEmpty {
-                homePath.append(AppRoute.outdoorDashboard)
             }
         }
     }
 
     private func shouldWarmLocation(for status: CLAuthorizationStatus) -> Bool {
         status == .authorizedWhenInUse || status == .authorizedAlways
+    }
+
+    @MainActor
+    private func navigateToHome(_ route: AppRoute) async {
+        if selectedTab != 0 {
+            selectedTab = 0
+            await Task.yield()
+        }
+        homePath.append(route)
+    }
+
+    @MainActor
+    private func navigateToHomeIfNeeded(_ route: AppRoute) async {
+        if selectedTab != 0 {
+            selectedTab = 0
+            await Task.yield()
+        }
+        if homePath.isEmpty {
+            homePath.append(route)
+        }
     }
 
     private func runSecondaryTabPrewarmTask() async {

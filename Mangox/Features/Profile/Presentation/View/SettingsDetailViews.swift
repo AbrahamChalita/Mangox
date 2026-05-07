@@ -161,6 +161,19 @@ struct AICoachSettingsView: View {
     }
 }
 
+private struct RiderProfilePhotoPickerLabel: View {
+    var body: some View {
+        Label("Photo", systemImage: "photo")
+            .font(MangoxFont.callout.value)
+            .foregroundStyle(AppColor.bg0)
+            .labelStyle(.titleAndIcon)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(AppColor.mango)
+            .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous))
+    }
+}
+
 // MARK: - Power & Zones
 
 struct PowerZonesSettingsView: View {
@@ -1048,7 +1061,7 @@ struct IndoorTrainerSettingsView: View {
                     Text("Speed source")
                         .settingsPrimary()
                     Text(
-                        "Trainer-reported uses your trainer's internal model. Computed derives speed from power using physics."
+                        "Trainer-reported uses your trainer's internal model. Computed derives indoor speed and fallback distance from power using physics."
                     )
                         .settingsFootnoteMuted()
                     Picker("Speed source", selection: $prefs.indoorSpeedSource) {
@@ -1967,14 +1980,7 @@ struct RiderProfileSettingsView: View {
 
                             HStack(spacing: 8) {
                                 PhotosPicker(selection: $riderProfilePhotoItem, matching: .images) {
-                                    Label("Photo", systemImage: "photo")
-                                        .font(MangoxFont.callout.value)
-                                        .foregroundStyle(AppColor.bg0)
-                                        .labelStyle(.titleAndIcon)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 10)
-                                        .background(AppColor.mango)
-                                        .clipShape(RoundedRectangle(cornerRadius: CGFloat(MangoxRadius.button.rawValue), style: .continuous))
+                                    RiderProfilePhotoPickerLabel()
                                 }
                                 .buttonStyle(MangoxPressStyle())
 

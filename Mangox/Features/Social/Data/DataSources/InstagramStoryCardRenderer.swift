@@ -489,13 +489,17 @@ private enum StoryCardDrawing {
             sessionKind: sessionKind,
             dominantZone: dominantZone
         )
-        eyebrow.draw(
+        let eyebrowAttrs = fittedAttributes(
+            for: eyebrow,
+            fontProvider: { StoryCardFontToken.mono(size: $0, weight: .medium) },
+            startingAt: 24,
+            minimum: 18,
+            maxWidth: width - sidePad * 2,
+            kern: 2.0
+        )
+        truncatedText(eyebrow, attributes: eyebrowAttrs, maxWidth: width - sidePad * 2).draw(
             at: CGPoint(x: sidePad, y: y),
-            withAttributes: [
-                .font: StoryCardFontToken.mono(size: 24, weight: .medium),
-                .foregroundColor: accent.withAlphaComponent(0.94),
-                .kern: 2.0,
-            ]
+            withAttributes: eyebrowAttrs
         )
 
         let titleRectY = y + 48
@@ -503,24 +507,34 @@ private enum StoryCardDrawing {
             let firstLine = titleLines.first ?? ""
             let secondLine = titleLines.count > 1 ? titleLines[1] : ""
 
-            let firstAttrs: [NSAttributedString.Key: Any] = [
-                .font: StoryCardFontToken.ui(size: 112, weight: .heavy),
-                .foregroundColor: StoryCardDesign.textPrimary,
-                .kern: -4.6,
-            ]
-            firstLine.draw(
+            let titleWidth = width - sidePad * 2
+            let firstAttrs = fittedAttributes(
+                for: firstLine,
+                fontProvider: { StoryCardFontToken.ui(size: $0, weight: .heavy) },
+                startingAt: 112,
+                minimum: 72,
+                maxWidth: titleWidth,
+                kern: -4.6,
+                foregroundColor: StoryCardDesign.textPrimary
+            )
+            truncatedText(firstLine, attributes: firstAttrs, maxWidth: titleWidth).draw(
                 at: CGPoint(x: sidePad, y: titleRectY),
                 withAttributes: firstAttrs
             )
 
             if !secondLine.isEmpty {
-                secondLine.draw(
+                let secondAttrs = fittedAttributes(
+                    for: secondLine,
+                    fontProvider: { StoryCardFontToken.ui(size: $0, weight: .heavy) },
+                    startingAt: 108,
+                    minimum: 68,
+                    maxWidth: titleWidth,
+                    kern: -4.6,
+                    foregroundColor: StoryCardDesign.textQuiet
+                )
+                truncatedText(secondLine, attributes: secondAttrs, maxWidth: titleWidth).draw(
                     at: CGPoint(x: sidePad, y: titleRectY + 118),
-                    withAttributes: [
-                        .font: StoryCardFontToken.ui(size: 108, weight: .heavy),
-                        .foregroundColor: StoryCardDesign.textQuiet,
-                        .kern: -4.6,
-                    ]
+                    withAttributes: secondAttrs
                 )
             }
         }
@@ -1362,6 +1376,74 @@ private enum StoryCardDrawing {
             size -= 4
         }
         return minimum
+    }
+
+    private static func fittedAttributes(
+        for text: String,
+        fontProvider: (CGFloat) -> UIFont,
+        startingAt start: CGFloat,
+        minimum: CGFloat,
+        maxWidth: CGFloat,
+        kern: CGFloat,
+        foregroundColor: UIColor? = nil
+    ) -> [NSAttributedString.Key: Any] {
+        let size = fittingFontSize(
+            for: text,
+            fontProvider: fontProvider,
+            startingAt: start,
+            minimum: minimum,
+            maxWidth: maxWidth,
+            kern: kern
+        )
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: fontProvider(size),
+            .kern: kern,
+        ]
+        if let foregroundColor {
+            attributes[.foregroundColor] = foregroundColor
+        }
+        return attributes
+    }
+
+    private static func fittingFontSize(
+        for text: String,
+        fontProvider: (CGFloat) -> UIFont,
+        startingAt start: CGFloat,
+        minimum: CGFloat,
+        maxWidth: CGFloat,
+        kern: CGFloat
+    ) -> CGFloat {
+        var size = start
+        while size > minimum {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: fontProvider(size),
+                .kern: kern,
+            ]
+            if text.size(withAttributes: attrs).width <= maxWidth {
+                return size
+            }
+            size -= 2
+        }
+        return minimum
+    }
+
+    private static func truncatedText(
+        _ text: String,
+        attributes: [NSAttributedString.Key: Any],
+        maxWidth: CGFloat
+    ) -> String {
+        guard text.size(withAttributes: attributes).width > maxWidth else { return text }
+        var candidate = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        while !candidate.isEmpty {
+            candidate.removeLast()
+            let collapsed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            let withEllipsis = collapsed + "…"
+            if withEllipsis.size(withAttributes: attributes).width <= maxWidth {
+                return withEllipsis
+            }
+            candidate = collapsed
+        }
+        return "…"
     }
 
     private static func templateEyebrowAttrs(accent: UIColor) -> [NSAttributedString.Key: Any] {

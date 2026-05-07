@@ -10,4 +10,7 @@ REVENUECAT_API_KEY =
 USER_DATA_KEY =
 MANGOX_COACH_STAFF_TIER =
 
+SUPABASE_URL_HOST = jvhkplgacbeuksiphgyk.supabase.co
+SUPABASE_PUBLISHABLE_KEY = sb_publishable_m2mgjTsNA9Gi2wPMwewwgg_oS8-aerC
+
 #include? "Secrets.xcconfig"

@@ -12,14 +12,14 @@ private enum OnboardingHeroGraphic {
 /// First-launch onboarding with permission screens.
 /// Shown once — persisted via `@AppStorage("hasCompletedOnboarding")`.
 ///
-/// Flow: Welcome → Bluetooth → HealthKit → Notifications → Location → Strava → Rider profile → Get Started
+/// Flow: Welcome → Bluetooth → HealthKit → Notifications → Location → Strava → Rider profile → Cloud (optional) → Get Started
 struct OnboardingView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewModel: OnboardingViewModel
     @State private var onboardingProfilePhotoItem: PhotosPickerItem?
     @State private var onboardingLocalAvatarToken = UUID()
 
-    private let totalPages = 8
+    private let totalPages = 9
 
     init(viewModel: OnboardingViewModel) {
         _viewModel = State(initialValue: viewModel)
@@ -51,7 +51,8 @@ struct OnboardingView: View {
                     locationPage.tag(4)
                     stravaPage.tag(5)
                     riderProfilePage.tag(6)
-                    getStartedPage.tag(7)
+                    cloudPage.tag(7)
+                    getStartedPage.tag(8)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .animation(reduceMotion ? .none : .easeInOut(duration: 0.35), value: viewModel.currentStep)
@@ -92,7 +93,7 @@ struct OnboardingView: View {
             if new == 6 {
                 viewModel.prepareRiderProfileStep()
             }
-            if new == 7 {
+            if new == 8 {
                 triggerFinishCelebrationIfNeeded()
             }
         }
@@ -393,6 +394,23 @@ struct OnboardingView: View {
         )
     }
 
+    private var cloudPage: some View {
+        OnboardingCloudPage(
+            reduceMotion: reduceMotion,
+            onSkip: {
+                withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) {
+                    viewModel.advance()
+                }
+            },
+            onSignedIn: {
+                HapticManager.shared.onboardingStepCompleted()
+                withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.25)) {
+                    viewModel.advance()
+                }
+            }
+        )
+    }
+
     private var getStartedPage: some View {
         VStack(spacing: 24) {
             Spacer()
@@ -527,7 +545,7 @@ struct OnboardingView: View {
 
                     HStack(spacing: MangoxSpacing.sm.rawValue) {
                         PhotosPicker(selection: $onboardingProfilePhotoItem, matching: .images) {
-                            choosePhotoLabel
+                            OnboardingChoosePhotoLabel()
                         }
                         .buttonStyle(MangoxPressStyle())
 
@@ -559,7 +577,10 @@ struct OnboardingView: View {
         .cardStyle(cornerRadius: MangoxRadius.card.rawValue)
     }
 
-    private var choosePhotoLabel: some View {
+}
+
+private struct OnboardingChoosePhotoLabel: View {
+    var body: some View {
         Label("Choose photo", systemImage: "photo")
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(.black)
@@ -569,7 +590,9 @@ struct OnboardingView: View {
             .background(AppColor.mango)
             .clipShape(Capsule())
     }
+}
 
+private extension OnboardingView {
     // MARK: - Helper Views
 
     private var onboardingAge: Int {

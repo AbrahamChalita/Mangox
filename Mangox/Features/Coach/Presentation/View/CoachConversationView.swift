@@ -382,7 +382,7 @@ struct CoachConversationView: View {
             }
         }
         .onChange(of: scrollToMessageID) { _, targetID in
-            guard let targetID, shouldAutoScrollToBottom else { return }
+            guard targetID != nil, shouldAutoScrollToBottom else { return }
             scrollTranscriptToBottom()
         }
         .onChange(of: coachViewModel.isLoading) { _, _ in

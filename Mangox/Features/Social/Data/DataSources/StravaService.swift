@@ -1064,10 +1064,10 @@ private final class WebAuthenticationPresentationContextProvider: NSObject, ASWe
             return anchor
         }
         stravaLogger.error("No presentation anchor for Strava OAuth")
-        #if canImport(UIKit)
-        return ASPresentationAnchor(frame: .zero)
-        #elseif canImport(AppKit)
+        #if canImport(AppKit)
         return ASPresentationAnchor()
+        #else
+        preconditionFailure("Missing presentation anchor for Strava OAuth")
         #endif
     }
 

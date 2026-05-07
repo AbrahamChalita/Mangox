@@ -30,7 +30,7 @@ final class OnboardingViewModel {
     /// BLE trigger retained so CBCentralManager stays alive during permission polling.
     var bleTrigger: CBCentralManager?
 
-    private let totalPages = 8
+    private let totalPages = 9
 
     var isPermissionPage: Bool {
         switch currentStep {
@@ -74,7 +74,8 @@ final class OnboardingViewModel {
             if stravaConnected { return "Continue" }
             return stravaConfigured ? "Connect Strava" : "Continue"
         case 6: return "Continue"
-        case 7: return "Get Started"
+        case 7: return "Continue"   // Cloud (optional)
+        case 8: return "Get Started"
         default: return "Continue"
         }
     }
@@ -238,6 +239,9 @@ final class OnboardingViewModel {
             prefs.riderDisplayName = onboardingRiderDisplayName
             advance()
         case 7:
+            // Cloud step is purely informational + optional sign-in. Continue advances.
+            advance()
+        case 8:
             HapticManager.shared.onboardingCelebration()
             markOnboardingComplete()
         default:

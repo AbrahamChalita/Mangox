@@ -40,6 +40,8 @@ struct MangoxApp: App {
                         .environment(di.personalRecords)
                         .environment(di.liveActivityManager)
                         .environment(di.aiService)
+                        .environment(di.authState)
+                        .environment(di.syncCoordinator)
                         .environment(\.launchOverlayVisible, showLaunch)
                         .preferredColorScheme(.dark)
                         .overlay {
@@ -53,6 +55,8 @@ struct MangoxApp: App {
                         .environment(di.healthKitManager)
                         .environment(di.stravaService)
                         .environment(di.whoopService)
+                        .environment(di.authState)
+                        .environment(di.syncCoordinator)
                         .preferredColorScheme(.dark)
                 }
 
@@ -126,6 +130,9 @@ private struct NotificationLifecycleHook: View {
                     TrainingNotificationsScheduler.evaluateMissedKeyIfNeeded()
                     TrainingNotificationsScheduler.rescheduleFTPReminder()
                     WorkoutRAGIndex.scheduleBackgroundSync()
+                    if di.authState.isSignedIn {
+                        Task { await di.syncCoordinator.syncNow() }
+                    }
                 case .background:
                     di.locationService.persistRecordingCheckpointNow()
                     di.persistIndoorRecordingCheckpointNow()
