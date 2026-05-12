@@ -84,7 +84,6 @@ final class SocialViewModel {
         if kind == .indoorTrainer {
             o.template = .indoorPower
             o.visualStyle = .analyst
-            o.showElevation = false
             o.quickStatSlots = [.normalizedPower, .tss, .intensityFactor, .cadence]
         } else if !personalRecordNames.isEmpty {
             o.template = .prFlex

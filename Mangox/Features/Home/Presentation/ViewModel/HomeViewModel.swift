@@ -29,7 +29,7 @@ final class HomeViewModel {
 
     private var trainingCacheRecomputeTask: Task<Void, Never>?
     private var trainingCacheGeneration: UInt64 = 0
-    private var trainingCacheHasSeenWorkouts = false
+    private var trainingCacheHasSeenData = false
 
     // MARK: - Whoop computed properties
 
@@ -101,21 +101,21 @@ final class HomeViewModel {
 
     // MARK: - Training cache
 
-    func scheduleTrainingRefresh(workouts: [Workout]) {
-        if workouts.isEmpty {
+    func scheduleTrainingRefresh(workouts: [Workout], activities: [LoggedActivityRecord]) {
+        if workouts.isEmpty && activities.isEmpty {
             trainingCacheRecomputeTask?.cancel()
             trainingCacheGeneration += 1
-            trainingCacheHasSeenWorkouts = false
+            trainingCacheHasSeenData = false
             let dto = trainingAggregator([], Date(), .current, .current)
             apply(dto)
             return
         }
 
-        if !trainingCacheHasSeenWorkouts {
-            trainingCacheHasSeenWorkouts = true
+        if !trainingCacheHasSeenData {
+            trainingCacheHasSeenData = true
             trainingCacheRecomputeTask?.cancel()
             Task { @MainActor [weak self] in
-                await self?.runTrainingCacheGeneration(workouts: workouts)
+                await self?.runTrainingCacheGeneration(workouts: workouts, activities: activities)
             }
             return
         }
@@ -123,7 +123,7 @@ final class HomeViewModel {
         trainingCacheRecomputeTask?.cancel()
         if !hasComputedTrainingState {
             Task { @MainActor [weak self] in
-                await self?.runTrainingCacheGeneration(workouts: workouts)
+                await self?.runTrainingCacheGeneration(workouts: workouts, activities: activities)
             }
             return
         }
@@ -131,7 +131,7 @@ final class HomeViewModel {
         trainingCacheRecomputeTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
-            await self?.runTrainingCacheGeneration(workouts: workouts)
+            await self?.runTrainingCacheGeneration(workouts: workouts, activities: activities)
         }
     }
 
@@ -144,28 +144,48 @@ final class HomeViewModel {
         trainingPlanLookupService.nextScheduledWorkout(allProgress: allProgress)
     }
 
-    private func runTrainingCacheGeneration(workouts: [Workout]) async {
+    private func runTrainingCacheGeneration(
+        workouts: [Workout],
+        activities: [LoggedActivityRecord]
+    ) async {
         trainingCacheGeneration += 1
         let generation = trainingCacheGeneration
-        let slices = workouts.map { HomeWorkoutMetricSlice(startDate: $0.startDate, tss: $0.tss) }
+        let profile = LoggedActivityTSSEstimator.Profile.current()
+        var slices = workouts.map { HomeWorkoutMetricSlice(startDate: $0.startDate, tss: $0.tss) }
+        slices.reserveCapacity(slices.count + activities.count)
+        for record in activities {
+            let domain = record.toDomain()
+            let tss = LoggedActivityTSSEstimator.estimate(domain, profile: profile)
+            slices.append(HomeWorkoutMetricSlice(startDate: domain.startDate, tss: tss))
+        }
         let now = Date()
         let timeZone = TimeZone.current
         let locale = Locale.current
         let aggregator = trainingAggregator
-        let dto = await withTaskGroup(
-            of: HomeTrainingCacheDTO?.self,
-            returning: HomeTrainingCacheDTO?.self
-        ) { group in
-            group.addTask(priority: .utility) {
-                guard !Task.isCancelled else { return nil }
-                return aggregator(slices, now, timeZone, locale)
-            }
-            return await group.next() ?? nil
-        }
+        let dto = await Self.computeTrainingCacheDTO(
+            slices: slices,
+            now: now,
+            timeZone: timeZone,
+            locale: locale,
+            aggregator: aggregator
+        )
         guard let dto else { return }
         guard !Task.isCancelled else { return }
         guard generation == trainingCacheGeneration else { return }
         apply(dto)
+    }
+
+    private nonisolated static func computeTrainingCacheDTO(
+        slices: [HomeWorkoutMetricSlice],
+        now: Date,
+        timeZone: TimeZone,
+        locale: Locale,
+        aggregator: @escaping @Sendable ([HomeWorkoutMetricSlice], Date, TimeZone, Locale) -> HomeTrainingCacheDTO
+    ) async -> HomeTrainingCacheDTO? {
+        await Task.detached(priority: .utility) {
+            guard !Task.isCancelled else { return nil }
+            return aggregator(slices, now, timeZone, locale)
+        }.value
     }
 
     private func apply(_ dto: HomeTrainingCacheDTO) {

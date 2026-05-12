@@ -185,14 +185,7 @@ struct InstagramStoryCardOptions: Equatable, Codable, Sendable {
     var showTrainingLoad: Bool
     var showSummaryCards: Bool
     var showBottomStrip: Bool
-    /// Third quick-stat tile: `true` = elevation (m), `false` = normalized power (W).
-    var showElevation: Bool
     var showBrandBadge: Bool
-    /// Per-metric visibility in the four-up quick stats row (when `showBottomStrip` is on).
-    var showQuickStatHeartRate: Bool
-    var showQuickStatCadence: Bool
-    var showQuickStatThird: Bool
-    var showQuickStatSpeed: Bool
     var quickStatSlots: [MetricSlot]
     /// When WHOOP is linked and recovery/strain values are passed in at render time, show a line on the training load card.
     var showWhoopReadiness: Bool
@@ -214,12 +207,7 @@ struct InstagramStoryCardOptions: Equatable, Codable, Sendable {
         showTrainingLoad: true,
         showSummaryCards: true,
         showBottomStrip: true,
-        showElevation: true,
         showBrandBadge: true,
-        showQuickStatHeartRate: true,
-        showQuickStatCadence: true,
-        showQuickStatThird: true,
-        showQuickStatSpeed: true,
         quickStatSlots: [.heartRate, .cadence, .elevation, .speed],
         showWhoopReadiness: true,
         privacyHideRoute: false,
@@ -241,12 +229,7 @@ struct InstagramStoryCardOptions: Equatable, Codable, Sendable {
         showTrainingLoad: Bool,
         showSummaryCards: Bool,
         showBottomStrip: Bool,
-        showElevation: Bool,
         showBrandBadge: Bool,
-        showQuickStatHeartRate: Bool,
-        showQuickStatCadence: Bool,
-        showQuickStatThird: Bool,
-        showQuickStatSpeed: Bool,
         quickStatSlots: [MetricSlot],
         showWhoopReadiness: Bool,
         privacyHideRoute: Bool,
@@ -266,12 +249,7 @@ struct InstagramStoryCardOptions: Equatable, Codable, Sendable {
         self.showTrainingLoad = showTrainingLoad
         self.showSummaryCards = showSummaryCards
         self.showBottomStrip = showBottomStrip
-        self.showElevation = showElevation
         self.showBrandBadge = showBrandBadge
-        self.showQuickStatHeartRate = showQuickStatHeartRate
-        self.showQuickStatCadence = showQuickStatCadence
-        self.showQuickStatThird = showQuickStatThird
-        self.showQuickStatSpeed = showQuickStatSpeed
         self.quickStatSlots = quickStatSlots
         self.showWhoopReadiness = showWhoopReadiness
         self.privacyHideRoute = privacyHideRoute
@@ -293,12 +271,7 @@ struct InstagramStoryCardOptions: Equatable, Codable, Sendable {
         case showTrainingLoad
         case showSummaryCards
         case showBottomStrip
-        case showElevation
         case showBrandBadge
-        case showQuickStatHeartRate
-        case showQuickStatCadence
-        case showQuickStatThird
-        case showQuickStatSpeed
         case quickStatSlots
         case showWhoopReadiness
         case privacyHideRoute
@@ -322,12 +295,7 @@ struct InstagramStoryCardOptions: Equatable, Codable, Sendable {
         showTrainingLoad = try c.decodeIfPresent(Bool.self, forKey: .showTrainingLoad) ?? defaults.showTrainingLoad
         showSummaryCards = try c.decodeIfPresent(Bool.self, forKey: .showSummaryCards) ?? defaults.showSummaryCards
         showBottomStrip = try c.decodeIfPresent(Bool.self, forKey: .showBottomStrip) ?? defaults.showBottomStrip
-        showElevation = try c.decodeIfPresent(Bool.self, forKey: .showElevation) ?? defaults.showElevation
         showBrandBadge = try c.decodeIfPresent(Bool.self, forKey: .showBrandBadge) ?? defaults.showBrandBadge
-        showQuickStatHeartRate = try c.decodeIfPresent(Bool.self, forKey: .showQuickStatHeartRate) ?? defaults.showQuickStatHeartRate
-        showQuickStatCadence = try c.decodeIfPresent(Bool.self, forKey: .showQuickStatCadence) ?? defaults.showQuickStatCadence
-        showQuickStatThird = try c.decodeIfPresent(Bool.self, forKey: .showQuickStatThird) ?? defaults.showQuickStatThird
-        showQuickStatSpeed = try c.decodeIfPresent(Bool.self, forKey: .showQuickStatSpeed) ?? defaults.showQuickStatSpeed
         quickStatSlots = try c.decodeIfPresent([MetricSlot].self, forKey: .quickStatSlots) ?? defaults.quickStatSlots
         showWhoopReadiness = try c.decodeIfPresent(Bool.self, forKey: .showWhoopReadiness) ?? defaults.showWhoopReadiness
         privacyHideRoute = try c.decodeIfPresent(Bool.self, forKey: .privacyHideRoute) ?? defaults.privacyHideRoute

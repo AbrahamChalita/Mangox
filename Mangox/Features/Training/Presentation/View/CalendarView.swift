@@ -104,6 +104,7 @@ struct CalendarView: View {
     @Binding var navigationPath: NavigationPath
 
     @Query(CalendarWorkoutQuery.descriptor) private var allWorkouts: [Workout]
+    @Query private var allLoggedActivities: [LoggedActivityRecord]
 
     @AppStorage("calendarScreenMode") private var screenModeRaw = CalendarScreenMode.monthGrid.rawValue
     @AppStorage("workoutHistoryFilter") private var historyFilterRaw = WorkoutHistoryFilter.all.rawValue
@@ -114,6 +115,8 @@ struct CalendarView: View {
     @State private var workoutsGroupedByDay: [(day: Date, workouts: [Workout])] = []
     /// O(1) day lookup for month cells (avoids scanning all workouts per cell).
     @State private var workoutsByDayStart: [Date: [Workout]] = [:]
+    /// O(1) day lookup for logged-activity TSS (estimated). Mirrors `workoutsByDayStart`.
+    @State private var loggedActivityTSSByDayStart: [Date: Double] = [:]
     @State private var calendarRegroupTask: Task<Void, Never>?
     @State private var showWorkoutImporter = false
     @State private var workoutImportError: String?
@@ -139,6 +142,15 @@ struct CalendarView: View {
     private var selectedDayWorkouts: [Workout] {
         guard let day = selectedDay else { return [] }
         return workouts(for: day)
+    }
+
+    private var selectedDayLoggedActivities: [LoggedActivityRecord] {
+        guard let day = selectedDay else { return [] }
+        return loggedActivities(for: day)
+    }
+
+    private var selectedDayHasShareableActivities: Bool {
+        !selectedDayWorkouts.isEmpty || !selectedDayLoggedActivities.isEmpty
     }
 
     var body: some View {
@@ -210,9 +222,16 @@ struct CalendarView: View {
         .onChange(of: allWorkouts, initial: true) { _, workouts in
             applyCalendarWorkoutChanges(workouts)
         }
+        .onChange(of: allLoggedActivities, initial: true) { _, activities in
+            rebuildLoggedActivityTSSIndex(from: activities)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .mangoxWorkoutAggregatesMayHaveChanged)) {
             _ in
             applyCalendarWorkoutChanges(allWorkouts)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mangoxLoggedActivitiesAggregatesMayHaveChanged)) {
+            _ in
+            rebuildLoggedActivityTSSIndex(from: allLoggedActivities)
         }
         .fileImporter(
             isPresented: $showWorkoutImporter,
@@ -268,6 +287,21 @@ struct CalendarView: View {
         workoutsByDayStart = byDay
         workoutsGroupedByDay = byDay.keys.sorted(by: >).map { day in (day, byDay[day]!) }
         recomputeFilteredWorkoutGroups()
+    }
+
+    /// Rebuilds the per-day logged-activity TSS index. Estimator is pure and cheap;
+    /// the full scan keeps the index in sync with `@Query` updates.
+    private func rebuildLoggedActivityTSSIndex(from activities: [LoggedActivityRecord]) {
+        let profile = LoggedActivityTSSEstimator.Profile.current()
+        var byDay: [Date: Double] = [:]
+        byDay.reserveCapacity(min(activities.count, 365))
+        for record in activities {
+            let tss = LoggedActivityTSSEstimator.estimate(record.toDomain(), profile: profile)
+            guard tss > 0 else { continue }
+            let day = calendar.startOfDay(for: record.startDate)
+            byDay[day, default: 0] += tss
+        }
+        loggedActivityTSSByDayStart = byDay
     }
 
     /// Shows a warning only when the query cap is reached.
@@ -335,10 +369,51 @@ struct CalendarView: View {
                     // Selected day detail
                     if let day = selectedDay {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(day, format: .dateTime.weekday(.wide).month(.wide).day())
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.6))
-                                .padding(.horizontal, 20)
+                            HStack(spacing: 10) {
+                                Text(day, format: .dateTime.weekday(.wide).month(.wide).day())
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.6))
+                                    .lineLimit(1)
+
+                                Spacer()
+
+                                if selectedDayHasShareableActivities {
+                                    Button {
+                                        navigationPath.append(AppRoute.daySummaryStudio(date: day))
+                                    } label: {
+                                        Image(systemName: "square.and.arrow.up")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(AppColor.bg)
+                                            .frame(width: 34, height: 30)
+                                            .background(AppColor.mango, in: Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Share all workouts and activities for selected day")
+                                }
+
+                                Button {
+                                    navigationPath.append(AppRoute.loggedActivitiesForDay(date: day))
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "figure.mixed.cardio")
+                                            .font(.system(size: 12, weight: .semibold))
+                                        Text("\(selectedDayLoggedActivities.count)")
+                                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                            .contentTransition(.numericText())
+                                    }
+                                    .foregroundStyle(
+                                        selectedDayLoggedActivities.isEmpty ? AppColor.fg3 : AppColor.blue
+                                    )
+                                    .frame(minWidth: 42)
+                                    .frame(height: 30)
+                                    .padding(.horizontal, 8)
+                                    .background(Color.white.opacity(0.06), in: Capsule())
+                                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("\(selectedDayLoggedActivities.count) other activities for selected day")
+                            }
+                            .padding(.horizontal, 20)
 
                             if selectedDayWorkouts.isEmpty {
                                 selectedDayEmptyState(date: day)
@@ -355,6 +430,7 @@ struct CalendarView: View {
                                     .buttonStyle(.plain)
                                 }
                             }
+
                         }
                         .padding(.top, 16)
                     }
@@ -401,12 +477,33 @@ struct CalendarView: View {
     }
 
     private func listSectionHeader(day: Date, workouts: [Workout]) -> some View {
-        let dayTSS = workouts.reduce(0.0) { $0 + $1.tss }
-        return HStack {
+        let workoutTSS = workouts.reduce(0.0) { $0 + $1.tss }
+        let dayTSS = workoutTSS + (loggedActivityTSSByDayStart[calendar.startOfDay(for: day)] ?? 0)
+        let dayActivityCount = loggedActivities(for: day).count
+        return HStack(spacing: 8) {
             Text(day, format: .dateTime.weekday(.wide).month(.wide).day())
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(.white.opacity(0.45))
             Spacer()
+            if dayActivityCount > 0 {
+                Button {
+                    navigationPath.append(AppRoute.loggedActivitiesForDay(date: day))
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "figure.mixed.cardio")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("\(dayActivityCount)")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundStyle(AppColor.blue)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.white.opacity(0.06), in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(dayActivityCount) other activities for \(day.formatted(date: .abbreviated, time: .omitted))")
+            }
             if dayTSS > 0 {
                 Text(String(format: "%.0f TSS", dayTSS))
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
@@ -655,9 +752,12 @@ struct CalendarView: View {
     private func dayCell(date: Date) -> some View {
         let dayWorkouts = workouts(for: date)
         let hasRide = !dayWorkouts.isEmpty
+        let hasLoggedActivity = hasLoggedActivity(on: date)
+        let hasAnyActivity = hasRide || hasLoggedActivity
         let isSelected = calendar.isDate(date, inSameDayAs: selectedDay ?? .distantPast)
         let isToday = calendar.isDateInToday(date)
-        let dayTSS = dayWorkouts.reduce(0.0) { $0 + $1.tss }
+        let workoutTSS = dayWorkouts.reduce(0.0) { $0 + $1.tss }
+        let dayTSS = workoutTSS + (loggedActivityTSSByDayStart[calendar.startOfDay(for: date)] ?? 0)
 
         Button {
             selectedDay = isSelected ? nil : date
@@ -665,12 +765,22 @@ struct CalendarView: View {
             VStack(spacing: 3) {
                 Text("\(calendar.component(.day, from: date))")
                     .font(.system(size: 14, weight: isToday ? .bold : .medium))
-                    .foregroundStyle(isToday ? AppColor.mango : .white.opacity(hasRide ? 0.8 : 0.3))
+                    .foregroundStyle(isToday ? AppColor.mango : .white.opacity(hasAnyActivity ? 0.8 : 0.3))
 
-                if hasRide {
-                    Circle()
-                        .fill(tssColor(dayTSS))
-                        .frame(width: 6, height: 6)
+                if hasAnyActivity {
+                    HStack(spacing: 3) {
+                        if hasRide {
+                            Circle()
+                                .fill(tssColor(dayTSS))
+                                .frame(width: 6, height: 6)
+                        }
+                        if hasLoggedActivity {
+                            Circle()
+                                .fill(AppColor.blue)
+                                .frame(width: 6, height: 6)
+                        }
+                    }
+                    .frame(height: 6)
                 } else {
                     Spacer().frame(height: 6)
                 }
@@ -681,6 +791,15 @@ struct CalendarView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if hasAnyActivity {
+                Button {
+                    navigationPath.append(AppRoute.daySummaryStudio(date: date))
+                } label: {
+                    Label("Share Day", systemImage: "square.and.arrow.up")
+                }
+            }
+        }
     }
 
     // MARK: - Helpers
@@ -702,9 +821,17 @@ struct CalendarView: View {
         workouts(for: date).count > 0
     }
 
+    private func hasLoggedActivity(on date: Date) -> Bool {
+        !loggedActivities(for: date).isEmpty
+    }
+
     private func workouts(for date: Date) -> [Workout] {
         let startOfDay = calendar.startOfDay(for: date)
         return workoutsByDayStart[startOfDay] ?? []
+    }
+
+    private func loggedActivities(for date: Date) -> [LoggedActivityRecord] {
+        allLoggedActivities.filter { calendar.isDate($0.startDate, inSameDayAs: date) }
     }
 
     private func changeMonth(by offset: Int) {

@@ -20,4 +20,9 @@ enum AppRoute: Hashable {
     case paywall
     case aiPlan(planID: String)
     case storyCardDebug // TEMPORARY — remove after visual QA
+    case loggedActivities
+    case loggedActivitiesForDay(date: Date)
+    case loggedActivityDetail(id: UUID)
+    case loggedActivityForm(editing: UUID?)
+    case daySummaryStudio(date: Date)
 }

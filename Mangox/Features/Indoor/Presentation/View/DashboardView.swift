@@ -912,7 +912,6 @@ struct DashboardView: View {
                         compactPowerStageCard()
                         if showExtendedRideSecondaryUI {
                             compactRideEffortHintRow()
-                            IndoorRideHeartRateCard(heartRateBpm: viewModel.liveHeartRateBpm)
                         }
                         if !prefs.activeGoals.isEmpty {
                             goalProgressSection(fit: true)
@@ -936,7 +935,6 @@ struct DashboardView: View {
                 compactPrimaryMetricsGrid(dense: dense)
                 if showExtendedRideSecondaryUI {
                     compactRideEffortHintRow()
-                    IndoorRideHeartRateCard(heartRateBpm: viewModel.liveHeartRateBpm)
                 }
                 if !prefs.activeGoals.isEmpty {
                     goalProgressSection(fit: true)
@@ -1440,6 +1438,7 @@ struct DashboardView: View {
                     unit: "bpm",
                     tint: hrZone?.color ?? AppColor.fg0,
                     dense: dense,
+                    badgeText: hrZone.map { "Z\($0.id) \($0.name)" },
                     edgeColor: hrZone?.color,
                     isSearching: viewModel.liveHeartRateBpm == 0 && workoutManager.state == .recording
                 )
@@ -1497,6 +1496,7 @@ struct DashboardView: View {
                     unit: "bpm",
                     tint: hrZone?.color ?? AppColor.fg0,
                     dense: dense,
+                    badgeText: hrZone.map { "Z\($0.id) \($0.name)" },
                     edgeColor: hrZone?.color,
                     isSearching: viewModel.liveHeartRateBpm == 0 && workoutManager.state == .recording
                 )
@@ -1566,6 +1566,7 @@ struct DashboardView: View {
         tint: Color,
         dense: Bool,
         valueSize: CGFloat? = nil,
+        badgeText: String? = nil,
         edgeColor: Color? = nil,
         isSearching: Bool = false
     ) -> some View {
@@ -1614,6 +1615,19 @@ struct DashboardView: View {
                     .mangoxFont(.micro)
                     .foregroundStyle(AppColor.fg3)
                     .lineLimit(1)
+
+                if let badgeText {
+                    Text(badgeText.uppercased())
+                        .font(DashboardViewFontToken.mono(size: dense ? 9 : 10, weight: .semibold))
+                        .foregroundStyle(tint)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(tint.opacity(0.14), in: Capsule())
+                        .overlay(Capsule().strokeBorder(tint.opacity(0.28), lineWidth: 1))
+                        .accessibilityLabel("Heart rate zone \(badgeText)")
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)

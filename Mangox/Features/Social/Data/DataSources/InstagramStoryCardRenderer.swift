@@ -128,7 +128,7 @@ enum InstagramStoryCardRenderer {
     }
 }
 
-private enum StoryCardFontToken {
+enum StoryCardFontToken {
     static func ui(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
         let fontName: String
         switch weight {
@@ -158,7 +158,7 @@ private enum StoryCardFontToken {
     }
 }
 
-private enum StoryCardDesign {
+enum StoryCardDesign {
     static let canvasBackground = UIColor(AppColor.bg0)
     static let canvasSecondary = UIColor(AppColor.bg2)
     static let panelTop = UIColor(AppColor.bg2).withAlphaComponent(0.96)
@@ -187,7 +187,7 @@ private enum StoryCardDesign {
     }
 }
 
-private enum StoryCardDrawing {
+enum StoryCardDrawing {
     private static let sidePad: CGFloat = 64
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -652,6 +652,7 @@ private enum StoryCardDrawing {
         whoopRecovery: Double?
     ) -> CGFloat {
         guard options.showTrainingLoad else { return 0 }
+        if options.privacyHidePower { return 90 }
         return hasWhoopStoryLine(options: options, whoopStrain: whoopStrain, whoopRecovery: whoopRecovery) ? 306 : 270
     }
 
@@ -739,6 +740,9 @@ private enum StoryCardDrawing {
             ]
         )
 
+        // Power data is hidden — show the effort badge only, no numbers or zone breakdown.
+        if options.privacyHidePower { return }
+
         let load = trainingLoadValue(for: workout)
         let loadText = "\(load)"
         let loadAttrs: [NSAttributedString.Key: Any] = [
@@ -753,7 +757,7 @@ private enum StoryCardDrawing {
             withAttributes: loadAttrs
         )
 
-        let slashText = "/ 100"
+        let slashText = Int(workout.tss.rounded()) > 0 ? "TSS" : "/ 100"
         let slashAttrs: [NSAttributedString.Key: Any] = [
             .font: StoryCardFontToken.mono(size: 38, weight: .medium),
             .foregroundColor: StoryCardDesign.textQuiet,
@@ -790,6 +794,7 @@ private enum StoryCardDrawing {
         }
 
         let segments = zoneDistribution(for: workout, dominantZone: dominantZone)
+            .filter { $0.percentage > 0 }
         let barY = zoneContentTop
         let barX = rect.minX + 26
         let totalBarWidth = rect.width - 52
@@ -797,21 +802,25 @@ private enum StoryCardDrawing {
         var cursor = barX
         let gap: CGFloat = 8
         let available = totalBarWidth - gap * CGFloat(max(0, segments.count - 1))
-        for segment in segments {
-            let widthSegment = max(28, available * CGFloat(segment.percentage))
-            let barRect = CGRect(x: cursor, y: barY, width: widthSegment, height: barHeight)
+        var segWidths = segments.map { max(28.0, available * CGFloat($0.percentage)) }
+        let totalW = segWidths.reduce(0, +)
+        if totalW > available {
+            let scale = available / totalW
+            segWidths = segWidths.map { $0 * scale }
+        }
+        for (index, segment) in segments.enumerated() {
+            let barRect = CGRect(x: cursor, y: barY, width: segWidths[index], height: barHeight)
             let barPath = UIBezierPath(roundedRect: barRect, cornerRadius: 8)
             segment.color.setFill()
             barPath.fill()
-            cursor += widthSegment + gap
+            cursor += segWidths[index] + gap
         }
 
         let legendY = barY + 34
-        let itemWidth = totalBarWidth / CGFloat(segments.count)
+        let itemWidth = segments.isEmpty ? totalBarWidth : totalBarWidth / CGFloat(segments.count)
         for (index, segment) in segments.enumerated() {
             let x = barX + CGFloat(index) * itemWidth
             let dotRect = CGRect(x: x, y: legendY + 10, width: 10, height: 10)
-            UIBezierPath(ovalIn: dotRect).fill(with: .normal, alpha: 1)
             segment.color.setFill()
             UIBezierPath(ovalIn: dotRect).fill()
 
@@ -953,7 +962,7 @@ private enum StoryCardDrawing {
         )
     }
 
-    private static func drawPanel(in rect: CGRect, cornerRadius: CGFloat, cg: CGContext) {
+    static func drawPanel(in rect: CGRect, cornerRadius: CGFloat, cg: CGContext) {
         let path = UIBezierPath(roundedRect: rect, cornerRadius: cornerRadius)
         cg.saveGState()
         cg.setShadow(
@@ -1563,7 +1572,7 @@ private enum StoryCardDrawing {
 
     private static func trainingLoadValue(for workout: Workout) -> Int {
         let tss = Int(workout.tss.rounded())
-        if tss > 0 { return min(100, tss) }
+        if tss > 0 { return tss }
         let ftp = ftpPercentValue(for: workout)
         return min(100, max(ftp, 0))
     }

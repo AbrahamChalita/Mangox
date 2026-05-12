@@ -55,6 +55,7 @@ final class DIContainer {
     let trainingPlanLookupService: TrainingPlanLookupServiceProtocol
     let workoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol
     let trainingPlanPersistenceRepository: TrainingPlanPersistenceRepositoryProtocol
+    let loggedActivityRepository: LoggedActivityRepository
 
     // MARK: - Cloud sync (Supabase)
 
@@ -144,6 +145,39 @@ final class DIContainer {
             persistenceRepository: trainingPlanPersistenceRepository
         )
     }
+    func makeLoggedActivitiesViewModel(lockedDate: Date? = nil) -> LoggedActivitiesViewModel {
+        LoggedActivitiesViewModel(
+            repository: loggedActivityRepository,
+            importWhoop: ImportWhoopWorkoutsUseCase(
+                whoopService: whoopServiceProtocol,
+                repository: loggedActivityRepository
+            ),
+            importStrava: ImportStravaActivitiesUseCase(
+                stravaService: stravaService,
+                repository: loggedActivityRepository
+            ),
+            whoopConnected: { [weak self] in self?.whoopService.isConnected ?? false },
+            stravaConnected: { [weak self] in self?.stravaService.isConnected ?? false },
+            lockedDate: lockedDate
+        )
+    }
+
+    func makeLoggedActivityFormViewModel(editing id: UUID? = nil) -> LoggedActivityFormViewModel {
+        LoggedActivityFormViewModel(repository: loggedActivityRepository, editingID: id)
+    }
+
+    func makeDaySummaryStudioViewModel(for date: Date) -> DaySummaryStudioViewModel {
+        DaySummaryStudioViewModel(
+            date: date,
+            modelContext: PersistenceContainer.shared.mainContext,
+            repository: loggedActivityRepository,
+            enrichStravaStreams: EnrichStravaStreamsUseCase(
+                stravaService: stravaService,
+                repository: loggedActivityRepository
+            )
+        )
+    }
+
     func makeWorkoutViewModel() -> WorkoutViewModel {
         WorkoutViewModel(
             stravaService: stravaService,
@@ -198,6 +232,12 @@ final class DIContainer {
 
         let auth = AuthState()
         authState = auth
+
+        let activityRepo = LoggedActivityRepositoryImpl(
+            modelContext: PersistenceContainer.shared.mainContext
+        )
+        loggedActivityRepository = activityRepo
+
         syncCoordinator = SyncCoordinator(
             auth: auth,
             context: PersistenceContainer.shared.mainContext,
@@ -210,7 +250,14 @@ final class DIContainer {
                 TrainingPlanProgressSyncDomain(),
                 ZoneSnapshotSyncDomain(),
                 CustomWorkoutTemplateSyncDomain(),
+                LoggedActivitySyncDomain(),
             ]
         )
+
+        // Wire local-change notifications from the repo to the sync coordinator.
+        // Done after syncCoordinator is initialized so the capture is valid.
+        activityRepo.setOnLocalChange { [weak syncCoordinator] in
+            syncCoordinator?.notifyLocalChange()
+        }
     }
 }

@@ -1,7 +1,9 @@
 // Features/Home/Domain/UseCases/HomeTrainingAggregateMath.swift
 import Foundation
 
-/// Lightweight workout metrics copied on the main thread before off-main aggregation.
+/// Lightweight per-activity slice copied on the main thread before off-main aggregation.
+/// Holds anything that contributes to weekly training load (cycling workouts and
+/// non-cycling logged activities alike), so the aggregator can stay source-agnostic.
 struct HomeWorkoutMetricSlice: Sendable {
     let startDate: Date
     let tss: Double

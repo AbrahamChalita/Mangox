@@ -42,6 +42,7 @@ final class SyncCoordinator {
         "mangox.sync.ai_plans.cursor",
         "mangox.sync.zone_snapshots.cursor",
         "mangox.sync.custom_templates.cursor",
+        "mangox.sync.logged_activities.cursor",
     ]
 
     private(set) var state: SyncState = .idle

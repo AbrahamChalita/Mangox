@@ -21,6 +21,14 @@ struct HomeView: View {
 
     @Query(HomeView.recentWorkoutsDescriptor) private var workouts: [Workout]
 
+    private static let recentActivitiesDescriptor: FetchDescriptor<LoggedActivityRecord> = {
+        var d = FetchDescriptor<LoggedActivityRecord>(sortBy: [SortDescriptor(\.startDate, order: .reverse)])
+        d.fetchLimit = 150
+        return d
+    }()
+
+    @Query(HomeView.recentActivitiesDescriptor) private var loggedActivities: [LoggedActivityRecord]
+
     private static let planProgressDescriptor: FetchDescriptor<TrainingPlanProgress> = {
         var d = FetchDescriptor<TrainingPlanProgress>(
             sortBy: [SortDescriptor(\.startDate, order: .reverse)])
@@ -95,11 +103,18 @@ struct HomeView: View {
             viewModel.prewarmLocationServices()
         }
         .onChange(of: workouts, initial: true) { _, _ in
-            viewModel.scheduleTrainingRefresh(workouts: workouts)
+            viewModel.scheduleTrainingRefresh(workouts: workouts, activities: loggedActivities)
+        }
+        .onChange(of: loggedActivities) { _, _ in
+            viewModel.scheduleTrainingRefresh(workouts: workouts, activities: loggedActivities)
         }
         .onReceive(NotificationCenter.default.publisher(for: .mangoxWorkoutAggregatesMayHaveChanged)) {
             _ in
-            viewModel.scheduleTrainingRefresh(workouts: workouts)
+            viewModel.scheduleTrainingRefresh(workouts: workouts, activities: loggedActivities)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mangoxLoggedActivitiesAggregatesMayHaveChanged)) {
+            _ in
+            viewModel.scheduleTrainingRefresh(workouts: workouts, activities: loggedActivities)
         }
         .task {
             await viewModel.refreshWhoopIfStale()
@@ -226,7 +241,7 @@ struct HomeView: View {
                 snapshotMetricCell(
                     label: "CTL · FIT",
                     value: chronicLoad > 0 ? "\(Int(chronicLoad.rounded()))" : "—",
-                    detail: chronicLoad > 0 ? "\(viewModel.weekRides) rides" : "No load yet",
+                    detail: chronicLoad > 0 ? "\(viewModel.weekRides) sessions" : "No load yet",
                     color: AppColor.blue
                 )
                 metricDivider

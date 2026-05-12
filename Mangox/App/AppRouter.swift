@@ -91,5 +91,16 @@ func appRouteDestination(_ route: AppRoute, path: Binding<NavigationPath>, di: D
             .toolbar(.hidden, for: .navigationBar)
     case .storyCardDebug:
         StoryCardDebugView()
+    case .loggedActivities:
+        LoggedActivitiesView(viewModel: di.makeLoggedActivitiesViewModel(), navigationPath: path)
+    case .loggedActivitiesForDay(let date):
+        LoggedActivitiesView(viewModel: di.makeLoggedActivitiesViewModel(lockedDate: date), navigationPath: path)
+    case .loggedActivityDetail(let id):
+        LoggedActivityDetailView(id: id, repository: di.loggedActivityRepository, navigationPath: path)
+    case .loggedActivityForm(let editing):
+        LoggedActivityFormView(viewModel: di.makeLoggedActivityFormViewModel(editing: editing), navigationPath: path)
+    case .daySummaryStudio(let date):
+        DaySummaryStudioView(date: date, viewModel: di.makeDaySummaryStudioViewModel(for: date), navigationPath: path)
+            .toolbar(.hidden, for: .tabBar)
     }
 }

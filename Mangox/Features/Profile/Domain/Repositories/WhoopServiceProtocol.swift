@@ -26,4 +26,6 @@ protocol WhoopServiceProtocol: AnyObject {
     func refreshLinkedData() async throws
     func refreshLinkedDataIfStale(maximumAge: TimeInterval) async
     func applyHeartBaselinesFromLatestWhoopData()
+
+    func fetchRecentWorkouts(since: Date, until: Date) async throws -> [WhoopWorkoutDTO]
 }

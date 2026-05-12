@@ -64,15 +64,62 @@ final class StravaService: StravaServiceProtocol {
         let profile_medium: String?
     }
 
-    private struct SummaryActivity: Codable {
+    struct SummaryActivity: Codable {
         let id: Int
+        let name: String?
+        let sportType: String?
         let startDate: Date?
         let elapsedTime: Int?
+        let movingTime: Int?
+        let distance: Double?
+        let totalElevationGain: Double?
+        let averageHeartrate: Double?
+        let maxHeartrate: Double?
+        let calories: Double?
+        let kilojoules: Double?
+        let averageSpeed: Double?
+        let maxSpeed: Double?
+        let averageCadence: Double?
+        let averageWatts: Double?
+        let averageTemp: Double?
+        let sufferScore: Int?
+        let achievementCount: Int?
+        let prCount: Int?
+        let totalPhotoCount: Int?
+        let map: ActivityMap?
+
+        struct ActivityMap: Codable {
+            let id: String?
+            let summaryPolyline: String?
+
+            enum CodingKeys: String, CodingKey {
+                case id
+                case summaryPolyline = "summary_polyline"
+            }
+        }
 
         enum CodingKeys: String, CodingKey {
-            case id
+            case id, name
+            case sportType = "sport_type"
             case startDate = "start_date"
             case elapsedTime = "elapsed_time"
+            case movingTime = "moving_time"
+            case distance
+            case totalElevationGain = "total_elevation_gain"
+            case averageHeartrate = "average_heartrate"
+            case maxHeartrate = "max_heartrate"
+            case calories
+            case kilojoules
+            case averageSpeed = "average_speed"
+            case maxSpeed = "max_speed"
+            case averageCadence = "average_cadence"
+            case averageWatts = "average_watts"
+            case averageTemp = "average_temp"
+            case sufferScore = "suffer_score"
+            case achievementCount = "achievement_count"
+            case prCount = "pr_count"
+            case totalPhotoCount = "total_photo_count"
+            case map
         }
 
         private static let iso8601: ISO8601DateFormatter = {
@@ -84,7 +131,26 @@ final class StravaService: StravaServiceProtocol {
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decode(Int.self, forKey: .id)
+            name = try container.decodeIfPresent(String.self, forKey: .name)
+            sportType = try container.decodeIfPresent(String.self, forKey: .sportType)
             elapsedTime = try container.decodeIfPresent(Int.self, forKey: .elapsedTime)
+            movingTime = try container.decodeIfPresent(Int.self, forKey: .movingTime)
+            distance = try container.decodeIfPresent(Double.self, forKey: .distance)
+            totalElevationGain = try container.decodeIfPresent(Double.self, forKey: .totalElevationGain)
+            averageHeartrate = try container.decodeIfPresent(Double.self, forKey: .averageHeartrate)
+            maxHeartrate = try container.decodeIfPresent(Double.self, forKey: .maxHeartrate)
+            calories = try container.decodeIfPresent(Double.self, forKey: .calories)
+            kilojoules = try container.decodeIfPresent(Double.self, forKey: .kilojoules)
+            averageSpeed = try container.decodeIfPresent(Double.self, forKey: .averageSpeed)
+            maxSpeed = try container.decodeIfPresent(Double.self, forKey: .maxSpeed)
+            averageCadence = try container.decodeIfPresent(Double.self, forKey: .averageCadence)
+            averageWatts = try container.decodeIfPresent(Double.self, forKey: .averageWatts)
+            averageTemp = try container.decodeIfPresent(Double.self, forKey: .averageTemp)
+            sufferScore = try container.decodeIfPresent(Int.self, forKey: .sufferScore)
+            achievementCount = try container.decodeIfPresent(Int.self, forKey: .achievementCount)
+            prCount = try container.decodeIfPresent(Int.self, forKey: .prCount)
+            totalPhotoCount = try container.decodeIfPresent(Int.self, forKey: .totalPhotoCount)
+            map = try container.decodeIfPresent(ActivityMap.self, forKey: .map)
 
             if let dateString = try container.decodeIfPresent(String.self, forKey: .startDate) {
                 startDate = Self.iso8601.date(from: dateString)
@@ -208,7 +274,7 @@ final class StravaService: StravaServiceProtocol {
     private static let authorizeURL = URL(string: "https://www.strava.com/oauth/authorize")!
     private static let uploadURL = URL(string: "https://www.strava.com/api/v3/uploads")!
     private static let athleteURL = URL(string: "https://www.strava.com/api/v3/athlete")!
-    private static let athleteActivitiesURL = URL(string: "https://www.strava.com/api/v3/athlete/activities")!
+    static let athleteActivitiesURL = URL(string: "https://www.strava.com/api/v3/athlete/activities")!
     private static let keychainAccount = "strava.session.v1"
     private static let requestTimeout: TimeInterval = 20
     private static let uploadTimeout: TimeInterval = 45
@@ -219,7 +285,7 @@ final class StravaService: StravaServiceProtocol {
     private let clientSecret: String
     private let redirectURIString: String
     private let presentationContextProvider = WebAuthenticationPresentationContextProvider()
-    private let urlSession: URLSession
+    let urlSession: URLSession
 
     private var session: Session?
     private var authSession: ASWebAuthenticationSession?
@@ -229,6 +295,23 @@ final class StravaService: StravaServiceProtocol {
     /// Without this, two simultaneous API calls could both detect an expired
     /// token and both call `requestToken(refreshToken:)`, invalidating each other.
     private var refreshTask: Task<String, Error>?
+
+    /// Latest seen 15-minute rate-limit usage. Updated lazily from `X-RateLimit-Usage` headers
+    /// on Activities API responses; nil until any call has completed.
+    /// Format: (usage, limit) for the rolling 15-min window.
+    private(set) var rateLimitShortWindow: (usage: Int, limit: Int)?
+
+    /// Module-internal setter so request helpers in extensions can record usage. Don't expose to UI.
+    func updateRateLimitShortWindow(usage: Int, limit: Int) {
+        rateLimitShortWindow = (usage: usage, limit: limit)
+    }
+
+    /// Heuristic guard for non-essential calls (streams, lap details). Returns true when we've
+    /// seen recent traffic close to the 15-min cap, so callers can opt-out instead of getting 429s.
+    var isRateLimitTight: Bool {
+        guard let r = rateLimitShortWindow, r.limit > 0 else { return false }
+        return Double(r.usage) / Double(r.limit) >= 0.80
+    }
 
     init() {
         self.clientID = Self.infoValue(for: "STRAVA_CLIENT_ID")
@@ -717,7 +800,7 @@ final class StravaService: StravaServiceProtocol {
         }
     }
 
-    private func validAccessToken() async throws -> String {
+    func validAccessToken() async throws -> String {
         guard let current = session else {
             throw StravaError.tokenExchangeFailed("No Strava session. Connect your account first.")
         }

@@ -16,6 +16,7 @@ struct PMChartView: View {
     @State private var viewModel: FitnessViewModel
     @State private var pmcWorkoutSnapshotCache: [WorkoutMetricsSnapshot] = []
     @State private var powerCurveSnapshotCache: [WorkoutMetricsSnapshot] = []
+    @State private var pmcLoggedActivitySnapshotCache: [WorkoutMetricsSnapshot.LoggedActivitySnapshot] = []
 
     @State private var selectedPMCDate: Date?
     @State private var selectedPowerDuration: Int?
@@ -33,6 +34,16 @@ struct PMChartView: View {
     }()
 
     @Query(PMChartView.pmcWorkoutsDescriptor) private var allWorkouts: [Workout]
+
+    private static let pmcActivitiesDescriptor: FetchDescriptor<LoggedActivityRecord> = {
+        var d = FetchDescriptor<LoggedActivityRecord>(
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        d.fetchLimit = Self.pmcFetchLimit
+        return d
+    }()
+
+    @Query(PMChartView.pmcActivitiesDescriptor) private var allLoggedActivities: [LoggedActivityRecord]
 
     private static let recentPlanProgressDescriptor: FetchDescriptor<TrainingPlanProgress> = {
         var d = FetchDescriptor<TrainingPlanProgress>(
@@ -52,6 +63,23 @@ struct PMChartView: View {
     private func rebuildWorkoutSnapshotCaches() {
         pmcWorkoutSnapshotCache = allWorkouts.map { WorkoutMetricsSnapshot(pmcFieldsFrom: $0) }
         rebuildPowerCurveSnapshotCache()
+        rebuildLoggedActivitySnapshotCache()
+    }
+
+    /// Estimates TSS for each logged activity on the main thread (UserDefaults-bound
+    /// HR profile lookup happens here) so the resulting Sendable snapshots can cross
+    /// the actor boundary cleanly.
+    @MainActor
+    private func rebuildLoggedActivitySnapshotCache() {
+        let profile = LoggedActivityTSSEstimator.Profile.current()
+        pmcLoggedActivitySnapshotCache = allLoggedActivities.compactMap { record in
+            let tss = LoggedActivityTSSEstimator.estimate(record.toDomain(), profile: profile)
+            guard tss > 0 else { return nil }
+            return WorkoutMetricsSnapshot.LoggedActivitySnapshot(
+                startDate: record.startDate,
+                tss: tss
+            )
+        }
     }
 
     @MainActor
@@ -66,7 +94,8 @@ struct PMChartView: View {
     private func schedulePMCAndPowerCurveRebuild() {
         viewModel.schedulePMCRebuild(
             pmcWorkouts: pmcWorkoutSnapshotCache,
-            powerCurveWorkouts: powerCurveSnapshotCache
+            powerCurveWorkouts: powerCurveSnapshotCache,
+            loggedActivities: pmcLoggedActivitySnapshotCache
         )
     }
 
@@ -161,8 +190,17 @@ struct PMChartView: View {
                 workouts: pmcWorkoutSnapshotCache
             )
         }
+        .onChange(of: allLoggedActivities, initial: false) { _, _ in
+            rebuildLoggedActivitySnapshotCache()
+            schedulePMCAndPowerCurveRebuild()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .mangoxWorkoutAggregatesMayHaveChanged)) {
             _ in
+            schedulePMCAndPowerCurveRebuild()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mangoxLoggedActivitiesAggregatesMayHaveChanged)) {
+            _ in
+            rebuildLoggedActivitySnapshotCache()
             schedulePMCAndPowerCurveRebuild()
         }
         .onChange(of: recentPlanProgress, initial: true) { _, _ in

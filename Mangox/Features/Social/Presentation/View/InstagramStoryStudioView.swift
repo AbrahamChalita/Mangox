@@ -1,5 +1,4 @@
 import PhotosUI
-import SwiftData
 import SwiftUI
 import UIKit
 
@@ -35,11 +34,11 @@ struct InstagramStoryStudioView: View {
     private var sessionKindFootnote: String {
         switch storySessionKind {
         case .outdoor:
-            return "Outdoor (route, GPX/directions ride, elevation, or long road-like stats). Eyebrow: route if shown, else Outdoor cycling."
+            return "Outdoor ride detected — route name shows when available."
         case .indoorTrainer:
-            return "Indoor-style. Unchanged factory options default the third quick stat to NP."
+            return "Indoor session detected — power and zones are highlighted."
         case .unknown:
-            return "Unclear session. Without route name, eyebrow uses your dominant zone."
+            return "Session type unclear — defaults to zone-based card style."
         }
     }
 
@@ -226,9 +225,13 @@ struct InstagramStoryStudioView: View {
                 if let previewImage = viewModel.previewImage {
                     Image(uiImage: previewImage)
                         .resizable()
-                        .scaledToFill()
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .clipped()
+                        .scaledToFit()
+                        .frame(
+                            width: min(geo.size.width - 40, (geo.size.height - 36) * 9 / 16),
+                            height: geo.size.height - 36
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .shadow(color: .black.opacity(0.45), radius: 18, x: 0, y: 10)
                 } else if viewModel.isRendering {
                     ProgressView().tint(AppColor.mango)
                 } else {
@@ -343,36 +346,40 @@ struct InstagramStoryStudioView: View {
         let hasCustomBackgroundImage = viewModel.customBackgroundImage != nil
 
         return VStack(spacing: 10) {
-            ZStack(alignment: .topTrailing) {
-                PhotosPicker(
-                    selection: $selectedPhotoItem,
-                    matching: .images,
-                    photoLibrary: .shared()
-                ) {
-                    Image(systemName: hasCustomBackgroundImage ? "photo.fill" : "photo.badge.plus")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
+            PhotosPicker(
+                selection: $selectedPhotoItem,
+                matching: .images,
+                photoLibrary: .shared()
+            ) {
+                Image(systemName: hasCustomBackgroundImage ? "photo.fill" : "photo.badge.plus")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(hasCustomBackgroundImage ? AppColor.mango : .white)
+                    .frame(width: 44, height: 44)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+            }
+            .accessibilityLabel(hasCustomBackgroundImage ? "Change background photo" : "Add background photo")
+
+            if hasCustomBackgroundImage {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    viewModel.customBackgroundImage = nil
+                    selectedPhotoItem = nil
+                    var opts = viewModel.storyOptions
+                    if opts.backgroundSource == .custom { opts.backgroundSource = .preset }
+                    viewModel.saveStoryOptions(opts)
+                    renderPreviewImmediately()
+                } label: {
+                    Image(systemName: "trash.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.45))
                         .frame(width: 44, height: 44)
                         .background(.ultraThinMaterial, in: Circle())
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+                        .overlay(Circle().strokeBorder(Color.red.opacity(0.32), lineWidth: 0.6))
                 }
-                .accessibilityLabel(hasCustomBackgroundImage ? "Change background photo" : "Add background photo")
-                if hasCustomBackgroundImage {
-                    Button {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        viewModel.customBackgroundImage = nil
-                        selectedPhotoItem = nil
-                        renderPreviewImmediately()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.white, .black)
-                            .frame(width: 44, height: 44)
-                    }
-                    .offset(x: 4, y: -4)
-                    .buttonStyle(MangoxPressStyle())
-                    .accessibilityLabel("Remove background photo")
-                }
+                .buttonStyle(MangoxPressStyle())
+                .transition(.scale.combined(with: .opacity))
+                .accessibilityLabel("Remove background photo")
             }
 
             Button {
@@ -499,14 +506,25 @@ struct InstagramStoryStudioView: View {
     }
 
     private var templateCarousel: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(InstagramStoryCardOptions.Template.allCases) { template in
-                    templateThumb(template)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(InstagramStoryCardOptions.Template.allCases) { template in
+                        templateThumb(template)
+                            .id(template)
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 4)
+            }
+            .onAppear {
+                proxy.scrollTo(viewModel.storyOptions.template, anchor: .center)
+            }
+            .onChange(of: viewModel.storyOptions.template) { _, template in
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(template, anchor: .center)
                 }
             }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 4)
         }
     }
 
@@ -746,13 +764,22 @@ struct InstagramStoryStudioView: View {
 
                 if hasCustomImage {
                     Button(role: .destructive) {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         viewModel.customBackgroundImage = nil
                         selectedPhotoItem = nil
                         renderPreviewImmediately()
                     } label: {
-                        Label("Remove Photo", systemImage: "trash")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Color.red.opacity(0.8))
+                        Label("Remove Photo", systemImage: "trash.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.42))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.red.opacity(0.10))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(Color.red.opacity(0.22), lineWidth: 1)
+                            )
                     }
                 }
             }
@@ -886,6 +913,7 @@ struct InstagramStoryStudioView: View {
     private var resetButton: some View {
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            viewModel.aiTitle = nil
             viewModel.customBackgroundImage = nil
             selectedPhotoItem = nil
             viewModel.resetStoryOptions()

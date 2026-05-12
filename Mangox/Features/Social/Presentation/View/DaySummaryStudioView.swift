@@ -1,0 +1,625 @@
+// Features/Social/Presentation/View/DaySummaryStudioView.swift
+import PhotosUI
+import SwiftUI
+import UIKit
+
+struct DaySummaryStudioView: View {
+    let date: Date
+    let navigationPath: Binding<NavigationPath>
+
+    @State private var viewModel: DaySummaryStudioViewModel
+    @State private var showCustomizeSheet = false
+    @State private var renderTask: Task<Void, Never>?
+    @State private var shareError: String?
+    @State private var selectedPhotoItem: PhotosPickerItem?
+
+    init(date: Date, viewModel: DaySummaryStudioViewModel, navigationPath: Binding<NavigationPath>) {
+        self.date = date
+        self.navigationPath = navigationPath
+        _viewModel = State(initialValue: viewModel)
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                canvas.frame(maxWidth: .infinity, maxHeight: .infinity)
+                bottomDeck
+            }
+
+            topToolbar
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                .allowsHitTesting(true)
+        }
+        .preferredColorScheme(.dark)
+        .navigationBarHidden(true)
+        .onAppear {
+            viewModel.load()
+            scheduleRender(immediate: true)
+        }
+        .onChange(of: viewModel.cardOptions) { _, _ in
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            scheduleRender()
+        }
+        .onChange(of: selectedPhotoItem) { _, item in
+            guard let item else { return }
+            Task { @MainActor in
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let raw = UIImage(data: data) {
+                    let prepared = ImageProcessing.prepareStoryBackground(from: raw)
+                    viewModel.customBackgroundImage = prepared
+                    var opts = viewModel.cardOptions
+                    opts.backgroundSource = .photo
+                    viewModel.saveOptions(opts)
+                    viewModel.invalidateThumbnails()
+                    scheduleRender(immediate: true)
+                    viewModel.renderThumbnails()
+                }
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { viewModel.showShareFallback },
+            set: { viewModel.showShareFallback = $0 }
+        )) {
+            ShareSheet(activityItems: viewModel.shareFallbackItems)
+        }
+        .sheet(isPresented: $showCustomizeSheet) {
+            customizeSheet
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .preferredColorScheme(.dark)
+        }
+        .alert("Couldn't Share", isPresented: .init(
+            get: { shareError != nil },
+            set: { if !$0 { shareError = nil } }
+        )) {
+            Button("OK", role: .cancel) { shareError = nil }
+        } message: {
+            Text(shareError ?? "")
+        }
+    }
+
+    // MARK: - Render scheduling
+
+    private func scheduleRender(immediate: Bool = false) {
+        renderTask?.cancel()
+        renderTask = Task { @MainActor in
+            if !immediate {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+            }
+            await viewModel.renderPreview()
+            if immediate { viewModel.renderThumbnails() }
+        }
+    }
+
+    // MARK: - Canvas
+
+    private var canvas: some View {
+        GeometryReader { geo in
+            ZStack {
+                Color.black
+
+                if let img = viewModel.previewImage {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(
+                            width: min(geo.size.width - 40, (geo.size.height - 36) * 9 / 16),
+                            height: geo.size.height - 36
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .shadow(color: .black.opacity(0.45), radius: 18, x: 0, y: 10)
+                } else {
+                    ProgressView().tint(AppColor.mango)
+                }
+
+                if viewModel.isRendering, viewModel.previewImage != nil {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .tint(.white)
+                                .padding(8)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .padding(.top, 56)
+                                .padding(.trailing, 16)
+                        }
+                        Spacer()
+                    }
+                }
+
+                VStack {
+                    Spacer()
+                    sideRail
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.trailing, 14)
+                        .padding(.bottom, 14)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Top toolbar
+
+    private var topToolbar: some View {
+        HStack {
+            circularButton(systemName: "xmark", label: "Close") {
+                navigationPath.wrappedValue.removeLast()
+            }
+            Spacer()
+            circularButton(systemName: "square.and.arrow.down", label: "Save to Photos") {
+                viewModel.saveToPhotos()
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+            circularButton(systemName: "slider.horizontal.3", label: "Customize") {
+                showCustomizeSheet = true
+            }
+        }
+    }
+
+    private func circularButton(systemName: String, label: String, action: @escaping () -> Void) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+        }
+        .buttonStyle(MangoxPressStyle())
+        .accessibilityLabel(label)
+    }
+
+    // MARK: - Side rail
+
+    private var sideRail: some View {
+        let hasPhoto = viewModel.customBackgroundImage != nil
+        return VStack(spacing: 10) {
+            // Photo picker
+            PhotosPicker(
+                selection: $selectedPhotoItem,
+                matching: .images,
+                photoLibrary: .shared()
+            ) {
+                Image(systemName: hasPhoto ? "photo.fill" : "photo.badge.plus")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(hasPhoto ? AppColor.mango : .white)
+                    .frame(width: 44, height: 44)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+            }
+            .accessibilityLabel(hasPhoto ? "Change background photo" : "Add background photo")
+
+            if hasPhoto {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    viewModel.customBackgroundImage = nil
+                    selectedPhotoItem = nil
+                    var opts = viewModel.cardOptions
+                    opts.backgroundSource = .gradient
+                    viewModel.saveOptions(opts)
+                    viewModel.invalidateThumbnails()
+                    scheduleRender(immediate: true)
+                    viewModel.renderThumbnails()
+                } label: {
+                    Image(systemName: "trash.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.45))
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().strokeBorder(Color.red.opacity(0.32), lineWidth: 0.6))
+                }
+                .buttonStyle(MangoxPressStyle())
+                .transition(.scale.combined(with: .opacity))
+                .accessibilityLabel("Remove background photo")
+            }
+
+            // Gradient scheme cycle (only when on gradient mode)
+            if viewModel.cardOptions.backgroundSource == .gradient {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    var opts = viewModel.cardOptions
+                    opts.backgroundGradientIndex = (opts.backgroundGradientIndex + 1) % 5
+                    viewModel.saveOptions(opts)
+                } label: {
+                    Circle()
+                        .fill(gradientSwatchColor)
+                        .frame(width: 18, height: 18)
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.4), lineWidth: 1))
+                        .padding(11)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+                }
+                .buttonStyle(MangoxPressStyle())
+                .accessibilityLabel("Cycle background color")
+            }
+
+            // Brand badge toggle
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                var opts = viewModel.cardOptions
+                opts.showBrandBadge.toggle()
+                viewModel.saveOptions(opts)
+            } label: {
+                Image(systemName: viewModel.cardOptions.showBrandBadge ? "m.square.fill" : "m.square")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(viewModel.cardOptions.showBrandBadge ? AppColor.mango : .white)
+                    .frame(width: 44, height: 44)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+            }
+            .buttonStyle(MangoxPressStyle())
+            .accessibilityLabel("Brand badge")
+            .accessibilityValue(viewModel.cardOptions.showBrandBadge ? "Visible" : "Hidden")
+        }
+        .animation(.easeInOut(duration: 0.18), value: hasPhoto)
+        .animation(.easeInOut(duration: 0.18), value: viewModel.cardOptions.backgroundSource)
+    }
+
+    private var gradientSwatchColor: Color {
+        let colors: [Color] = [AppColor.mango, AppColor.blue, .green, .purple, .teal]
+        let idx = min(viewModel.cardOptions.backgroundGradientIndex, colors.count - 1)
+        return colors[idx]
+    }
+
+    // MARK: - Bottom deck
+
+    private var bottomDeck: some View {
+        VStack(spacing: 12) {
+            templateCarousel
+            Text(viewModel.cardOptions.template.displayName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppColor.fg1)
+                .frame(maxWidth: .infinity)
+                .animation(.easeInOut(duration: 0.18), value: viewModel.cardOptions.template)
+            shareButton
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 14)
+        .background(
+            LinearGradient(
+                colors: [Color.black.opacity(0), Color.black.opacity(0.6), Color.black],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+
+    private var templateCarousel: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(DaySummaryCardOptions.Template.allCases) { template in
+                        templateThumb(template)
+                            .id(template)
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 4)
+            }
+            .onAppear {
+                proxy.scrollTo(viewModel.cardOptions.template, anchor: .center)
+            }
+            .onChange(of: viewModel.cardOptions.template) { _, template in
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(template, anchor: .center)
+                }
+            }
+        }
+    }
+
+    private func templateThumb(_ template: DaySummaryCardOptions.Template) -> some View {
+        let selected = viewModel.cardOptions.template == template
+        let thumb = viewModel.thumbnails[template]
+        return Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            var opts = viewModel.cardOptions
+            opts.template = template
+            viewModel.saveOptions(opts)
+        } label: {
+            ZStack {
+                if let thumb {
+                    Image(uiImage: thumb)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.08), Color.white.opacity(0.03)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    if viewModel.summary != nil {
+                        ProgressView().scaleEffect(0.6).tint(AppColor.fg2)
+                    }
+                }
+            }
+            .frame(width: 64, height: 112)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(
+                        selected ? AppColor.mango : Color.white.opacity(0.12),
+                        lineWidth: selected ? 2 : 1
+                    )
+            )
+            .shadow(color: selected ? AppColor.mango.opacity(0.35) : .clear, radius: 6, x: 0, y: 2)
+        }
+        .buttonStyle(MangoxPressStyle())
+        .accessibilityLabel(template.displayName)
+    }
+
+    private var shareButton: some View {
+        Button {
+            Task {
+                await viewModel.shareToInstagram(
+                    onError: { shareError = $0 },
+                    onDismiss: { navigationPath.wrappedValue.removeLast() }
+                )
+            }
+        } label: {
+            HStack(spacing: 10) {
+                if viewModel.isSharing {
+                    ProgressView().tint(.white)
+                } else {
+                    Image("BrandInstagram")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 18, height: 18)
+                }
+                Text(viewModel.isSharing ? "Opening Instagram…" : "Share to Instagram Stories")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 52)
+            .padding(.vertical, 14)
+            .background(Capsule().fill(Color(red: 0.88, green: 0.19, blue: 0.42)))
+        }
+        .buttonStyle(MangoxPressStyle())
+        .disabled(viewModel.isSharing || viewModel.isRendering)
+    }
+
+    // MARK: - Customize sheet
+
+    private var customizeSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 18) {
+                    sheetSection(title: "Background") { backgroundSection }
+                    sheetSection(title: "Stats") { statsSection }
+                    sheetSection(title: "Privacy") { privacySection }
+                    resetButton
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 28)
+            }
+            .background(AppColor.bg)
+            .navigationTitle("Customize")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showCustomizeSheet = false }
+                        .foregroundStyle(AppColor.mango)
+                }
+            }
+        }
+    }
+
+    private func sheetSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MangoxSectionLabel(title: title, horizontalPadding: 0)
+            Spacer(minLength: 14)
+            content()
+        }
+        .padding(16)
+        .background(Color.white.opacity(AppOpacity.cardBg))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(AppOpacity.cardBorder), lineWidth: 1)
+        )
+    }
+
+    private var backgroundSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("Source", selection: optionBinding(\.backgroundSource)) {
+                ForEach(DaySummaryCardOptions.BackgroundSource.allCases) { src in
+                    Text(src.pickerTitle).tag(src)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if viewModel.cardOptions.backgroundSource == .gradient {
+                Text("Gradient Theme")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppColor.fg2)
+                HStack(spacing: 14) {
+                    ForEach(0..<5, id: \.self) { idx in
+                        let selected = viewModel.cardOptions.backgroundGradientIndex == idx
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            var opts = viewModel.cardOptions
+                            opts.backgroundGradientIndex = idx
+                            viewModel.saveOptions(opts)
+                        } label: {
+                            Circle()
+                                .fill(gradientSwatchColors[idx])
+                                .frame(width: 34, height: 34)
+                                .overlay(
+                                    Circle().strokeBorder(
+                                        selected ? AppColor.mango : Color.white.opacity(0.15),
+                                        lineWidth: selected ? 2.5 : 1
+                                    )
+                                )
+                                .shadow(color: selected ? AppColor.mango.opacity(0.4) : .clear, radius: 5)
+                        }
+                        .buttonStyle(MangoxPressStyle())
+                    }
+                }
+            } else {
+                photoControls
+            }
+            Toggle("Show Mangox badge", isOn: optionBinding(\.showBrandBadge))
+                .tint(AppColor.mango)
+        }
+    }
+
+    private var photoControls: some View {
+        let hasPhoto = viewModel.customBackgroundImage != nil
+        let pickerTint = AppColor.mango
+        return VStack(spacing: 10) {
+            PhotosPicker(
+                selection: $selectedPhotoItem,
+                matching: .images,
+                photoLibrary: .shared()
+            ) {
+                Label(hasPhoto ? "Change Photo" : "Choose Photo", systemImage: "photo.badge.plus")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(pickerTint)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(pickerTint.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
+            if hasPhoto {
+                Button(role: .destructive) {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    viewModel.customBackgroundImage = nil
+                    selectedPhotoItem = nil
+                    var opts = viewModel.cardOptions
+                    opts.backgroundSource = .gradient
+                    viewModel.saveOptions(opts)
+                    viewModel.invalidateThumbnails()
+                    scheduleRender(immediate: true)
+                    viewModel.renderThumbnails()
+                } label: {
+                    Label("Remove Photo", systemImage: "trash.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.42))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.red.opacity(0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Color.red.opacity(0.22), lineWidth: 1)
+                        )
+                }
+            } else {
+                Text("Pictures from your day make stories pop — try one.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(AppColor.fg3)
+            }
+        }
+    }
+
+    private var gradientSwatchColors: [Color] {
+        [AppColor.mango, AppColor.blue, .green, .purple, .teal]
+    }
+
+    private var statsSection: some View {
+        VStack(spacing: 10) {
+            ForEach(0..<3, id: \.self) { index in
+                statSlotMenu(index: index)
+            }
+        }
+    }
+
+    private func statSlotMenu(index: Int) -> some View {
+        let slots = normalizedStatSlots()
+        let selected = slots[index]
+        return Menu {
+            ForEach(DaySummaryCardOptions.StatSlot.allCases) { slot in
+                Button(slot.displayName) {
+                    var opts = viewModel.cardOptions
+                    var updated = normalizedStatSlots()
+                    updated[index] = slot
+                    opts.statSlots = updated
+                    viewModel.saveOptions(opts)
+                }
+            }
+        } label: {
+            HStack {
+                Text("Slot \(index + 1)")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.58))
+                Spacer()
+                Text(selected.displayName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.88))
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(AppColor.mango)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(Color.white.opacity(0.055))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+
+    private func normalizedStatSlots() -> [DaySummaryCardOptions.StatSlot] {
+        let defaults: [DaySummaryCardOptions.StatSlot] = [.totalTime, .totalDistance, .totalKJ]
+        var slots = viewModel.cardOptions.statSlots
+        for fallback in defaults where slots.count < 3 { slots.append(fallback) }
+        return Array(slots.prefix(3))
+    }
+
+    private var privacySection: some View {
+        VStack(spacing: 12) {
+            Toggle("Hide power / energy", isOn: optionBinding(\.privacyHidePower))
+                .tint(AppColor.mango)
+            Toggle("Hide heart rate", isOn: optionBinding(\.privacyHideHeartRate))
+                .tint(AppColor.mango)
+            Toggle("Hide strength load details", isOn: optionBinding(\.privacyHideStrengthLoad))
+                .tint(AppColor.mango)
+        }
+    }
+
+    private var resetButton: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            selectedPhotoItem = nil
+            viewModel.resetOptions()
+            scheduleRender(immediate: true)
+            viewModel.renderThumbnails()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: 12, weight: .medium))
+                Text("Reset to defaults")
+                    .font(.system(size: 13, weight: .medium))
+            }
+            .foregroundStyle(Color.white.opacity(AppOpacity.textSecondary))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+        }
+    }
+
+    // MARK: - Binding helpers
+
+    private func optionBinding<Value>(_ keyPath: WritableKeyPath<DaySummaryCardOptions, Value>) -> Binding<Value> {
+        Binding(
+            get: { viewModel.cardOptions[keyPath: keyPath] },
+            set: {
+                var opts = viewModel.cardOptions
+                opts[keyPath: keyPath] = $0
+                viewModel.saveOptions(opts)
+            }
+        )
+    }
+}

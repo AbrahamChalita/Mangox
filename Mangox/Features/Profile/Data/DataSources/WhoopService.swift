@@ -589,6 +589,16 @@ final class WhoopService: WhoopServiceProtocol {
 
     // MARK: - HTTP helpers
 
+    /// Internal entry point for cross-file extensions (e.g. WhoopService+Workouts.swift).
+    /// Handles token refresh + decoding; callers supply the path relative to `apiBase` and optional query items.
+    func authorizedGet<T: Decodable>(path: String, queryItems: [URLQueryItem] = [], context: String) async throws -> T {
+        let token = try await validAccessToken()
+        var components = URLComponents(url: Self.apiBase.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        if !queryItems.isEmpty { components?.queryItems = queryItems }
+        guard let url = components?.url else { throw WhoopError.invalidAuthURL }
+        return try await getJSON(url: url, token: token, context: context)
+    }
+
     private func getJSON<T: Decodable>(url: URL, token: String, context: String) async throws -> T {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"

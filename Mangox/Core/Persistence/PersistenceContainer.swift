@@ -28,6 +28,7 @@ enum PersistenceContainer {
             AIGeneratedPlan.self,
             FitnessSettingsSnapshot.self,
             TrainingPlanProgress.self,
+            LoggedActivityRecord.self,
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: inMemory)
         return try ModelContainer(for: schema, configurations: [config])

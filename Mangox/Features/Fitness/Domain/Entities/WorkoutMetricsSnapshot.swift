@@ -35,6 +35,14 @@ struct WorkoutMetricsSnapshot: Sendable {
         self.sortedPowers = sorted.map { $0.power }
     }
 
+    /// Sendable snapshot of a logged (non-cycling) activity contributing TSS to PMC.
+    /// TSS is estimated via `LoggedActivityTSSEstimator` on the main thread before
+    /// crossing actor boundaries, so background PMC rebuilds stay pure.
+    struct LoggedActivitySnapshot: Sendable {
+        let startDate: Date
+        let tss: Double
+    }
+
     /// Up to `limit` recent rides in the window that qualify for the power curve (each pays a sample sort).
     static func powerCurveCandidates(
         from workouts: [Workout],

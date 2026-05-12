@@ -51,28 +51,38 @@ final class FitnessViewModel {
 
     func schedulePMCRebuild(
         pmcWorkouts: [WorkoutMetricsSnapshot],
-        powerCurveWorkouts: [WorkoutMetricsSnapshot]
+        powerCurveWorkouts: [WorkoutMetricsSnapshot],
+        loggedActivities: [WorkoutMetricsSnapshot.LoggedActivitySnapshot] = []
     ) {
-        if pmcWorkouts.isEmpty || pmcData.isEmpty {
+        if (pmcWorkouts.isEmpty && loggedActivities.isEmpty) || pmcData.isEmpty {
             pmcRebuildTask?.cancel()
-            rebuildPMC(pmcWorkouts: pmcWorkouts, powerCurveWorkouts: powerCurveWorkouts)
+            rebuildPMC(
+                pmcWorkouts: pmcWorkouts,
+                powerCurveWorkouts: powerCurveWorkouts,
+                loggedActivities: loggedActivities
+            )
             return
         }
         pmcRebuildTask?.cancel()
         pmcRebuildTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(64))
             guard !Task.isCancelled else { return }
-            rebuildPMC(pmcWorkouts: pmcWorkouts, powerCurveWorkouts: powerCurveWorkouts)
+            rebuildPMC(
+                pmcWorkouts: pmcWorkouts,
+                powerCurveWorkouts: powerCurveWorkouts,
+                loggedActivities: loggedActivities
+            )
         }
     }
 
     func rebuildPMC(
         pmcWorkouts: [WorkoutMetricsSnapshot],
-        powerCurveWorkouts: [WorkoutMetricsSnapshot]
+        powerCurveWorkouts: [WorkoutMetricsSnapshot],
+        loggedActivities: [WorkoutMetricsSnapshot.LoggedActivitySnapshot] = []
     ) {
         rebuildPowerCurve(from: powerCurveWorkouts)
 
-        guard !pmcWorkouts.isEmpty else {
+        guard !pmcWorkouts.isEmpty || !loggedActivities.isEmpty else {
             pmcData = []
             return
         }
@@ -89,6 +99,11 @@ final class FitnessViewModel {
             let day = cal.startOfDay(for: workout.startDate)
             if day < warmStart || day > today { continue }
             tssByDay[day, default: 0] += workout.tss
+        }
+        for activity in loggedActivities {
+            let day = cal.startOfDay(for: activity.startDate)
+            if day < warmStart || day > today { continue }
+            tssByDay[day, default: 0] += activity.tss
         }
 
         let ctlConstant = 42.0
