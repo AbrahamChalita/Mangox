@@ -55,7 +55,7 @@ struct SettingsView: View {
                             navRow(
                                 icon: "icloud",
                                 iconColor: AppColor.mango,
-                                title: "Cloud Sync",
+                                title: "Cloud Backup",
                                 value: auth.isSignedIn
                                     ? (auth.email ?? "Signed in")
                                     : "Off — local only",

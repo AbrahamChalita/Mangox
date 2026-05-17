@@ -1043,6 +1043,7 @@ private struct SummaryContentView: View {
         .onChange(of: rpeRating) { _, newValue in
             guard workout.rpe != newValue else { return }
             workout.rpe = newValue
+            workout.updatedAt = .now
             try? modelContext.save()
         }
         .accessibilityIdentifier("summary.rpe.card")

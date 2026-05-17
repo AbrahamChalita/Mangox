@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Account & Cloud Sync settings.
+/// Account & cloud backup settings.
 ///
 /// Signed-out: explains local-first, runs the email + OTP sign-in flow.
-/// Signed-in: shows email, last sync, sign-out, manual "Sync now".
+/// Signed-in: shows email, last backup, sign-out, manual "Back Up Now".
 struct AccountView: View {
     @Environment(AuthState.self) private var auth
     @Environment(SyncCoordinator.self) private var sync
@@ -72,14 +72,14 @@ struct AccountView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Cloud Sync")
+            Text("Cloud Backup")
                 .mangoxFont(.label)
                 .foregroundStyle(AppColor.fg3)
                 .tracking(1.1)
 
             Text(auth.isSignedIn
                  ? "Your rides, settings, and coach chats are backed up to your account."
-                 : "Mangox works fully on this device. Sign in to back up your data and use it across devices.")
+                 : "Mangox works fully on this device. Sign in to back up your data to your account.")
                 .mangoxFont(.body)
                 .foregroundStyle(AppColor.fg1)
                 .fixedSize(horizontal: false, vertical: true)
@@ -93,7 +93,7 @@ struct AccountView: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 12) {
                 bullet(icon: "iphone", text: "Everything you've recorded so far is stored on this device.")
-                bullet(icon: "icloud.and.arrow.up", text: "Sign in to sync to the cloud — current data uploads on your next sync.")
+                bullet(icon: "icloud.and.arrow.up", text: "Sign in to back up current data to the cloud on your next upload.")
                 bullet(icon: "lock.shield", text: "Only you can read your data; access is enforced by row-level security.")
             }
             .padding(.horizontal, MangoxSpacing.page)
@@ -337,7 +337,7 @@ struct AccountView: View {
                 .frame(width: 28, height: 28)
                 .foregroundStyle(AppColor.mango)
             VStack(alignment: .leading, spacing: 2) {
-                Text(sync.state == .running ? "Syncing…" : "Sync Now")
+                Text(sync.state == .running ? "Backing up…" : "Back Up Now")
                     .mangoxFont(.bodyBold)
                     .foregroundStyle(AppColor.fg1)
                 if case .error(let message) = sync.state {
@@ -354,10 +354,10 @@ struct AccountView: View {
     }
 
     private var lastSyncedSummary: String {
-        guard let last = sync.lastSyncedAt ?? auth.lastSyncedAt else { return "Not yet synced." }
+        guard let last = sync.lastSyncedAt ?? auth.lastSyncedAt else { return "Not yet backed up." }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
-        return "Last synced \(formatter.localizedString(for: last, relativeTo: .now))."
+        return "Last backed up \(formatter.localizedString(for: last, relativeTo: .now))."
     }
 
     // MARK: - Actions

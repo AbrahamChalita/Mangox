@@ -1,6 +1,7 @@
 // App/ContentView.swift
 import CoreLocation
 import MapKit
+import Supabase
 import SwiftData
 import SwiftUI
 
@@ -153,6 +154,11 @@ struct ContentView: View {
             }
         }
         .onOpenURL { url in
+            if isSupabaseAuthCallbackURL(url) {
+                MangoxSupabase.shared?.auth.handle(url)
+                return
+            }
+
             guard isRideLiveActivityURL(url) else { return }
             Task { @MainActor in
                 // Never clear `homePath` here: that pops the in-memory indoor stack and builds a new
@@ -208,6 +214,11 @@ struct ContentView: View {
 
     private func isRideLiveActivityURL(_ url: URL) -> Bool {
         isOutdoorLiveActivityURL(url) || isIndoorLiveActivityURL(url)
+    }
+
+    private func isSupabaseAuthCallbackURL(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "mangox" else { return false }
+        return url.host?.lowercased() == "auth-callback"
     }
 
     private func isOutdoorLiveActivityURL(_ url: URL) -> Bool {

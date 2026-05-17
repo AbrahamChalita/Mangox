@@ -22,7 +22,7 @@ The product rule:
 
 Onboarding copy must say this explicitly. Suggested wording:
 
-> "You can use Mangox without an account. Your rides, settings, and coach chats stay on this device. To back them up, sync across devices, or use cloud features, sign in or create an account in Settings."
+> "You can use Mangox without an account. Your rides, settings, and coach chats stay on this device. To back them up to your account or use cloud features, sign in or create an account in Settings."
 
 Implementation contract:
 
@@ -155,7 +155,7 @@ Mangox/Core/Networking/Supabase/
 ### Sync model
 
 - **Push**: on sign-in, upsert all SwiftData rows by `client_id`. Subsequent edits are queued and flushed on app foreground / network availability.
-- **Pull**: on sign-in to a previously used account, fetch rows newer than `local.updated_at`. Merge by `client_id`; remote `updated_at` wins on conflicts (last-write-wins is fine for this domain — every row is single-user).
+- **Pull**: follow-up work. The current iOS implementation is cloud backup first; true multi-device restore/sync should fetch rows newer than `local.updated_at`, merge by `client_id`, and let remote `updated_at` win on conflicts.
 - **Realtime** (later): subscribe to `workouts`, `chat_messages`, `user_settings` for cross-device live updates.
 
 ### Idempotency
@@ -168,7 +168,7 @@ Add to `Features/Profile/Presentation`:
 
 1. **Account section** (top of Settings):
    - When signed out: "Sync to cloud — Sign in or create account" with a subtitle "Your data stays on this device until you sign in."
-   - When signed in: shows email, "Last synced …", "Sign out", "Delete cloud data".
+   - When signed in: shows email, "Last backed up …", "Sign out", "Delete cloud data".
 2. **Onboarding final step**: a clear screen explaining cloud-optional behavior with two CTAs — `Skip — keep on device` (primary) and `Create account` (secondary).
 
 ## Updating the schema

@@ -11,6 +11,7 @@ nonisolated let minimumValidWorkoutSeconds: Int = 60
 final class Workout {
     @Attribute(.unique) var id: UUID
     var startDate: Date
+    var updatedAt: Date = Date.now
     var endDate: Date?
     var duration: TimeInterval = 0          // active seconds only (excludes pauses)
     var distance: Double = 0                // meters
@@ -76,6 +77,7 @@ final class Workout {
     init(startDate: Date = .now, planDayID: String? = nil, planID: String? = nil) {
         self.id = UUID()
         self.startDate = startDate
+        self.updatedAt = startDate
         self.planDayID = planDayID
         self.planID = planID
     }

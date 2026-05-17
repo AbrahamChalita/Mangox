@@ -225,7 +225,7 @@ final class StravaService: StravaServiceProtocol {
         var errorDescription: String? {
             switch self {
             case .notConfigured:
-                return "Strava is not configured. Add STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET in build settings."
+                return "Strava uploads require server-side OAuth token exchange before this build can connect."
             case .invalidAuthURL:
                 return "Unable to build Strava authorization URL."
             case .userCancelled:
@@ -315,7 +315,7 @@ final class StravaService: StravaServiceProtocol {
 
     init() {
         self.clientID = Self.infoValue(for: "STRAVA_CLIENT_ID")
-        self.clientSecret = Self.infoValue(for: "STRAVA_CLIENT_SECRET")
+        self.clientSecret = ""
         self.redirectURIString = Self.infoValue(for: "STRAVA_REDIRECT_URI", fallback: "mangox://localhost/strava-auth")
         self.urlSession = Self.makeSession()
         restoreSession()

@@ -79,6 +79,7 @@ final class WorkoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol {
         workout.importFormat = payload.format
         workout.notes = "Imported from \(payload.format.rawValue.uppercased()) · \(payload.fileName)"
         workout.sampleCount = payload.samples.count
+        workout.updatedAt = .now
 
         let powerSamples = payload.samples.map(\.power).filter { $0 > 0 }
         if !powerSamples.isEmpty {

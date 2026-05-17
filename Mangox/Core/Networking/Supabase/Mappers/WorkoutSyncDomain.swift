@@ -5,9 +5,8 @@ import SwiftData
 /// Syncs completed `Workout` rows together with their `samples` and `laps`.
 ///
 /// Push strategy: track a per-domain "last pushed up to" timestamp in
-/// UserDefaults. On each sync, fetch SwiftData rows whose end_date (fallback
-/// start_date) exceeds the cursor, upsert them via Postgrest, then advance
-/// the cursor.
+/// UserDefaults. On each sync, fetch SwiftData rows whose local updatedAt
+/// exceeds the cursor, upsert them via Postgrest, then advance the cursor.
 struct WorkoutSyncDomain: SupabaseSyncDomain {
     let name = "workouts"
 
@@ -19,8 +18,8 @@ struct WorkoutSyncDomain: SupabaseSyncDomain {
         let cursor = UserDefaults.standard.object(forKey: Self.cursorKey) as? Date ?? .distantPast
 
         let descriptor = FetchDescriptor<Workout>(
-            predicate: #Predicate { $0.startDate > cursor },
-            sortBy: [SortDescriptor(\.startDate, order: .forward)]
+            predicate: #Predicate { $0.updatedAt > cursor },
+            sortBy: [SortDescriptor(\.updatedAt, order: .forward)]
         )
         let workouts = try context.fetch(descriptor)
         guard !workouts.isEmpty else { return }
@@ -36,8 +35,7 @@ struct WorkoutSyncDomain: SupabaseSyncDomain {
             try await pushLaps(workout: workout, workoutId: workoutId, userId: userId, client: client)
             try await pushSamples(workout: workout, workoutId: workoutId, userId: userId, client: client)
 
-            let candidate = workout.endDate ?? workout.startDate
-            if candidate > newCursor { newCursor = candidate }
+            if workout.updatedAt > newCursor { newCursor = workout.updatedAt }
         }
 
         UserDefaults.standard.set(newCursor, forKey: Self.cursorKey)
@@ -100,6 +98,7 @@ private struct WorkoutRow: Codable, Sendable {
     let user_id: String
     let client_id: String
     let start_date: Date
+    let updated_at: Date
     let end_date: Date?
     let duration_seconds: Int
     let distance_meters: Double
@@ -131,6 +130,7 @@ private struct WorkoutRow: Codable, Sendable {
         self.user_id = userId.uuidString
         self.client_id = workout.id.uuidString
         self.start_date = workout.startDate
+        self.updated_at = workout.updatedAt
         self.end_date = workout.endDate
         self.duration_seconds = Int(workout.duration)
         self.distance_meters = workout.distance

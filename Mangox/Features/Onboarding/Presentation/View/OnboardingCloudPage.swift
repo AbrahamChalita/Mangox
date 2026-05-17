@@ -52,7 +52,7 @@ struct OnboardingCloudPage: View {
                             .foregroundStyle(AppColor.fg0)
                             .multilineTextAlignment(.center)
 
-                        Text("Mangox works fully on this device — nothing leaves your phone unless you sign in. You can always turn this on later in Settings → Account.")
+                        Text("Mangox works fully on this device — nothing leaves your phone unless you sign in. You can turn cloud backup on later in Settings → Account.")
                             .font(.body)
                             .foregroundStyle(AppColor.fg2)
                             .multilineTextAlignment(.center)
@@ -90,7 +90,7 @@ struct OnboardingCloudPage: View {
             VStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 12) {
                     bullet(icon: "iphone", text: "Local-only by default — no account needed.")
-                    bullet(icon: "icloud.and.arrow.up", text: "Sign in to back up rides, settings, and chats.")
+                    bullet(icon: "icloud.and.arrow.up", text: "Sign in to back up rides, settings, and chats to your account.")
                     bullet(icon: "lock.shield", text: "Only you can access your data.")
                 }
                 .padding(.horizontal, 36)

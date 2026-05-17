@@ -20,14 +20,10 @@
 	<string>$(USER_DATA_KEY)</string>
 	<key>STRAVA_CLIENT_ID</key>
 	<string>$(STRAVA_CLIENT_ID)</string>
-	<key>STRAVA_CLIENT_SECRET</key>
-	<string>$(STRAVA_CLIENT_SECRET)</string>
 	<key>STRAVA_REDIRECT_URI</key>
 	<string>$(STRAVA_REDIRECT_URI)</string>
 	<key>WHOOP_CLIENT_ID</key>
 	<string>$(WHOOP_CLIENT_ID)</string>
-	<key>WHOOP_CLIENT_SECRET</key>
-	<string>$(WHOOP_CLIENT_SECRET)</string>
 	<key>WHOOP_REDIRECT_URI</key>
 	<string>$(WHOOP_REDIRECT_URI)</string>
 	<key>SUPABASE_URL_HOST</key>

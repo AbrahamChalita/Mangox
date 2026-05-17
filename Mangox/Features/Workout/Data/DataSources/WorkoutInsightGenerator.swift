@@ -323,6 +323,7 @@ extension WorkoutSummaryOnDeviceInsight {
                 powerZoneLine: powerZoneLine,
                 ftpWatts: ftpWatts
             )
+            workout.updatedAt = .now
             try? modelContext.save()
             return
         }
@@ -350,6 +351,7 @@ extension WorkoutSummaryOnDeviceInsight {
             let title = response.content.title.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty else { return }
             workout.smartTitle = title
+            workout.updatedAt = .now
             try? modelContext.save()
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "smart_title")
         } catch {
@@ -360,6 +362,7 @@ extension WorkoutSummaryOnDeviceInsight {
                     powerZoneLine: powerZoneLine,
                     ftpWatts: ftpWatts
                 )
+                workout.updatedAt = .now
                 try? modelContext.save()
             }
         }

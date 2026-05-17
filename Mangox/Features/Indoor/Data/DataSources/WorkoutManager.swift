@@ -617,6 +617,7 @@ final class WorkoutManager {
         state = .finished
         workout?.status = .completed
         workout?.endDate = Date()
+        workout?.updatedAt = .now
 
         // Release trainer control on workout end
         releaseTrainerControl()
@@ -1397,6 +1398,7 @@ final class WorkoutManager {
                 endDistance: workoutStartDistance + workoutDistance
             )
         }
+        workout.updatedAt = .now
     }
 
     /// Computes positive elevation gain over a distance range by sampling the GPX elevation

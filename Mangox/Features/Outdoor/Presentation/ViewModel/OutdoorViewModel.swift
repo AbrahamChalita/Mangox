@@ -641,6 +641,7 @@ final class OutdoorViewModel {
         workout.savedRouteName = rideDraft.savedRouteName
         workout.routeDestinationSummary = rideDraft.routeDestinationSummary
         workout.notes = rideDraft.notes
+        workout.updatedAt = .now
 
         var splits: [LapSplit] = []
         for lapDraft in rideDraft.lapDrafts {
@@ -725,6 +726,7 @@ final class OutdoorViewModel {
         workout.savedRouteName = payload.savedRouteName
         workout.routeDestinationSummary = payload.routeDestinationSummary
         workout.notes = payload.notes
+        workout.updatedAt = .now
 
         var splits: [LapSplit] = []
         for lap in payload.laps {

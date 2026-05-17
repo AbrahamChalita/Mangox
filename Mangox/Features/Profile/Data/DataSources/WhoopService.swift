@@ -33,7 +33,7 @@ final class WhoopService: WhoopServiceProtocol {
         var errorDescription: String? {
             switch self {
             case .notConfigured:
-                return "WHOOP is not configured. Add WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET in build settings and register the redirect URL in the WHOOP Developer Dashboard."
+                return "WHOOP requires server-side OAuth token exchange before this build can connect."
             case .invalidAuthURL:
                 return "Unable to build WHOOP authorization URL."
             case .userCancelled:
@@ -163,7 +163,7 @@ final class WhoopService: WhoopServiceProtocol {
 
     init() {
         self.clientID = Self.infoValue(for: "WHOOP_CLIENT_ID")
-        self.clientSecret = Self.infoValue(for: "WHOOP_CLIENT_SECRET")
+        self.clientSecret = ""
         self.redirectURIString = Self.infoValue(
             for: "WHOOP_REDIRECT_URI",
             fallback: "mangox://localhost/whoop-auth"
