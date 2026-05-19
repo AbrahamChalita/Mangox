@@ -22,6 +22,7 @@ final class HealthKitManager: HealthKitServiceProtocol {
     var maxHeartRate: Int? = nil              // bpm — from workouts or age-estimated
     var dateOfBirth: DateComponents? = nil
     var vo2Max: Double? = nil                 // mL/kg/min
+    var healthReadinessSnapshot: HealthReadinessAnalytics.Snapshot? = nil
     var lastError: String? = nil
 
     /// Last failure when saving a completed ride to Health (separate from general `lastError`).
@@ -58,6 +59,7 @@ final class HealthKitManager: HealthKitServiceProtocol {
     private static let restingHRKey = "healthkit_resting_hr"
     private static let maxHRKey = "healthkit_max_hr"
     private static let vo2MaxKey = "healthkit_vo2max"
+    private static let readinessSnapshotKey = "healthkit_readiness_snapshot_v1"
     /// User completed the HealthKit permission flow successfully (persists across launches).
     private static let userEnabledKey = "healthkit_user_enabled"
     private static let syncWorkoutsToHealthKey = "healthkit_sync_rides_to_health"
@@ -166,6 +168,18 @@ final class HealthKitManager: HealthKitServiceProtocol {
         if let vo2 = HKQuantityType.quantityType(forIdentifier: .vo2Max) {
             readTypes.insert(vo2)
         }
+        if let hrv = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
+            readTypes.insert(hrv)
+        }
+        if let respiratoryRate = HKQuantityType.quantityType(forIdentifier: .respiratoryRate) {
+            readTypes.insert(respiratoryRate)
+        }
+        if let wristTemperature = HKQuantityType.quantityType(forIdentifier: .appleSleepingWristTemperature) {
+            readTypes.insert(wristTemperature)
+        }
+        if let sleep = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) {
+            readTypes.insert(sleep)
+        }
         if let dob = HKCharacteristicType.characteristicType(forIdentifier: .dateOfBirth) {
             readTypes.insert(dob)
         }
@@ -215,8 +229,9 @@ final class HealthKitManager: HealthKitServiceProtocol {
         async let mhr: Void = fetchMaxHeartRate(store: healthStore)
         async let vo2: Void = fetchVO2Max(store: healthStore)
         async let dob: Void = fetchDateOfBirth(store: healthStore)
+        async let readiness: Void = fetchReadinessSnapshot(store: healthStore)
 
-        _ = await (rhr, mhr, vo2, dob)
+        _ = await (rhr, mhr, vo2, dob, readiness)
     }
 
     // MARK: - Resting Heart Rate
@@ -293,6 +308,159 @@ final class HealthKitManager: HealthKitServiceProtocol {
         }
     }
 
+    // MARK: - Readiness Baseline
+
+    /// Builds a cycling-readiness context from recent HealthKit signals.
+    /// Signals are interpreted against the user's own baseline and stay informational.
+    private func fetchReadinessSnapshot(store: HKHealthStore) async {
+        async let hrv = fetchDailyAverageQuantitySamples(
+            store: store,
+            identifier: .heartRateVariabilitySDNN,
+            unit: .secondUnit(with: .milli),
+            lookbackDays: 45
+        )
+        async let rhr = fetchDailyAverageQuantitySamples(
+            store: store,
+            identifier: .restingHeartRate,
+            unit: HKUnit.count().unitDivided(by: .minute()),
+            lookbackDays: 45
+        )
+        async let respiratoryRate = fetchDailyAverageQuantitySamples(
+            store: store,
+            identifier: .respiratoryRate,
+            unit: HKUnit.count().unitDivided(by: .minute()),
+            lookbackDays: 45
+        )
+        async let wristTemperature = fetchDailyAverageQuantitySamples(
+            store: store,
+            identifier: .appleSleepingWristTemperature,
+            unit: .degreeCelsius(),
+            lookbackDays: 45
+        )
+        async let sleep = fetchDailySleepMinutes(store: store, lookbackDays: 45)
+        let readinessSamples = await (
+            hrv: hrv,
+            rhr: rhr,
+            respiratoryRate: respiratoryRate,
+            wristTemperature: wristTemperature,
+            sleep: sleep
+        )
+
+        var summaries: [HealthReadinessAnalytics.SignalSummary] = []
+        if let summary = HealthReadinessAnalytics.summarize(
+            kind: .hrvSDNN,
+            samples: readinessSamples.hrv,
+            direction: .higherIsBetter
+        ) {
+            summaries.append(summary)
+        }
+        if let summary = HealthReadinessAnalytics.summarize(
+            kind: .restingHeartRate,
+            samples: readinessSamples.rhr,
+            direction: .lowerIsBetter
+        ) {
+            summaries.append(summary)
+        }
+        if let summary = HealthReadinessAnalytics.summarize(
+            kind: .respiratoryRate,
+            samples: readinessSamples.respiratoryRate,
+            direction: .closeToBaseline
+        ) {
+            summaries.append(summary)
+        }
+        if let summary = HealthReadinessAnalytics.summarize(
+            kind: .wristTemperatureCelsius,
+            samples: readinessSamples.wristTemperature,
+            direction: .closeToBaseline
+        ) {
+            summaries.append(summary)
+        }
+        if let summary = HealthReadinessAnalytics.summarize(
+            kind: .sleepMinutes,
+            samples: readinessSamples.sleep,
+            direction: .higherIsBetter
+        ) {
+            summaries.append(summary)
+        }
+
+        persistReadinessSnapshot(HealthReadinessAnalytics.snapshot(summaries: summaries))
+    }
+
+    private func fetchDailyAverageQuantitySamples(
+        store: HKHealthStore,
+        identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        lookbackDays: Int
+    ) async -> [HealthReadinessAnalytics.Sample] {
+        guard let sampleType = HKQuantityType.quantityType(forIdentifier: identifier) else { return [] }
+        let calendar = Calendar.current
+        let start = calendar.date(byAdding: .day, value: -lookbackDays, to: Date()) ?? Date()
+        let datePredicate = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictEndDate)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: sampleType, predicate: datePredicate)],
+            sortDescriptors: [SortDescriptor(\.endDate, order: .forward)],
+            limit: HKObjectQueryNoLimit
+        )
+
+        do {
+            let samples = try await descriptor.result(for: store)
+            var totals: [Date: (sum: Double, count: Int)] = [:]
+            for sample in samples {
+                let value = sample.quantity.doubleValue(for: unit)
+                guard value.isFinite, value > 0 else { continue }
+                let day = calendar.startOfDay(for: sample.endDate)
+                let current = totals[day] ?? (sum: 0.0, count: 0)
+                totals[day] = (current.sum + value, current.count + 1)
+            }
+            return totals.compactMap { day, aggregate in
+                guard aggregate.count > 0 else { return nil }
+                return HealthReadinessAnalytics.Sample(
+                    date: day,
+                    value: aggregate.sum / Double(aggregate.count)
+                )
+            }
+            .sorted { $0.date < $1.date }
+        } catch {
+            lastError = "Readiness \(identifier.rawValue): \(error.localizedDescription)"
+            return []
+        }
+    }
+
+    private func fetchDailySleepMinutes(
+        store: HKHealthStore,
+        lookbackDays: Int
+    ) async -> [HealthReadinessAnalytics.Sample] {
+        guard let sampleType = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) else { return [] }
+        let calendar = Calendar.current
+        let start = calendar.date(byAdding: .day, value: -lookbackDays, to: Date()) ?? Date()
+        let datePredicate = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictEndDate)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.categorySample(type: sampleType, predicate: datePredicate)],
+            sortDescriptors: [SortDescriptor(\.endDate, order: .forward)],
+            limit: HKObjectQueryNoLimit
+        )
+
+        do {
+            let samples = try await descriptor.result(for: store)
+            var minutesByDay: [Date: Double] = [:]
+            for sample in samples {
+                guard let value = HKCategoryValueSleepAnalysis(rawValue: sample.value) else { continue }
+                guard value == .asleepCore || value == .asleepDeep || value == .asleepREM || value == .asleepUnspecified else {
+                    continue
+                }
+                let day = calendar.startOfDay(for: sample.endDate)
+                minutesByDay[day, default: 0] += sample.endDate.timeIntervalSince(sample.startDate) / 60
+            }
+            return minutesByDay.map { day, minutes in
+                HealthReadinessAnalytics.Sample(date: day, value: minutes)
+            }
+            .sorted { $0.date < $1.date }
+        } catch {
+            lastError = "Readiness sleep: \(error.localizedDescription)"
+            return []
+        }
+    }
+
     // MARK: - Date of Birth
 
     /// Reads the user's date of birth from HealthKit characteristics.
@@ -323,6 +491,18 @@ final class HealthKitManager: HealthKitServiceProtocol {
         let cachedVO2 = UserDefaults.standard.double(forKey: Self.vo2MaxKey)
         if cachedVO2 > 0 {
             vo2Max = cachedVO2
+        }
+
+        if let data = UserDefaults.standard.data(forKey: Self.readinessSnapshotKey),
+           let snapshot = try? JSONDecoder().decode(HealthReadinessAnalytics.Snapshot.self, from: data) {
+            healthReadinessSnapshot = snapshot
+        }
+    }
+
+    private func persistReadinessSnapshot(_ snapshot: HealthReadinessAnalytics.Snapshot) {
+        healthReadinessSnapshot = snapshot
+        if let data = try? JSONEncoder().encode(snapshot) {
+            UserDefaults.standard.set(data, forKey: Self.readinessSnapshotKey)
         }
     }
 

@@ -9,6 +9,7 @@ protocol HealthKitServiceProtocol: AnyObject {
     var maxHeartRate: Int? { get }
     var dateOfBirth: DateComponents? { get }
     var vo2Max: Double? { get }
+    var healthReadinessSnapshot: HealthReadinessAnalytics.Snapshot? { get }
     var lastError: String? { get }
     var workoutSyncToHealthLastError: String? { get }
     var syncWorkoutsToAppleHealth: Bool { get set }

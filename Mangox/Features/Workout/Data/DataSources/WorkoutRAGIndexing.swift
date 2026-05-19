@@ -105,6 +105,7 @@ enum WorkoutRAGChunkBuilder {
 
 // MARK: - Index maintenance
 
+@MainActor
 enum WorkoutRAGIndex {
     private static let logger = Logger(subsystem: "com.abchalita.Mangox", category: "WorkoutRAG")
 
@@ -117,17 +118,13 @@ enum WorkoutRAGIndex {
 
     /// Debounced kick from app lifecycle (does not block UI long — processes in batches).
     static func scheduleBackgroundSync() {
-        scheduleBackgroundSync(modelContext: PersistenceContainer.shared.mainContext)
-    }
-
-    /// Debounced kick from app lifecycle (does not block UI long — processes in batches).
-    static func scheduleBackgroundSync(modelContext: ModelContext) {
         let now = Date()
         if let t = lastBackgroundSyncStarted, now.timeIntervalSince(t) < 50 { return }
         lastBackgroundSyncStarted = now
 
         Task(priority: .utility) { @MainActor in
             try? await Task.sleep(for: .seconds(1.5))
+            let modelContext = PersistenceContainer.shared.mainContext
             do {
                 try sync(modelContext: modelContext, maxNewEmbeddings: 80, prune: true)
             } catch {

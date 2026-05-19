@@ -957,7 +957,7 @@ private enum DaySummaryCardDrawing {
         )
 
         // HR zones strip (when available + at least Large)
-        var contentTop = bottomZone.minY
+        let contentTop = bottomZone.minY
         if isLarge, let zones = tile.hrZoneMillis, zones.reduce(0, +) > 0 {
             let stripRect = CGRect(x: bottomZone.minX, y: bottomZone.maxY - 14, width: bottomZone.width, height: 10)
             drawHRZoneStrip(zones: zones, rect: stripRect, cg: cg)

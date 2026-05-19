@@ -7,6 +7,8 @@ struct DaySummaryStudioView: View {
     let date: Date
     let navigationPath: Binding<NavigationPath>
 
+    private let mango = AppColor.mango
+
     @State private var viewModel: DaySummaryStudioViewModel
     @State private var showCustomizeSheet = false
     @State private var renderTask: Task<Void, Never>?
@@ -114,7 +116,7 @@ struct DaySummaryStudioView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                         .shadow(color: .black.opacity(0.45), radius: 18, x: 0, y: 10)
                 } else {
-                    ProgressView().tint(AppColor.mango)
+                    ProgressView().tint(mango)
                 }
 
                 if viewModel.isRendering, viewModel.previewImage != nil {
@@ -192,7 +194,7 @@ struct DaySummaryStudioView: View {
             ) {
                 Image(systemName: hasPhoto ? "photo.fill" : "photo.badge.plus")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(hasPhoto ? AppColor.mango : .white)
+                    .foregroundStyle(hasPhoto ? mango : .white)
                     .frame(width: 44, height: 44)
                     .background(.ultraThinMaterial, in: Circle())
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
@@ -252,7 +254,7 @@ struct DaySummaryStudioView: View {
             } label: {
                 Image(systemName: viewModel.cardOptions.showBrandBadge ? "m.square.fill" : "m.square")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(viewModel.cardOptions.showBrandBadge ? AppColor.mango : .white)
+                    .foregroundStyle(viewModel.cardOptions.showBrandBadge ? mango : .white)
                     .frame(width: 44, height: 44)
                     .background(.ultraThinMaterial, in: Circle())
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
@@ -266,7 +268,7 @@ struct DaySummaryStudioView: View {
     }
 
     private var gradientSwatchColor: Color {
-        let colors: [Color] = [AppColor.mango, AppColor.blue, .green, .purple, .teal]
+        let colors: [Color] = [mango, AppColor.blue, .green, .purple, .teal]
         let idx = min(viewModel.cardOptions.backgroundGradientIndex, colors.count - 1)
         return colors[idx]
     }
@@ -348,11 +350,11 @@ struct DaySummaryStudioView: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(
-                        selected ? AppColor.mango : Color.white.opacity(0.12),
+                        selected ? mango : Color.white.opacity(0.12),
                         lineWidth: selected ? 2 : 1
                     )
             )
-            .shadow(color: selected ? AppColor.mango.opacity(0.35) : .clear, radius: 6, x: 0, y: 2)
+            .shadow(color: selected ? mango.opacity(0.35) : .clear, radius: 6, x: 0, y: 2)
         }
         .buttonStyle(MangoxPressStyle())
         .accessibilityLabel(template.displayName)
@@ -411,7 +413,7 @@ struct DaySummaryStudioView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { showCustomizeSheet = false }
-                        .foregroundStyle(AppColor.mango)
+                        .foregroundStyle(mango)
                 }
             }
         }
@@ -459,11 +461,11 @@ struct DaySummaryStudioView: View {
                                 .frame(width: 34, height: 34)
                                 .overlay(
                                     Circle().strokeBorder(
-                                        selected ? AppColor.mango : Color.white.opacity(0.15),
+                                        selected ? mango : Color.white.opacity(0.15),
                                         lineWidth: selected ? 2.5 : 1
                                     )
                                 )
-                                .shadow(color: selected ? AppColor.mango.opacity(0.4) : .clear, radius: 5)
+                                .shadow(color: selected ? mango.opacity(0.4) : .clear, radius: 5)
                         }
                         .buttonStyle(MangoxPressStyle())
                     }
@@ -472,13 +474,13 @@ struct DaySummaryStudioView: View {
                 photoControls
             }
             Toggle("Show Mangox badge", isOn: optionBinding(\.showBrandBadge))
-                .tint(AppColor.mango)
+                .tint(mango)
         }
     }
 
     private var photoControls: some View {
         let hasPhoto = viewModel.customBackgroundImage != nil
-        let pickerTint = AppColor.mango
+        let pickerTint = mango
         return VStack(spacing: 10) {
             PhotosPicker(
                 selection: $selectedPhotoItem,
@@ -527,7 +529,7 @@ struct DaySummaryStudioView: View {
     }
 
     private var gradientSwatchColors: [Color] {
-        [AppColor.mango, AppColor.blue, .green, .purple, .teal]
+        [mango, AppColor.blue, .green, .purple, .teal]
     }
 
     private var statsSection: some View {
@@ -563,7 +565,7 @@ struct DaySummaryStudioView: View {
                     .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(AppColor.mango)
+                    .foregroundStyle(mango)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 11)
@@ -582,11 +584,11 @@ struct DaySummaryStudioView: View {
     private var privacySection: some View {
         VStack(spacing: 12) {
             Toggle("Hide power / energy", isOn: optionBinding(\.privacyHidePower))
-                .tint(AppColor.mango)
+                .tint(mango)
             Toggle("Hide heart rate", isOn: optionBinding(\.privacyHideHeartRate))
-                .tint(AppColor.mango)
+                .tint(mango)
             Toggle("Hide strength load details", isOn: optionBinding(\.privacyHideStrengthLoad))
-                .tint(AppColor.mango)
+                .tint(mango)
         }
     }
 

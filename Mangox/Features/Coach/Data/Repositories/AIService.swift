@@ -118,6 +118,8 @@ struct UserContext: Encodable {
     let planKeyDaySemanticsHint: String?
     /// Compact multi-line digest of the most recent completed rides for broader training context.
     let recentRideDigest: String?
+    /// Latest ride Pw:HR aerobic drift summary when enough power and HR data exists.
+    let lastRideAerobicDecoupling: String?
     /// Rider body weight in kg when set. Used to compute W/kg context.
     let riderWeightKg: Double?
     /// Rider age in years when birth year is set.
@@ -149,6 +151,8 @@ struct LastRideContext: Encodable {
     /// Human-readable line for the coach; omits misleading 0W/NP when no power meter.
     let summary: String
     let powerDataAvailable: Bool
+    let aerobicDecouplingPercent: Double?
+    let aerobicDecouplingStatus: String?
 }
 
 struct PlanGenerationRequest: Encodable {
@@ -1804,6 +1808,10 @@ final class AIService: AIServiceProtocol, CoachRepository {
             if ride.elevationGain > 1 {
                 summaryParts.append(String(format: "%.0f m elev", ride.elevationGain))
             }
+            let aerobicDecoupling = AerobicDecouplingAnalytics.compute(from: ride)
+            if let aerobicDecoupling {
+                summaryParts.append(aerobicDecoupling.plainLanguageSummary)
+            }
 
             lastRideContext = LastRideContext(
                 date: dateStr,
@@ -1818,7 +1826,9 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 tss: ride.tss,
                 intensityFactor: ride.intensityFactor,
                 summary: summaryParts.joined(separator: " · "),
-                powerDataAvailable: powerOK
+                powerDataAvailable: powerOK,
+                aerobicDecouplingPercent: aerobicDecoupling?.decouplingPercent,
+                aerobicDecouplingStatus: aerobicDecoupling?.status.rawValue
             )
         }
 
@@ -1846,6 +1856,12 @@ final class AIService: AIServiceProtocol, CoachRepository {
             seasonGoalSummary: nil,
             planKeyDaySemanticsHint: planSemanticsHint,
             recentRideDigest: recentRideDigest.isEmpty ? nil : recentRideDigest,
+            lastRideAerobicDecoupling: lastRideContext.flatMap { context in
+                guard let percent = context.aerobicDecouplingPercent,
+                      let status = context.aerobicDecouplingStatus
+                else { return nil }
+                return String(format: "%.1f%% %@", percent, status)
+            },
             riderWeightKg: riderWeight,
             riderAge: riderPrefs.riderAge,
             whoopLinked: whoopLinked,

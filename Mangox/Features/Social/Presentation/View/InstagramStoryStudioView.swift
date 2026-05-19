@@ -10,6 +10,9 @@ struct InstagramStoryStudioView: View {
     let personalRecordNames: [String]
     let onDismiss: () -> Void
     let onShareError: (String) -> Void
+
+    private let mango = AppColor.mango
+
     @State private var viewModel: SocialViewModel
 
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -233,7 +236,7 @@ struct InstagramStoryStudioView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                         .shadow(color: .black.opacity(0.45), radius: 18, x: 0, y: 10)
                 } else if viewModel.isRendering {
-                    ProgressView().tint(AppColor.mango)
+                    ProgressView().tint(mango)
                 } else {
                     VStack(spacing: 8) {
                         Image(systemName: "photo")
@@ -353,7 +356,7 @@ struct InstagramStoryStudioView: View {
             ) {
                 Image(systemName: hasCustomBackgroundImage ? "photo.fill" : "photo.badge.plus")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(hasCustomBackgroundImage ? AppColor.mango : .white)
+                    .foregroundStyle(hasCustomBackgroundImage ? mango : .white)
                     .frame(width: 44, height: 44)
                     .background(.ultraThinMaterial, in: Circle())
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
@@ -417,7 +420,7 @@ struct InstagramStoryStudioView: View {
             } label: {
                 Image(systemName: viewModel.storyOptions.showBrandBadge ? "m.square.fill" : "m.square")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(viewModel.storyOptions.showBrandBadge ? AppColor.mango : .white)
+                    .foregroundStyle(viewModel.storyOptions.showBrandBadge ? mango : .white)
                     .frame(width: 44, height: 44)
                     .background(.ultraThinMaterial, in: Circle())
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
@@ -451,7 +454,7 @@ struct InstagramStoryStudioView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "text.bubble.fill")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(AppColor.mango)
+                            .foregroundStyle(mango)
                         Text(captionPreviewSnippet(caption))
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.white)
@@ -556,11 +559,11 @@ struct InstagramStoryStudioView: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(
-                        selected ? AppColor.mango : Color.white.opacity(0.12),
+                        selected ? mango : Color.white.opacity(0.12),
                         lineWidth: selected ? 2 : 1
                     )
             )
-            .shadow(color: selected ? AppColor.mango.opacity(0.35) : .clear, radius: 6, x: 0, y: 2)
+            .shadow(color: selected ? mango.opacity(0.35) : .clear, radius: 6, x: 0, y: 2)
         }
         .buttonStyle(MangoxPressStyle())
         .accessibilityLabel(template.displayName)
@@ -648,7 +651,7 @@ struct InstagramStoryStudioView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { showCustomizeSheet = false }
-                        .foregroundStyle(AppColor.mango)
+                        .foregroundStyle(mango)
                 }
             }
         }
@@ -685,7 +688,7 @@ struct InstagramStoryStudioView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .tint(AppColor.mango)
+                .tint(mango)
             }
             .onChange(of: viewModel.storyOptions.backgroundSource) { _, _ in
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -718,7 +721,7 @@ struct InstagramStoryStudioView: View {
                                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                                             .strokeBorder(
                                                 viewModel.storyOptions.selectedPreset == preset
-                                                    ? AppColor.mango : Color.clear,
+                                                    ? mango : Color.clear,
                                                 lineWidth: 2
                                             )
                                     )
@@ -729,7 +732,7 @@ struct InstagramStoryStudioView: View {
                                         .multilineTextAlignment(.center)
                                         .foregroundStyle(
                                             viewModel.storyOptions.selectedPreset == preset
-                                                ? AppColor.mango
+                                                ? mango
                                                 : Color.white.opacity(0.50)
                                         )
                                 }
@@ -798,7 +801,7 @@ struct InstagramStoryStudioView: View {
                 }
             }
             .pickerStyle(.menu)
-            .tint(AppColor.mango)
+            .tint(mango)
 
             Picker("Style", selection: optionBinding(\.visualStyle)) {
                 ForEach(InstagramStoryCardOptions.VisualStyle.allCases) { style in
@@ -806,31 +809,31 @@ struct InstagramStoryStudioView: View {
                 }
             }
             .pickerStyle(.menu)
-            .tint(AppColor.mango)
+            .tint(mango)
         }
     }
 
     private var contentControls: some View {
         VStack(spacing: 12) {
             Toggle("Header chip + date", isOn: optionBinding(\.showHeader))
-                .tint(AppColor.mango)
+                .tint(mango)
             Toggle("Hero title", isOn: optionBinding(\.showHeroTitle))
-                .tint(AppColor.mango)
+                .tint(mango)
             Toggle("Route subtitle", isOn: optionBinding(\.showRouteName))
-                .tint(viewModel.storyOptions.showHeroTitle ? AppColor.mango : .gray)
+                .tint(viewModel.storyOptions.showHeroTitle ? mango : .gray)
                 .disabled(!viewModel.storyOptions.showHeroTitle)
             Toggle("Training load highlight", isOn: optionBinding(\.showTrainingLoad))
-                .tint(viewModel.storyOptions.showHeroTitle ? AppColor.mango : .gray)
+                .tint(viewModel.storyOptions.showHeroTitle ? mango : .gray)
                 .disabled(!viewModel.storyOptions.showHeroTitle)
             Toggle("WHOOP recovery on card", isOn: optionBinding(\.showWhoopReadiness))
-                .tint(viewModel.storyOptions.showTrainingLoad ? AppColor.mango : .gray)
+                .tint(viewModel.storyOptions.showTrainingLoad ? mango : .gray)
                 .disabled(!viewModel.storyOptions.showTrainingLoad)
             Toggle("Bottom performance cards", isOn: optionBinding(\.showSummaryCards))
-                .tint(AppColor.mango)
+                .tint(mango)
             Toggle("Quick stats row", isOn: optionBinding(\.showBottomStrip))
-                .tint(AppColor.mango)
+                .tint(mango)
             Toggle("Use Mangox brand badge", isOn: optionBinding(\.showBrandBadge))
-                .tint(AppColor.mango)
+                .tint(mango)
             Text(sessionKindFootnote)
                 .font(.system(size: 11))
                 .foregroundStyle(Color.white.opacity(0.38))
@@ -872,7 +875,7 @@ struct InstagramStoryStudioView: View {
                     .truncationMode(.tail)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(AppColor.mango)
+                    .foregroundStyle(mango)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 11)
@@ -893,20 +896,20 @@ struct InstagramStoryStudioView: View {
     private var privacyControls: some View {
         VStack(spacing: 12) {
             Toggle("Hide route/location name", isOn: optionBinding(\.privacyHideRoute))
-                .tint(AppColor.mango)
+                .tint(mango)
             Toggle("Hide power numbers", isOn: optionBinding(\.privacyHidePower))
-                .tint(AppColor.mango)
+                .tint(mango)
             Toggle("Hide heart rate", isOn: optionBinding(\.privacyHideHeartRate))
-                .tint(AppColor.mango)
+                .tint(mango)
         }
     }
 
     private var sharingControls: some View {
         VStack(spacing: 12) {
             Toggle("Layered share (gradient + movable card)", isOn: optionBinding(\.layeredShare))
-                .tint(AppColor.mango)
+                .tint(mango)
             Toggle("Carousel export (3 slides)", isOn: optionBinding(\.carouselExport))
-                .tint(AppColor.mango)
+                .tint(mango)
         }
     }
 
@@ -941,13 +944,13 @@ struct InstagramStoryStudioView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "apple.intelligence")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(AppColor.mango)
+                            .foregroundStyle(mango)
                         Text("AI caption")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(AppColor.fg1)
                         Spacer()
                         if viewModel.isCaptionGenerating {
-                            ProgressView().scaleEffect(0.7).tint(AppColor.mango)
+                            ProgressView().scaleEffect(0.7).tint(mango)
                         }
                     }
 
@@ -982,7 +985,7 @@ struct InstagramStoryStudioView: View {
                                     systemImage: captionCopied ? "checkmark" : "doc.on.doc"
                                 )
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(captionCopied ? AppColor.mango : .white)
+                                .foregroundStyle(captionCopied ? mango : .white)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
                                 .background(
@@ -1006,11 +1009,11 @@ struct InstagramStoryStudioView: View {
                                 } label: {
                                     Label("Regenerate", systemImage: "sparkles")
                                         .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(AppColor.mango)
+                                        .foregroundStyle(mango)
                                         .frame(maxWidth: .infinity)
                                         .padding(.vertical, 12)
                                         .background(
-                                            Capsule().fill(AppColor.mango.opacity(0.12))
+                                            Capsule().fill(mango.opacity(0.12))
                                         )
                                 }
                                 .buttonStyle(MangoxPressStyle())
@@ -1035,7 +1038,7 @@ struct InstagramStoryStudioView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { showCaptionSheet = false }
-                        .foregroundStyle(AppColor.mango)
+                        .foregroundStyle(mango)
                 }
             }
         }

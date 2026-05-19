@@ -1,6 +1,6 @@
 # Mangox Enterprise Refactor Register
 
-Last updated: 2026-04-10 (Domain extraction and closeout audit complete)
+Last updated: 2026-05-19 (WorkoutRAGIndex Swift 6 Concurrency isolation complete)
 
 ## Baseline
 
@@ -57,7 +57,7 @@ Finish turning Mangox into a feature-first SwiftUI app with:
 
 ### Recommended next order of work
 
-1. **Optional cleanup only**: If desired, follow up on low-priority app-level `ModelContext` helpers such as `WorkoutRAGIndex.scheduleBackgroundSync(modelContext:)` and preview-only `ModelContext(...)` scaffolding.
+1. **Optional cleanup only**: Completed `WorkoutRAGIndex` main-actor isolation and removed thread-crossing `ModelContext` parameters. Preview-only scaffolding is clean.
 2. **DTO split only if needed**: The architectural extraction is complete because no SwiftData `@Model` types remain in Domain. Only add parallel plain-domain mapper types later if a real isolation benefit appears.
 3. **UI polish/perf**: Future work is no longer architecture-blocking; focus can shift to feature polish, performance, and release readiness.
 
@@ -134,7 +134,7 @@ xcodebuild -project Mangox.xcodeproj -scheme Mangox -destination 'generic/platfo
 ### Domain purity gaps
 - No SwiftData `@Model` types remain under `Features/*/Domain`.
 - Targeted presentation `ModelContext` seams from the final audit are closed: `SettingsDetailViews`, `SummaryOnDeviceInsightCard`, `FTPHistoryView`, and the `DashboardView` bootstrap path now call data-layer helpers that own persistence internally.
-- Low-priority residuals are app-level only: `WorkoutRAGIndex.scheduleBackgroundSync(modelContext:)` in `MangoxApp` and preview/test-only `ModelContext(...)` construction.
+- Low-priority residuals are app-level only: `WorkoutRAGIndex.scheduleBackgroundSync()` is now `@MainActor` thread-safe. Preview/test-only `ModelContext(...)` construction is clean.
 
 ## Remaining to 100% checklist
 

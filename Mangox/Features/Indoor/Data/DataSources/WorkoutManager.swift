@@ -764,13 +764,19 @@ final class WorkoutManager {
         )
 
         for sampleElapsed in (previousElapsed + 1)...elapsedSeconds {
+            let packets = packetsBySecond[sampleElapsed] ?? []
             let telemetry = telemetryForSecond(
-                packets: packetsBySecond[sampleElapsed] ?? [],
+                packets: packets,
                 sampleElapsed: sampleElapsed,
                 now: now
             )
             latestTelemetry = telemetry
-            let shouldContinue = applySecondTelemetry(telemetry, sampleElapsed: sampleElapsed)
+            let isSyntheticBackfill = packets.isEmpty && sampleElapsed < elapsedSeconds
+            let shouldContinue = applySecondTelemetry(
+                telemetry,
+                sampleElapsed: sampleElapsed,
+                allowsAutoPause: !isSyntheticBackfill
+            )
             guard shouldContinue else { return }
         }
 
@@ -914,7 +920,11 @@ final class WorkoutManager {
         )
     }
 
-    private func applySecondTelemetry(_ telemetry: SecondTelemetry, sampleElapsed: Int) -> Bool {
+    private func applySecondTelemetry(
+        _ telemetry: SecondTelemetry,
+        sampleElapsed: Int,
+        allowsAutoPause: Bool = true
+    ) -> Bool {
         if let distanceMeters = telemetry.distanceMeters {
             lastRecordedDistance = max(lastRecordedDistance, distanceMeters)
         }
@@ -1039,7 +1049,7 @@ final class WorkoutManager {
         lapElapsedSeconds += 1
 
         let autoPauseAllowed = autoPauseSuppressedUntilElapsed.map { sampleElapsed >= $0 } ?? true
-        if autoPauseAllowed, telemetry.power == 0 && telemetry.displaySpeed < 1.0 {
+        if allowsAutoPause, autoPauseAllowed, telemetry.power == 0 && telemetry.displaySpeed < 1.0 {
             zeroPowerSeconds += 1
             if zeroPowerSeconds >= autoPauseThreshold {
                 flushPendingSamples()
