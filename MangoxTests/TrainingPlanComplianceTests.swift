@@ -103,4 +103,34 @@ struct TrainingPlanComplianceTests {
         #expect(c.keySessionsPlanned == 1)
         #expect(c.keySessionsCompleted == 0)
     }
+
+    @Test func testSundayBoundaryAlignmentOnUSCalendar() {
+        // Mon, April 6 to Sun, April 12, 2026.
+        // April 12 is a Sunday.
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 4
+        components.day = 12 // Sunday
+        let ref = Calendar.current.date(from: components)!
+
+        let range = TrainingPlanCompliance.currentWeekRange(referenceDate: ref)
+
+        // Mon, Apr 6, 2026
+        var expectedStartComponents = DateComponents()
+        expectedStartComponents.year = 2026
+        expectedStartComponents.month = 4
+        expectedStartComponents.day = 6
+        let expectedStart = Calendar.current.date(from: expectedStartComponents)!
+
+        // Mon, Apr 13, 2026
+        var expectedEndComponents = DateComponents()
+        expectedEndComponents.year = 2026
+        expectedEndComponents.month = 4
+        expectedEndComponents.day = 13
+        let expectedEnd = Calendar.current.date(from: expectedEndComponents)!
+
+        let cal = Calendar.current
+        #expect(cal.isDate(range.start, inSameDayAs: expectedStart))
+        #expect(cal.isDate(range.end, inSameDayAs: expectedEnd))
+    }
 }

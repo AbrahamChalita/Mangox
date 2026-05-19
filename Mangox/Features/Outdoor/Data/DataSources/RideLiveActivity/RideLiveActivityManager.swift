@@ -69,7 +69,8 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
             cadenceRpm: cadence,
             hrZoneId: hrZoneId,
             powerZoneId: powerZoneId,
-            useImperial: prefs.isImperial
+            useImperial: prefs.isImperial,
+            isPaused: locationManager.isAutoPaused
         )
 
         let modeLabel: String
@@ -122,7 +123,8 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
             cadenceRpm: cadence,
             hrZoneId: hrZoneId,
             powerZoneId: powerZoneId,
-            useImperial: prefs.isImperial
+            useImperial: prefs.isImperial,
+            isPaused: workoutManager.state == .paused || workoutManager.state == .autoPaused
         )
 
         await publishState(state, modeLabel: "Indoor")

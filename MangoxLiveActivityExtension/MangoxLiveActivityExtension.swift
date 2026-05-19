@@ -6,24 +6,7 @@ import WidgetKit
 
 // MARK: - Must match main app (byte-for-byte same fields)
 
-nonisolated struct MangoxRideAttributes: ActivityAttributes {
-    public struct ContentState: Codable, Hashable {
-        var speedKmh: Double
-        var distanceM: Double
-        var durationSeconds: Double
-        var startedAt: Date
-        var nextTurnShort: String?
-        var heartRateBpm: Int
-        var powerWatts: Int
-        var cadenceRpm: Double
-        var hrZoneId: Int
-        var powerZoneId: Int
-        var useImperial: Bool
-    }
 
-    var rideModeLabel: String
-
-}
 
 // MARK: - Palette (mirrors PowerZone / HeartRateZone ids 1…5)
 
@@ -50,7 +33,18 @@ private enum ZonePalette {
 // MARK: - Formatting
 
 private func liveDurationText(_ state: MangoxRideAttributes.ContentState) -> Text {
-    Text(state.startedAt, style: .timer)
+    if state.isPaused {
+        let totalSeconds = Int(state.durationSeconds)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        if hours > 0 {
+            return Text(String(format: "%02d:%02d:%02d", hours, minutes, seconds))
+        } else {
+            return Text(String(format: "%02d:%02d", minutes, seconds))
+        }
+    }
+    return Text(state.startedAt, style: .timer)
 }
 
 private func formatDistance(_ m: Double, imperial: Bool) -> String {
@@ -199,10 +193,17 @@ private func lockScreenView(context: ActivityViewContext<MangoxRideAttributes>) 
             }
             Text("·")
                 .foregroundStyle(.tertiary)
-            liveDurationText(s)
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .contentTransition(.numericText())
+            HStack(spacing: 4) {
+                if s.isPaused {
+                    Image(systemName: "pause.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Color(red: 240 / 255, green: 195 / 255, blue: 78 / 255))
+                }
+                liveDurationText(s)
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary.opacity(s.isPaused ? 0.8 : 1.0))
+                    .contentTransition(.numericText())
+            }
         }
 
         if let t = s.nextTurnShort, !t.isEmpty {
@@ -340,9 +341,17 @@ private func expandedBottom(context: ActivityViewContext<MangoxRideAttributes>) 
                 .contentTransition(.numericText())
             Text("·")
                 .foregroundStyle(.tertiary)
-            liveDurationText(s)
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .contentTransition(.numericText())
+            HStack(spacing: 4) {
+                if s.isPaused {
+                    Image(systemName: "pause.fill")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Color(red: 240 / 255, green: 195 / 255, blue: 78 / 255))
+                }
+                liveDurationText(s)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary.opacity(s.isPaused ? 0.8 : 1.0))
+                    .contentTransition(.numericText())
+            }
         }
         .font(.caption.weight(.medium))
         .foregroundStyle(.secondary)

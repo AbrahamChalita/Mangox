@@ -57,7 +57,7 @@ enum AerobicDecouplingAnalytics {
             firstEfficiency > 0
         else { return nil }
 
-        let decoupling = ((secondEfficiency / firstEfficiency) - 1) * 100
+        let decoupling = ((firstEfficiency - secondEfficiency) / firstEfficiency) * 100
         return Result(
             decouplingPercent: decoupling,
             firstHalfEfficiency: firstEfficiency,
@@ -80,10 +80,10 @@ enum AerobicDecouplingAnalytics {
 
     private static func efficiency(for samples: [Sample]) -> Double? {
         guard !samples.isEmpty else { return nil }
-        let avgPower = samples.reduce(0.0) { $0 + Double($1.power) } / Double(samples.count)
-        let avgHR = samples.reduce(0.0) { $0 + Double($1.heartRate) } / Double(samples.count)
-        guard avgPower > 0, avgHR > 0 else { return nil }
-        return avgHR / avgPower
+        let sumPower = samples.reduce(0.0) { $0 + Double($1.power) }
+        let sumHR = samples.reduce(0.0) { $0 + Double($1.heartRate) }
+        guard sumPower > 0, sumHR > 0 else { return nil }
+        return sumPower / sumHR
     }
 
     private static func status(for decoupling: Double) -> Status {

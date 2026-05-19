@@ -14,6 +14,13 @@ private enum CoachChatColumnWidthKey: PreferenceKey {
     }
 }
 
+private struct BottomOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 /// Primary coach chat surface: streaming replies and plan-builder entry.
 /// Avoids a root `GeometryReader` so the system keyboard safe area correctly lifts the transcript.
 struct CoachConversationView: View {
@@ -342,6 +349,18 @@ struct CoachConversationView: View {
                     .padding(.bottom, 16)
                     .scrollTargetLayout()
                 }
+
+                Color.clear
+                    .frame(height: 1)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear
+                                .preference(
+                                    key: BottomOffsetPreferenceKey.self,
+                                    value: proxy.frame(in: .named("scroll-container")).maxY
+                                )
+                        }
+                    }
             }
             .frame(
                 maxWidth: .infinity,
@@ -364,6 +383,13 @@ struct CoachConversationView: View {
         .scrollDismissesKeyboard(.interactively)
         .scrollIndicators(.hidden)
         .scrollPosition($scrollPosition)
+        .coordinateSpace(name: "scroll-container")
+        .onPreferenceChange(BottomOffsetPreferenceKey.self) { value in
+            let isAtBottom = value <= transcriptViewportHeight + 60
+            if isAtBottom && !shouldAutoScrollToBottom {
+                shouldAutoScrollToBottom = true
+            }
+        }
         .simultaneousGesture(
             DragGesture(minimumDistance: 1)
                 .onChanged { value in
