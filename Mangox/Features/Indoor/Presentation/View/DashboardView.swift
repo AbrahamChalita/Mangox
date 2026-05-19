@@ -340,23 +340,33 @@ struct DashboardView: View {
                 }
 
                 if isScreenLocked {
-                    screenLockOverlay
+                    ScreenLockOverlay(isScreenLocked: $isScreenLocked)
                         .zIndex(300)
                 }
 
                 if viewModel.showEndConfirmation {
-                    indoorEndWorkoutOverlay
-                        .zIndex(200)
+                    IndoorEndWorkoutOverlay(
+                        onDismiss: { viewModel.dismissEndConfirmation() },
+                        onEndAndSave: { endRide() },
+                        onDiscard: { discardRide() }
+                    )
+                    .zIndex(200)
                 }
 
                 if viewModel.showRideTipsOnboardingPrompt {
-                    rideTipsOnboardingOverlay
-                        .zIndex(201)
+                    RideTipsOnboardingOverlay(
+                        onDecline: { viewModel.applyRideTipsOnboardingDecline(prefs: prefs) },
+                        onConfirm: { viewModel.applyRideTipsOnboardingEnable(prefs: prefs) }
+                    )
+                    .zIndex(201)
                 }
 
                 if let persistenceErrorMessage {
-                    persistenceErrorOverlay(message: persistenceErrorMessage)
-                        .zIndex(202)
+                    PersistenceErrorOverlay(
+                        message: persistenceErrorMessage,
+                        errorMessage: $persistenceErrorMessage
+                    )
+                    .zIndex(202)
                 }
             }
             .overlay {
@@ -669,100 +679,7 @@ struct DashboardView: View {
 
     // MARK: - End / discard (matches outdoor `endDiscardOverlays` chrome)
 
-    private var indoorEndWorkoutOverlay: some View {
-        MangoxConfirmOverlay(
-            title: "End workout?",
-            message:
-                "We’ll open the summary next so you can review power, heart rate, and time — or discard this session with no save.",
-            onDismiss: { viewModel.dismissEndConfirmation() }
-        ) {
-            MangoxConfirmDualButtonRow(
-                cancelTitle: "Cancel",
-                confirmTitle: "End & Save",
-                trailingStyle: .hero,
-                onCancel: { viewModel.dismissEndConfirmation() },
-                onConfirm: { endRide() }
-            )
 
-            Button {
-                discardRide()
-            } label: {
-                Text("Discard without saving")
-                    .mangoxFont(.bodyBold)
-                    .mangoxButtonChrome(.destructive)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var rideTipsOnboardingOverlay: some View {
-        MangoxConfirmOverlay(
-            title: "Try Smart Ride Tips?",
-            message:
-                "Get occasional fueling, cadence, and posture nudges for long indoor rides. You can change this anytime in Settings.",
-            onDismiss: { viewModel.applyRideTipsOnboardingDecline(prefs: prefs) }
-        ) {
-            MangoxConfirmDualButtonRow(
-                cancelTitle: "Not now",
-                confirmTitle: "Enable Essentials",
-                trailingStyle: .hero,
-                onCancel: { viewModel.applyRideTipsOnboardingDecline(prefs: prefs) },
-                onConfirm: { viewModel.applyRideTipsOnboardingEnable(prefs: prefs) }
-            )
-        }
-    }
-
-    private func persistenceErrorOverlay(message: String) -> some View {
-        MangoxConfirmOverlay(
-            title: "Save Failed",
-            message: message,
-            onDismiss: { persistenceErrorMessage = nil }
-        ) {
-            Button {
-                persistenceErrorMessage = nil
-            } label: {
-                Text("OK")
-                    .mangoxButtonChrome(.hero)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var screenLockOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.7)
-                .ignoresSafeArea()
-
-            VStack(spacing: 16) {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 48, weight: .medium))
-                    .foregroundStyle(AppColor.fg2)
-
-                Text("Screen Locked")
-                    .mangoxFont(.title)
-                    .fontWeight(.bold)
-                    .foregroundStyle(AppColor.fg0)
-
-                Text("Tap and hold to unlock")
-                    .mangoxFont(.callout)
-                    .foregroundStyle(AppColor.fg3)
-            }
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 0)
-                .fill(Color.clear)
-                .contentShape(Rectangle())
-                .gesture(
-                    LongPressGesture(minimumDuration: 0.5)
-                        .onEnded { _ in
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                isScreenLocked = false
-                            }
-                        }
-                )
-        )
-        .allowsHitTesting(true)
-    }
 
     // MARK: - Compact Layout (iPhone)
 
