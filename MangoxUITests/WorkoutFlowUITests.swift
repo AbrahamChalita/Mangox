@@ -8,19 +8,22 @@ import XCTest
 /// Tests are designed to run without a real trainer connected.  Where the app
 /// requires a trainer, the test gracefully skips via `guard` so CI stays green
 /// on a plain simulator, and full hardware tests can run on physical devices.
+@MainActor
 final class WorkoutFlowUITests: XCTestCase {
 
     var app: XCUIApplication!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
+        try await super.setUp()
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments = ["UI_TESTING", "--disable-animations"]
         app.launch()
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         app = nil
+        try await super.tearDown()
     }
 
     // MARK: - Connection screen
@@ -323,6 +326,7 @@ final class WorkoutFlowUITests: XCTestCase {
 
 // MARK: - Performance benchmarks
 
+@MainActor
 final class WorkoutDashboardPerformanceTests: XCTestCase {
 
     @MainActor

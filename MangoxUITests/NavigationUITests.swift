@@ -8,11 +8,13 @@ import XCTest
 ///   (iOS 26 TabView uses the label string as the accessibility label).
 /// - Routes that require a trainer connection are marked `.skip` with a note, so the
 ///   CI matrix can optionally enable them with a connected simulator/device.
+@MainActor
 final class NavigationUITests: XCTestCase {
 
     var app: XCUIApplication!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
+        try await super.setUp()
         continueAfterFailure = false
         app = XCUIApplication()
         // Disable animations for faster, more stable tests
@@ -20,8 +22,9 @@ final class NavigationUITests: XCTestCase {
         app.launch()
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         app = nil
+        try await super.tearDown()
     }
 
     // MARK: - Tab switching
@@ -224,6 +227,7 @@ final class NavigationUITests: XCTestCase {
 
 // MARK: - Launch performance
 
+@MainActor
 final class MangoxUITestsLaunchPerformanceTests: XCTestCase {
 
     @MainActor
