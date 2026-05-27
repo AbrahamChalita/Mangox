@@ -40,20 +40,20 @@ struct LaunchScreenView: View {
                 // Loading dots — three bouncing circles
                 LoadingDotsView()
                     .opacity(dotsVisible && !exitPhase ? 1 : 0)
-                    .animation(.easeInOut(duration: 0.3), value: dotsVisible)
-                    .animation(.easeIn(duration: 0.25), value: exitPhase)
+                    .animation(MangoxMotion.standard, value: dotsVisible)
+                    .animation(MangoxMotion.exit, value: exitPhase)
             }
         }
         // Full view fade handles the very final step so the background
         // doesn't flash when the wordmark has already gone transparent.
         .opacity(exitPhase ? 0 : 1)
-        .animation(.easeIn(duration: 0.28), value: exitPhase)
+        .animation(MangoxMotion.exit, value: exitPhase)
         .allowsHitTesting(isVisible)
 
         // MARK: - Entry sequence
         .onAppear {
             // Step 1: wordmark fades + scales up
-            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+            withAnimation(MangoxMotion.sheet) {
                 wordmarkOpacity = 1
                 wordmarkScale = 1.0
             }
@@ -75,7 +75,7 @@ struct LaunchScreenView: View {
             exitPhaseTask = Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(150))
                 guard !Task.isCancelled else { return }
-                withAnimation(.easeIn(duration: 0.35)) {
+                withAnimation(MangoxMotion.exit) {
                     exitPhase = true
                 }
             }

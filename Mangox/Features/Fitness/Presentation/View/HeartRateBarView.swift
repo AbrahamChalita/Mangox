@@ -75,7 +75,7 @@ struct HeartRateBarView: View {
                     .font(HeartRateFontToken.mono(size: 22, weight: .bold))
                     .foregroundStyle(zone.color)
                     .contentTransition(.numericText())
-                    .animation(.easeInOut(duration: 0.3), value: heartRate)
+                    .animation(MangoxMotion.standard, value: heartRate)
                 Text("bpm")
                     .mangoxFont(.label)
                     .foregroundStyle(AppColor.fg3)
@@ -100,7 +100,7 @@ struct HeartRateBarView: View {
                     Capsule()
                         .fill(zone.color)
                         .frame(width: max(0, geo.size.width * min(pct, 1.0)))
-                        .animation(.easeInOut(duration: 0.5), value: heartRate)
+                        .animation(MangoxMotion.smooth, value: heartRate)
                 }
             }
             .frame(width: 72, height: 4)
@@ -167,13 +167,13 @@ struct HeartRateBarView: View {
                     RoundedRectangle(cornerRadius: 2)
                         .fill(zone.color)
                         .frame(width: geo.size.width * min(pct, 1.0), height: 6)
-                        .animation(.easeInOut(duration: 0.5), value: heartRate)
+                        .animation(MangoxMotion.smooth, value: heartRate)
                     Circle()
                         .fill(zone.color)
                         .frame(width: 10, height: 10)
                         .shadow(color: zone.color.opacity(0.6), radius: 4)
                         .offset(x: max(0, geo.size.width * min(pct, 1.0) - 5))
-                        .animation(.easeInOut(duration: 0.5), value: heartRate)
+                        .animation(MangoxMotion.smooth, value: heartRate)
                 }
             }
             .frame(height: 10)

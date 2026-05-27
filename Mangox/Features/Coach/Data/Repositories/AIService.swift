@@ -1078,14 +1078,14 @@ final class AIService: AIServiceProtocol, CoachRepository {
         let userMsg = ChatMessage.user(trimmed)
         do {
             try persistCoachMessage(userMsg, modelContext: modelContext)
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
+            withAnimation(MangoxMotion.sheet) {
                 messages.append(userMsg)
             }
         } catch {
             logger.error("sendMessage user persist failed: \(error)")
             self.error = "Couldn't save your message: \(error.localizedDescription)"
             // Still show it locally so the user sees what they typed.
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
+            withAnimation(MangoxMotion.sheet) {
                 messages.append(userMsg)
             }
         }

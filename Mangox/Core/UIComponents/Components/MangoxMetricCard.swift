@@ -18,7 +18,7 @@ struct MangoxMetricCard: View {
 
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(value)
-                    .font((compact ? MangoxFont.value : MangoxFont.largeValue).value)
+                    .mangoxFontScaled(compact ? .value : .largeValue)
                     .foregroundStyle(valueColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)

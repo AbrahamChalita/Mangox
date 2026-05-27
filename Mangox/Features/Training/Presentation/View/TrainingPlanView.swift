@@ -395,7 +395,7 @@ struct TrainingPlanView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .animation(.easeInOut(duration: 0.2), value: stickyCTAVisible)
+            .animation(MangoxMotion.micro, value: stickyCTAVisible)
         }
         .onAppear { seedExpansion() }
         .onChange(of: viewModel.selectedWeek) { _, _ in seedExpansion() }
@@ -443,7 +443,7 @@ struct TrainingPlanView: View {
                     Rectangle()
                         .fill(AppColor.mango)
                         .frame(width: max(0, geo.size.width * overallProgress), height: 2)
-                        .animation(.easeInOut(duration: accessibilityReduceMotion ? 0 : 0.4), value: overallProgress)
+                        .animation(MangoxMotion.smooth, value: overallProgress)
                 }
             }
             .frame(height: 2)
@@ -617,7 +617,7 @@ struct TrainingPlanView: View {
                             if accessibilityReduceMotion {
                                 viewModel.selectedWeek = week.weekNumber
                             } else {
-                                withAnimation(.easeInOut(duration: 0.2)) {
+                                withAnimation(MangoxMotion.micro) {
                                     viewModel.selectedWeek = week.weekNumber
                                 }
                             }
@@ -741,7 +741,7 @@ struct TrainingPlanView: View {
             ),
             shape: .rounded(MangoxRadius.sharp.rawValue)
         )
-        .animation(.easeInOut(duration: 0.18), value: expandedDayIDs)
+        .animation(MangoxMotion.exit, value: expandedDayIDs)
     }
 
     private func dayCompactRow(day: PlanDay, status: PlanDayStatus, calendarDate: Date?) -> some View {
@@ -873,7 +873,7 @@ struct TrainingPlanView: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(AppColor.fg3)
                     .rotationEffect(.degrees(expandedDayIDs.contains(day.id) ? 180 : 0))
-                    .animation(.easeInOut(duration: 0.18), value: expandedDayIDs)
+                    .animation(MangoxMotion.exit, value: expandedDayIDs)
             }
         }
     }

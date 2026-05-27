@@ -55,7 +55,7 @@ struct GuidedSessionCard: View {
             RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue)
                 .strokeBorder(borderColor, lineWidth: condensed ? 1 : 1.5)
         )
-        .animation(.easeInOut(duration: 0.3), value: session.currentStepIndex)
+        .animation(MangoxMotion.standard, value: session.currentStepIndex)
     }
 
     @ViewBuilder
@@ -94,7 +94,7 @@ struct GuidedSessionCard: View {
                     Capsule()
                         .fill(guidedZoneColor(step.zone))
                         .frame(width: max(0, geo.size.width * session.stepProgress))
-                        .animation(.easeInOut(duration: 0.5), value: session.stepProgress)
+                        .animation(MangoxMotion.smooth, value: session.stepProgress)
                 }
             }
             .frame(height: 4)
@@ -229,7 +229,7 @@ struct GuidedSessionCard: View {
                     .font(DashboardFontToken.mono(size: countdownFontSize, weight: .black))
                     .foregroundStyle(AppColor.fg0)
                     .contentTransition(.numericText())
-                    .animation(.easeInOut(duration: 0.3), value: session.stepSecondsRemaining)
+                    .animation(MangoxMotion.standard, value: session.stepSecondsRemaining)
                     .minimumScaleFactor(0.75)
             }
 
@@ -242,7 +242,7 @@ struct GuidedSessionCard: View {
                     Capsule()
                         .fill(guidedZoneColor(step.zone))
                         .frame(width: max(0, geo.size.width * session.stepProgress))
-                        .animation(.easeInOut(duration: 0.5), value: session.stepProgress)
+                        .animation(MangoxMotion.smooth, value: session.stepProgress)
                 }
             }
             .frame(height: 6)
@@ -255,7 +255,7 @@ struct GuidedSessionCard: View {
                 .foregroundStyle(AppColor.fg1)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .animation(.easeInOut(duration: 0.3), value: session.motivationalMessage)
+                .animation(MangoxMotion.standard, value: session.motivationalMessage)
         }
         .padding(contentPadding)
     }

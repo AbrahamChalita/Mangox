@@ -339,6 +339,7 @@ final class OutdoorViewModel {
     }
 
     func discardRide(using locationManager: LocationServiceProtocol) {
+        HapticManager.shared.workoutEnded()
         locationManager.stopRecording()
         dismissConfirmation()
         resetMapPresentationStateAfterRide()

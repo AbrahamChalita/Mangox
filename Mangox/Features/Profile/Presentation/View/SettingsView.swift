@@ -486,7 +486,7 @@ struct SettingsView: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(value.isEmpty ? title : "\(title), \(value)")
-        .accessibilityHint("Opens \(title) settings")
+        .accessibilityHint(A11yL10n.opensSettingsHint(title))
     }
 
     private func rowContent(

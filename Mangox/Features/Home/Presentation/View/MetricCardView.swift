@@ -21,7 +21,7 @@ struct MetricCardView: View {
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
-        .accessibilityValue("\(value) \(unit)")
+        .accessibilityValue(A11yL10n.metricValueFormat(value, unit))
     }
 }
 

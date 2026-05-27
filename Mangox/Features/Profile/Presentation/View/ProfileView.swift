@@ -69,7 +69,7 @@ struct FitnessZonesProfileCard: View {
                 }
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(MangoxMotion.micro) {
                         isEditingHealthData.toggle()
                     }
                     if isEditingHealthData {
@@ -86,6 +86,7 @@ struct FitnessZonesProfileCard: View {
                     .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(isEditingHealthData ? A11yL10n.saveHealthData : A11yL10n.editHealthData)
             }
 
             HStack(alignment: .top, spacing: 16) {
@@ -144,6 +145,8 @@ struct FitnessZonesProfileCard: View {
                     Spacer(minLength: 8)
                     Stepper("", value: $ftpDraft, in: 100...500, step: 5)
                         .labelsHidden()
+                        .accessibilityLabel(A11yL10n.ftpValue)
+                        .accessibilityValue(A11yL10n.ftpValueFormat(ftpDraft))
                 }
                 HStack(spacing: 8) {
                     Button {
@@ -160,6 +163,7 @@ struct FitnessZonesProfileCard: View {
                             .clipShape(Capsule())
                     }
                     .disabled(!hasFTPChanges)
+                    .accessibilityLabel(A11yL10n.applyFTPFormat(ftpDraft))
 
                     NavigationLink(value: AppRoute.ftpSetup) {
                         HStack(spacing: 4) {
@@ -174,6 +178,7 @@ struct FitnessZonesProfileCard: View {
                         .background(AppColor.orange)
                         .clipShape(Capsule())
                     }
+                    .accessibilityLabel(A11yL10n.takeFTPTest)
 
                     Button {
                         showFTPHistory = true
@@ -191,6 +196,7 @@ struct FitnessZonesProfileCard: View {
                         .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(A11yL10n.ftpTestHistory)
                 }
             }
             .padding(.top, 4)
@@ -223,6 +229,7 @@ struct FitnessZonesProfileCard: View {
                                 .padding(.vertical, 8)
                                 .background(Color.white.opacity(0.04))
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .accessibilityLabel(A11yL10n.manualMaxHeartRate)
                         }
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Resting HR")
@@ -238,6 +245,7 @@ struct FitnessZonesProfileCard: View {
                                 .padding(.vertical, 8)
                                 .background(Color.white.opacity(0.04))
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .accessibilityLabel(A11yL10n.manualRestingHeartRate)
                         }
                     }
 
@@ -256,6 +264,7 @@ struct FitnessZonesProfileCard: View {
                                 .clipShape(Capsule())
                         }
                         .disabled(!hasHRChanges)
+                        .accessibilityLabel(A11yL10n.applyHeartRateOverrides)
                         Button {
                             clearManualOverrides()
                         } label: {
@@ -356,6 +365,8 @@ struct FitnessZonesProfileCard: View {
                 .font(.system(size: 8))
                 .foregroundStyle(.white.opacity(0.2))
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(A11yL10n.metricSourceFormat(label, value, unit, source))
     }
 
     private func syncHealthKitToZones() {
@@ -457,6 +468,7 @@ struct StravaConnectionCard: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(viewModel.stravaIsBusy)
+                .accessibilityLabel(viewModel.stravaConnected ? "Disconnect Strava" : "Connect Strava")
 
                 Text("Account-level setting: ride summaries handle upload details.")
                     .font(.system(size: 10))

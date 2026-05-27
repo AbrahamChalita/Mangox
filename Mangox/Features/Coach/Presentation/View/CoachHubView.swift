@@ -66,10 +66,10 @@ struct CoachHubView: View {
                     }
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(.smooth(duration: 0.28), value: coachViewModel.planConfirmationDraft?.id)
-                .animation(.smooth(duration: 0.28), value: coachViewModel.planSaveCelebration?.planID)
-                .animation(.smooth(duration: 0.28), value: coachViewModel.workoutConfirmationDraft?.id)
-                .animation(.smooth(duration: 0.28), value: coachViewModel.workoutSaveCelebration?.id)
+                .animation(MangoxMotion.banner, value: coachViewModel.planConfirmationDraft?.id)
+                .animation(MangoxMotion.banner, value: coachViewModel.planSaveCelebration?.planID)
+                .animation(MangoxMotion.banner, value: coachViewModel.workoutConfirmationDraft?.id)
+                .animation(MangoxMotion.banner, value: coachViewModel.workoutSaveCelebration?.id)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -115,8 +115,8 @@ struct CoachHubView: View {
             }
             .buttonStyle(MangoxPressStyle())
             .sensoryFeedback(.impact(weight: .light, intensity: 0.85), trigger: chatOpenFeedbackTick)
-            .accessibilityLabel("Chat with your coach")
-            .accessibilityHint("Opens full-screen coach conversation.")
+            .accessibilityLabel(A11yL10n.chatWithCoach)
+            .accessibilityHint(A11yL10n.opensFullScreenCoachHint)
         }
     }
 

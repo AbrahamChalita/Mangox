@@ -75,7 +75,7 @@ struct FTPHistoryView: View {
                     .background(Color.white.opacity(0.06))
                     .clipShape(Circle())
             }
-            .accessibilityLabel("Close")
+            .accessibilityLabel(A11yL10n.close)
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)

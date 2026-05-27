@@ -161,7 +161,7 @@ struct PowerGraphView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(IndoorDashboardL10n.powerGraphTitle), \(IndoorDashboardL10n.powerGraphTimeframe)")
+            .accessibilityLabel(A11yL10n.powerGraphCombinedFormat(IndoorDashboardL10n.powerGraphTitle, IndoorDashboardL10n.powerGraphTimeframe))
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(IndoorDashboardL10n.powerGraphTitle)

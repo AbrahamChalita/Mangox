@@ -319,7 +319,7 @@ struct InstagramStoryStudioView: View {
                 .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
         }
         .buttonStyle(MangoxPressStyle())
-        .accessibilityLabel("Accent color")
+        .accessibilityLabel(A11yL10n.accentColor)
         .accessibilityValue(viewModel.storyOptions.accent.pickerTitle)
     }
 
@@ -382,7 +382,7 @@ struct InstagramStoryStudioView: View {
                 }
                 .buttonStyle(MangoxPressStyle())
                 .transition(.scale.combined(with: .opacity))
-                .accessibilityLabel("Remove background photo")
+                .accessibilityLabel(A11yL10n.removeBackgroundPhoto)
             }
 
             Button {
@@ -410,7 +410,7 @@ struct InstagramStoryStudioView: View {
             }
             .buttonStyle(MangoxPressStyle())
             .disabled(viewModel.isTitleGenerating)
-            .accessibilityLabel("Regenerate story title")
+            .accessibilityLabel(A11yL10n.regenerateStoryTitle)
 
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -426,7 +426,7 @@ struct InstagramStoryStudioView: View {
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
             }
             .buttonStyle(MangoxPressStyle())
-            .accessibilityLabel("Mangox brand badge")
+            .accessibilityLabel(A11yL10n.mangoxBrandBadge)
             .accessibilityValue(viewModel.storyOptions.showBrandBadge ? "Visible" : "Hidden")
         }
     }
@@ -493,7 +493,7 @@ struct InstagramStoryStudioView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity)
-                .animation(.easeInOut(duration: 0.18), value: viewModel.storyOptions.template)
+                .animation(MangoxMotion.exit, value: viewModel.storyOptions.template)
             shareButton
         }
         .padding(.horizontal, 16)
@@ -524,7 +524,7 @@ struct InstagramStoryStudioView: View {
                 proxy.scrollTo(viewModel.storyOptions.template, anchor: .center)
             }
             .onChange(of: viewModel.storyOptions.template) { _, template in
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(MangoxMotion.standard) {
                     proxy.scrollTo(template, anchor: .center)
                 }
             }

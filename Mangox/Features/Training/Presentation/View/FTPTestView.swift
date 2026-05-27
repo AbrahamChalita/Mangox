@@ -105,7 +105,7 @@ struct FTPTestView: View {
                 } label: {
                     Image(systemName: "clock.arrow.circlepath")
                 }
-                .accessibilityLabel("FTP test history")
+                .accessibilityLabel(A11yL10n.ftpTestHistory)
             }
         }
         .alert("End FTP Test?", isPresented: $showEndConfirmation) {
@@ -418,7 +418,7 @@ struct FTPTestView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
         )
-        .animation(.easeInOut(duration: accessibilityReduceMotion ? 0 : 0.3), value: currentZone.id)
+        .animation(MangoxMotion.standard, value: currentZone.id)
 
         // Phase transition warning overlay
         if let warning = manager.pendingPhaseWarning {
@@ -583,6 +583,7 @@ struct FTPTestView: View {
                 }
                 .buttonStyle(MangoxPressStyle())
                 .disabled(!manager.canStart)
+                .accessibilityLabel(A11yL10n.startFTPTestProtocol)
 
             case .running:
                 HStack(spacing: 10) {
@@ -620,6 +621,7 @@ struct FTPTestView: View {
                 }
                 .buttonStyle(MangoxPressStyle())
                 .disabled(manager.estimatedFTP == 0)
+                .accessibilityLabel(A11yL10n.applyEstimatedFTPFormat(manager.estimatedFTP))
 
                 controlButton(label: "Done", systemImage: "house.fill") {
                     navigationPath = NavigationPath()
@@ -712,7 +714,7 @@ struct FTPTestView: View {
         .padding(.vertical, 3)
         .background(color.opacity(0.12))
         .clipShape(Capsule())
-        .animation(.easeInOut(duration: accessibilityReduceMotion ? 0 : 0.3), value: label)
+        .animation(MangoxMotion.standard, value: label)
     }
 
     // MARK: - Trainer Activity Card

@@ -9,6 +9,6 @@ struct MangoxMark: View {
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)
-            .accessibilityLabel("Mangox")
+            .accessibilityLabel(A11yL10n.mangox)
     }
 }

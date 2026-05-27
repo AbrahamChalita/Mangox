@@ -108,6 +108,8 @@ struct LapCardView: View {
             RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue)
                 .strokeBorder(AppColor.hair2, lineWidth: 1)
         )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(lapAccessibilityLabel)
     }
 
     private var compactBody: some View {
@@ -146,6 +148,22 @@ struct LapCardView: View {
             RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue)
                 .strokeBorder(AppColor.hair2, lineWidth: 1)
         )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(lapAccessibilityLabel)
+    }
+
+    private var lapAccessibilityLabel: String {
+        let currentDurationText = formatDuration(currentDuration)
+        if lapNumber > 1 {
+            return A11yL10n.lapWithPreviousFormat(
+                lapNumber,
+                Int(currentAvgPower),
+                currentDurationText,
+                Int(previousAvgPower),
+                formatDuration(previousDuration)
+            )
+        }
+        return A11yL10n.lapCurrentFormat(lapNumber, Int(currentAvgPower), currentDurationText)
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {

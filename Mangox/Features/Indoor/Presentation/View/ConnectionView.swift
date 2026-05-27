@@ -677,7 +677,7 @@ struct ConnectionView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(category), \(title)")
+        .accessibilityLabel(A11yL10n.connectionStatusFormat(category, title))
     }
 
     // MARK: - Ride Mode
@@ -698,7 +698,7 @@ struct ConnectionView: View {
             HStack(spacing: 10) {
                 ForEach(RideLaunchMode.allCases) { mode in
                     Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withAnimation(MangoxMotion.micro) {
                             rideLaunchMode = mode
                         }
                     } label: {
@@ -725,6 +725,8 @@ struct ConnectionView: View {
                         )
                     }
                     .buttonStyle(MangoxPressStyle())
+                    .accessibilityLabel(mode.label)
+                    .accessibilityAddTraits(rideLaunchMode == mode ? .isSelected : [])
                 }
             }
 
@@ -1134,8 +1136,8 @@ struct ConnectionView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(trainer.name), connected Wi-Fi trainer")
-        .accessibilityValue("\(trainer.ipAddress), port \(trainer.port)")
+        .accessibilityLabel(A11yL10n.wifiConnectedFormat(trainer.name))
+        .accessibilityValue(A11yL10n.wifiConnectedValueFormat(trainer.ipAddress, Int(trainer.port)))
     }
 
     private func wifiConnectingRow(name: String) -> some View {
@@ -1157,7 +1159,7 @@ struct ConnectionView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(name), connecting Wi-Fi trainer")
+        .accessibilityLabel(A11yL10n.wifiConnectingFormat(name))
     }
 
     private func wifiTrainerRow(trainer: DiscoveredWiFiTrainer, connectDisabled: Bool) -> some View
@@ -1203,8 +1205,8 @@ struct ConnectionView: View {
         }
         .buttonStyle(.plain)
         .disabled(connectDisabled)
-        .accessibilityLabel("Connect \(trainer.name)")
-        .accessibilityValue("\(trainer.ipAddress), port \(trainer.port)")
+        .accessibilityLabel(A11yL10n.connectTrainerFormat(trainer.name))
+        .accessibilityValue(A11yL10n.connectTrainerValueFormat(trainer.ipAddress, Int(trainer.port)))
         .accessibilityHint(connectDisabled ? "Another trainer is already connected" : "Connect to trainer over Wi-Fi")
     }
 
@@ -1568,13 +1570,13 @@ struct ConnectionView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(device.name), \(typeLabel)")
+        .accessibilityLabel(A11yL10n.bleDeviceFormat(device.name, typeLabel))
         .accessibilityValue(
             isThisConnected
                 ? "Connected"
                 : (isThisConnecting ? "Connecting" : "Not connected")
         )
-        .accessibilityHint("Signal \(signalBars(rssi: device.rssi)) of 4")
+        .accessibilityHint(A11yL10n.signalFormat(signalBars(rssi: device.rssi)))
     }
 
     // MARK: - Custom workout library (.zwo)
@@ -1747,8 +1749,8 @@ struct ConnectionView: View {
                     lineWidth: routeDropTargeted ? 2 : 1
                 )
         )
-        .animation(.easeInOut(duration: 0.2), value: routeDropTargeted)
-        .animation(.easeInOut(duration: 0.35), value: routeService.hasRoute)
+        .animation(MangoxMotion.micro, value: routeDropTargeted)
+        .animation(MangoxMotion.standard, value: routeService.hasRoute)
     }
 
     private var emptyRouteCard: some View {

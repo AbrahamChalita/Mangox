@@ -42,7 +42,7 @@ struct DeviceStatusBadge: View {
                 Capsule().strokeBorder(AppColor.hair2, lineWidth: 0.5)
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: isDataStale)
+        .animation(MangoxMotion.standard, value: isDataStale)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityTitle)
     }

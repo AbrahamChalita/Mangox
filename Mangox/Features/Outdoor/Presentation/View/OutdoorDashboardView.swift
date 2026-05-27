@@ -1771,7 +1771,7 @@ struct OutdoorDashboardView: View {
                     }
                     .buttonStyle(MangoxPressStyle())
                     .contentShape(Circle())
-                    .accessibilityLabel("End ride")
+                    .accessibilityLabel(A11yL10n.endRide)
 
                     Spacer(minLength: 0)
 
@@ -1787,9 +1787,10 @@ struct OutdoorDashboardView: View {
                     }
                     .buttonStyle(MangoxPressStyle())
                     .contentShape(Circle())
-                    .accessibilityLabel("Show map")
+                    .accessibilityLabel(A11yL10n.showMap)
                 } else {
                     Button {
+                        HapticManager.shared.workoutStarted()
                         viewModel.startRide(using: ls)
                     } label: {
                         Text("Start ride")
@@ -1813,7 +1814,7 @@ struct OutdoorDashboardView: View {
                             .mangoxButtonChrome(.icon)
                     }
                     .buttonStyle(MangoxPressStyle())
-                    .accessibilityLabel("Show map")
+                    .accessibilityLabel(A11yL10n.showMap)
                 }
             }
             .padding(.bottom, max(safeBottomInset, 12))
@@ -2060,7 +2061,7 @@ struct OutdoorDashboardView: View {
                         .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .accessibilityLabel("Route")
+                .accessibilityLabel(A11yL10n.route)
 
             Button {
                 mapCameraService.centerMapOnUser()
@@ -2071,7 +2072,7 @@ struct OutdoorDashboardView: View {
                         .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .accessibilityLabel("Center on location")
+                .accessibilityLabel(A11yL10n.centerOnLocation)
             .disabled(ls.currentLocation == nil)
             .opacity(ls.currentLocation == nil ? 0.35 : 1)
 
@@ -2105,7 +2106,7 @@ struct OutdoorDashboardView: View {
                         .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .accessibilityLabel("Drop waypoint at current location")
+                .accessibilityLabel(A11yL10n.dropWaypoint)
                 .disabled(ls.currentLocation == nil)
                 .opacity(ls.currentLocation == nil ? 0.35 : 1)
 
@@ -2119,7 +2120,7 @@ struct OutdoorDashboardView: View {
                             .mangoxButtonChrome(.mapIcon)
                     }
                     .buttonStyle(MangoxPressStyle())
-                    .accessibilityLabel("Clear waypoints")
+                    .accessibilityLabel(A11yL10n.clearWaypoints)
                 }
             }
 
@@ -2133,7 +2134,7 @@ struct OutdoorDashboardView: View {
                         .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .accessibilityLabel("Discard ride")
+                .accessibilityLabel(A11yL10n.discardRide)
 
                 if surface != .bikeComputerDark {
                     Button {
@@ -2143,7 +2144,7 @@ struct OutdoorDashboardView: View {
                             .mangoxButtonChrome(.endIcon)
                     }
                     .buttonStyle(MangoxPressStyle())
-                    .accessibilityLabel("End ride")
+                    .accessibilityLabel(A11yL10n.endRide)
                 }
             }
         }
@@ -2700,7 +2701,7 @@ struct OutdoorDashboardView: View {
                         .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .accessibilityLabel("Route")
+                .accessibilityLabel(A11yL10n.route)
 
                 Button {
                     mapCameraService.centerMapOnUser()
@@ -2711,7 +2712,7 @@ struct OutdoorDashboardView: View {
                         .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .accessibilityLabel("Center on location")
+                .accessibilityLabel(A11yL10n.centerOnLocation)
                 .disabled(ls.currentLocation == nil)
                 .opacity(ls.currentLocation == nil ? 0.35 : 1)
 
@@ -2743,7 +2744,7 @@ struct OutdoorDashboardView: View {
                         .mangoxButtonChrome(.mapIcon)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .accessibilityLabel("Drop waypoint at current location")
+                .accessibilityLabel(A11yL10n.dropWaypoint)
                 .disabled(ls.currentLocation == nil)
                 .opacity(ls.currentLocation == nil ? 0.35 : 1)
 
@@ -2757,7 +2758,7 @@ struct OutdoorDashboardView: View {
                             .mangoxButtonChrome(.mapIcon)
                     }
                     .buttonStyle(MangoxPressStyle())
-                    .accessibilityLabel("Clear waypoints")
+                    .accessibilityLabel(A11yL10n.clearWaypoints)
                 }
 
                 if ls.isRecording {
@@ -2770,7 +2771,7 @@ struct OutdoorDashboardView: View {
                             .mangoxButtonChrome(.mapIcon)
                     }
                     .buttonStyle(MangoxPressStyle())
-                    .accessibilityLabel("Discard ride")
+                    .accessibilityLabel(A11yL10n.discardRide)
 
                     Button {
                         viewModel.presentEndConfirmation()
@@ -2779,7 +2780,7 @@ struct OutdoorDashboardView: View {
                             .mangoxButtonChrome(.endIcon)
                     }
                     .buttonStyle(MangoxPressStyle())
-                    .accessibilityLabel("End ride")
+                    .accessibilityLabel(A11yL10n.endRide)
                 }
             }
         }
@@ -2812,7 +2813,7 @@ struct OutdoorDashboardView: View {
                     .foregroundStyle(AppColor.orange.opacity(0.95))
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Weak GPS signal. Live speed may be unavailable.")
+            .accessibilityLabel(A11yL10n.weakGPS)
         } else {
             inlineGpsBadge(surface: surface)
         }
@@ -2927,7 +2928,7 @@ struct OutdoorDashboardView: View {
                                     .foregroundStyle(AppColor.orange.opacity(0.95))
                             }
                             .accessibilityElement(children: .combine)
-                            .accessibilityLabel("Weak GPS signal. Live speed may be unavailable.")
+                            .accessibilityLabel(A11yL10n.weakGPS)
                         } else {
                             inlineGpsBadge(surface: surface)
                         }
@@ -3708,6 +3709,7 @@ struct OutdoorDashboardView: View {
     }
 
     private func endRide() {
+        HapticManager.shared.workoutEnded()
         ls.stopRecording()
         Task { await viewModel.endLiveActivity() }
         let plannedRouteDistanceMeters =

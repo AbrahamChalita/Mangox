@@ -388,7 +388,7 @@ struct CalendarView: View {
                                             .background(AppColor.mango, in: Capsule())
                                     }
                                     .buttonStyle(.plain)
-                                    .accessibilityLabel("Share all workouts and activities for selected day")
+                                    .accessibilityLabel(A11yL10n.shareAllWorkouts)
                                 }
 
                                 Button {
@@ -411,7 +411,7 @@ struct CalendarView: View {
                                     .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityLabel("\(selectedDayLoggedActivities.count) other activities for selected day")
+                                .accessibilityLabel(A11yL10n.otherActivitiesFormat(selectedDayLoggedActivities.count))
                             }
                             .padding(.horizontal, 20)
 
@@ -502,7 +502,7 @@ struct CalendarView: View {
                     .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(dayActivityCount) other activities for \(day.formatted(date: .abbreviated, time: .omitted))")
+                .accessibilityLabel(A11yL10n.otherActivitiesForDayFormat(dayActivityCount, day.formatted(date: .abbreviated, time: .omitted)))
             }
             if dayTSS > 0 {
                 Text(String(format: "%.0f TSS", dayTSS))
@@ -547,7 +547,7 @@ struct CalendarView: View {
         .frame(maxWidth: .infinity)
         .frame(height: 34)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("View layout")
+        .accessibilityLabel(A11yL10n.viewLayout)
         .accessibilityValue(screenMode.title)
         .accessibilityAdjustableAction { direction in
             switch direction {
@@ -592,7 +592,7 @@ struct CalendarView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(mode.title)
-        .accessibilityHint("Switch workout view")
+        .accessibilityHint(A11yL10n.switchWorkoutViewHint)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -692,7 +692,7 @@ struct CalendarView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(filter.title) — \(count) workouts")
+        .accessibilityLabel(A11yL10n.filterFormat(filter.title, count))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -717,7 +717,7 @@ struct CalendarView: View {
         }
         .buttonStyle(.plain)
         .disabled(isImportingWorkout)
-        .accessibilityLabel("Import workout file")
+        .accessibilityLabel(A11yL10n.importWorkoutFile)
     }
 
     // MARK: - Selected day empty

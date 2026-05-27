@@ -139,7 +139,7 @@ struct CoachConversationView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Close chat")
+                .accessibilityLabel(A11yL10n.closeChat)
 
                 Spacer(minLength: 0)
 
@@ -155,7 +155,7 @@ struct CoachConversationView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(AppColor.fg2)
-                    .accessibilityLabel("Conversations")
+                    .accessibilityLabel(A11yL10n.conversations)
 
                     Button {
                         send(Self.planBuilderSeed)
@@ -171,7 +171,7 @@ struct CoachConversationView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(AppColor.mango)
-                    .accessibilityLabel("Plan builder")
+                    .accessibilityLabel(A11yL10n.planBuilder)
                     .disabled(coachViewModel.isLoading)
 
                     Button {
@@ -185,7 +185,7 @@ struct CoachConversationView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(AppColor.fg2)
-                    .accessibilityLabel("New conversation")
+                    .accessibilityLabel(A11yL10n.newConversation)
                     .disabled(coachViewModel.isLoading)
                 }
             }
@@ -498,11 +498,8 @@ struct CoachConversationView: View {
                     .foregroundStyle(.white.opacity(0.5))
             }
 
-            ForEach(0..<3, id: \.self) { _ in
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.08))
-                    .frame(height: 52)
-            }
+            MangoxChatBubbleSkeleton(isUser: false)
+            MangoxChatBubbleSkeleton(isUser: false)
         }
         .frame(maxWidth: maxW, alignment: .leading)
         .padding(.horizontal, 18)
@@ -647,43 +644,6 @@ struct CoachStreamingSection: View {
     }
 }
 
-private struct CoachErrorBanner: View {
-    let message: String
-    let onDismiss: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.red.opacity(0.85))
-                .padding(.top, 1)
-            Text(message)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.78))
-                .lineLimit(3)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button {
-                onDismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Dismiss error")
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Color.red.opacity(0.10))
-        .overlay(alignment: .top) { Divider().opacity(0.18) }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Error: \(message)")
-    }
-}
-
 struct CoachInputBarWrapper: View {
     @Binding var navigationPath: NavigationPath
     @Binding var chatSheetPresented: Bool
@@ -788,7 +748,7 @@ struct InputBarView: View {
                     .background(AppColor.mango.opacity(0.1))
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint("Opens subscription options.")
+                .accessibilityHint(A11yL10n.opensSubscriptionHint)
                 .transition(
                     accessibilityReduceMotion
                         ? .opacity
@@ -797,8 +757,10 @@ struct InputBarView: View {
             }
 
             if let errorMessage = coachViewModel.error, !errorMessage.isEmpty {
-                CoachErrorBanner(
+                MangoxErrorBanner(
                     message: errorMessage,
+                    severity: .error,
+                    layout: .inlineStrip,
                     onDismiss: { coachViewModel.dismissError() }
                 )
                 .transition(
@@ -832,7 +794,7 @@ struct InputBarView: View {
                 )
                 .focused($inputFocused)
                 .submitLabel(.send)
-                .accessibilityLabel("Message")
+                .accessibilityLabel(A11yL10n.messageInput)
                 .onSubmit { sendAction(inputText) }
 
                 sendButton

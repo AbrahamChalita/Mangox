@@ -140,7 +140,7 @@ struct GoalProgressPill: View {
                         Capsule()
                             .fill(isComplete ? AppColor.success : AppColor.mango)
                             .frame(width: max(4, geo.size.width * min(progress, 1.0)))
-                            .animation(.easeInOut(duration: 0.5), value: progress)
+                            .animation(MangoxMotion.smooth, value: progress)
                     }
                 }
 
@@ -244,7 +244,7 @@ struct GoalProgressPill: View {
                         )
                         .frame(width: fillW)
                         .shadow(color: AppColor.mango.opacity(0.55), radius: 8, x: 0, y: 0)
-                        .animation(.easeInOut(duration: 0.45), value: progress)
+                        .animation(MangoxMotion.smooth, value: progress)
                         .overlay(alignment: .trailing) {
                             if progress > 0.04 && !isComplete {
                                 RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -692,7 +692,7 @@ struct CollapsibleLivePerformanceBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.22)) { expanded.toggle() }
+                withAnimation(MangoxMotion.micro) { expanded.toggle() }
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "chevron.right")
@@ -994,13 +994,13 @@ struct IndoorRideHeartRateCard: View {
                             .fill(tint)
                             .frame(width: max(8, geo.size.width * min(max(pctMax, 0), 1)))
                             .shadow(color: tint.opacity(0.35), radius: 5, x: 0, y: 0)
-                            .animation(.easeInOut(duration: 0.35), value: heartRateBpm)
+                            .animation(MangoxMotion.standard, value: heartRateBpm)
                         Circle()
                             .fill(tint)
                             .frame(width: 10, height: 10)
                             .offset(x: max(0, geo.size.width * min(max(pctMax, 0), 1) - 5))
                             .shadow(color: tint.opacity(0.6), radius: 5, x: 0, y: 0)
-                            .animation(.easeInOut(duration: 0.35), value: heartRateBpm)
+                            .animation(MangoxMotion.standard, value: heartRateBpm)
                     } else {
                         Text(String(localized: "indoor.dashboard.heart_card.waiting_short"))
                             .mangoxFont(.micro)
@@ -1246,7 +1246,7 @@ struct PhonePowerDisplay: View {
             }
         }
         .padding(.vertical, 8)
-        .animation(.easeInOut(duration: 0.25), value: zone.id)
+        .animation(MangoxMotion.standard, value: zone.id)
     }
 }
 
@@ -1290,7 +1290,7 @@ struct ZoneTickedPowerBar: View {
                     .scaleEffect(
                         x: min(Double(watts) / 500.0, 1.0), y: 1, anchor: .leading
                     )
-                    .animation(.easeOut(duration: 0.35), value: watts)
+                    .animation(MangoxMotion.standard, value: watts)
             }
         }
         .frame(height: 5)

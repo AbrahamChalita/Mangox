@@ -95,3 +95,145 @@
 
 /* Trainer */
 "indoor.trainer.route_sim_footer" = "Route simulation appears when a GPX route is loaded.";
+
+/* ────────────────────────────────────────────────────────────────
+   Accessibility strings (A11yL10n)
+   ──────────────────────────────────────────────────────────────── */
+
+/* Coach */
+"coach.a11y.close_chat" = "Close chat";
+"coach.a11y.conversations" = "Conversations";
+"coach.a11y.plan_builder" = "Plan builder";
+"coach.a11y.new_conversation" = "New conversation";
+"coach.a11y.dismiss_error" = "Dismiss error";
+"coach.a11y.error_format" = "Error: %@";
+"coach.a11y.opens_subscription_hint" = "Opens subscription options.";
+"coach.a11y.message_input" = "Message";
+"coach.a11y.your_message" = "Your message";
+"coach.a11y.on_device_answer" = "On-device answer, private on this device";
+"coach.a11y.web_sources_answer" = "Answer used live web sources";
+"coach.a11y.coach" = "Coach";
+"coach.a11y.coach_status_format" = "Coach status: %@";
+"coach.a11y.question_format" = "Question %1$d of %2$d";
+"coach.a11y.coach_typing" = "Coach is typing";
+"coach.a11y.confirm_plan_generation" = "Confirm plan generation for %@";
+"coach.a11y.chat_with_coach" = "Chat with your coach";
+"coach.a11y.opens_full_screen_coach_hint" = "Opens full-screen coach conversation.";
+
+/* Dashboard (Indoor) */
+"dashboard.a11y.distance" = "Distance";
+"dashboard.a11y.distance_value_format" = "%@ %@";
+"dashboard.a11y.heart_rate_zone" = "Heart rate zone %@";
+"dashboard.a11y.dismiss_tip" = "Dismiss tip";
+
+/* Social (Instagram / Day Summary) */
+"social.a11y.accent_color" = "Accent color";
+"social.a11y.remove_background_photo" = "Remove background photo";
+"social.a11y.regenerate_story_title" = "Regenerate story title";
+"social.a11y.mangox_brand_badge" = "Mangox brand badge";
+"social.a11y.cycle_background_color" = "Cycle background color";
+"social.a11y.brand_badge" = "Brand badge";
+
+/* PM Chart */
+"pmchart.a11y.chart_options" = "Chart options";
+"pmchart.a11y.day_range_format" = "%d-day range";
+
+/* Home */
+"home.a11y.next_workout_format" = "Next workout: %@";
+"home.a11y.metric_detail_format" = "%1$@: %2$@, %3$@";
+"home.a11y.recalibrate_ftp" = "Recalibrate FTP";
+"home.a11y.set_ftp" = "Set your FTP";
+"home.a11y.ftp_test_hint" = "Opens FTP test setup, takes about 20 minutes";
+"home.a11y.see_all_workouts" = "See all workouts";
+"home.a11y.no_rides_yet" = "No rides yet. Tap Indoor or Outdoor above to ride. Use the Coach tab for your training plan.";
+
+/* Summary / Workout */
+"workout.a11y.summary_actions" = "Summary actions";
+"workout.a11y.reset_description_template" = "Reset description to generated template";
+"workout.a11y.activity_description" = "Activity description";
+"workout.a11y.activity_description_hint" = "Plain text sent to Strava. Edit freely before uploading.";
+"workout.a11y.activity_title" = "Activity title";
+"workout.a11y.include_duration_hint" = "Regenerates the description template from your ride data.";
+"workout.a11y.metric_stat_format" = "%1$@: %2$@ %3$@";
+"workout.a11y.lap_current_format" = "Lap %1$d, current %2$d watts for %3$@";
+"workout.a11y.lap_with_previous_format" = "Lap %1$d, current %2$d watts for %3$@, previous %4$d watts for %5$@";
+
+/* Training / Calendar */
+"training.a11y.share_all_workouts" = "Share all workouts and activities for selected day";
+"training.a11y.other_activities_format" = "%d other activities for selected day";
+"training.a11y.other_activities_for_day_format" = "%1$d other activities for %2$@";
+"training.a11y.view_layout" = "View layout";
+"training.a11y.switch_workout_view_hint" = "Switch workout view";
+"training.a11y.filter_format" = "%1$@ — %2$d workouts";
+"training.a11y.import_workout_file" = "Import workout file";
+"training.a11y.start_ftp_test_protocol" = "Start FTP test protocol";
+"training.a11y.apply_estimated_ftp_format" = "Apply FTP %d watts";
+
+/* Profile / Settings */
+"profile.a11y.max_heart_rate" = "Max heart rate";
+"profile.a11y.resting_heart_rate" = "Resting heart rate";
+"profile.a11y.outdoor_bike_label" = "Outdoor bike label";
+"profile.a11y.indoor_trainer_label" = "Indoor trainer label";
+"profile.a11y.opens_settings_hint" = "Opens %@ settings";
+"profile.a11y.save_health_data" = "Save health data";
+"profile.a11y.edit_health_data" = "Edit health data";
+"profile.a11y.ftp_value" = "FTP value";
+"profile.a11y.ftp_value_format" = "%d watts";
+"profile.a11y.apply_ftp_format" = "Apply FTP %d watts";
+"profile.a11y.take_ftp_test" = "Take FTP test";
+"profile.a11y.manual_max_heart_rate" = "Manual max heart rate";
+"profile.a11y.manual_resting_heart_rate" = "Manual resting heart rate";
+"profile.a11y.apply_heart_rate_overrides" = "Apply heart rate overrides";
+"profile.a11y.metric_source_format" = "%1$@: %2$@ %3$@, source %4$@";
+
+/* Outdoor Dashboard */
+"outdoor.a11y.end_ride" = "End ride";
+"outdoor.a11y.show_map" = "Show map";
+"outdoor.a11y.route" = "Route";
+"outdoor.a11y.center_on_location" = "Center on location";
+"outdoor.a11y.drop_waypoint" = "Drop waypoint at current location";
+"outdoor.a11y.clear_waypoints" = "Clear waypoints";
+"outdoor.a11y.discard_ride" = "Discard ride";
+"outdoor.a11y.weak_gps" = "Weak GPS signal. Live speed may be unavailable.";
+
+/* Onboarding */
+"onboarding.a11y.page_format" = "Page %1$d of %2$d";
+"onboarding.a11y.weight" = "Weight";
+"onboarding.a11y.weight_value_format" = "%1$d %2$@";
+"onboarding.a11y.display_name" = "Display name";
+
+/* Indoor Connection */
+"indoor.a11y.connection_status_format" = "%1$@, %2$@";
+"indoor.a11y.wifi_connected_format" = "%@, connected Wi-Fi trainer";
+"indoor.a11y.wifi_connected_value_format" = "%1$@, port %2$d";
+"indoor.a11y.wifi_connecting_format" = "%@, connecting Wi-Fi trainer";
+"indoor.a11y.connect_trainer_format" = "Connect %@";
+"indoor.a11y.connect_trainer_value_format" = "%1$@, port %2$d";
+"indoor.a11y.ble_device_format" = "%1$@, %2$@";
+"indoor.a11y.signal_format" = "Signal %d of 4";
+
+/* Training / FTP */
+"training.a11y.ftp_test_history" = "FTP test history";
+"training.a11y.close" = "Close";
+
+/* Metric Card */
+"metric_card.a11y.value_format" = "%@ %@";
+
+/* Power Graph */
+"power_graph.a11y.combined_format" = "%1$@, %2$@";
+
+/* Activity Log */
+"activity_log.a11y.header_format" = "%1$@, %2$@, source %3$@";
+"activity_log.a11y.stat_format" = "%1$@: %2$@";
+"activity_log.a11y.notes_format" = "Notes: %@";
+"activity_log.a11y.view_on_source_format" = "View on %@";
+"activity_log.a11y.edit_activity" = "Edit activity";
+"activity_log.a11y.delete_activity" = "Delete activity";
+"activity_log.a11y.delete_activity_hint" = "Permanently removes this activity";
+
+/* Shared banners */
+"a11y.warning_format" = "Warning: %@";
+"a11y.info_format" = "Info: %@";
+
+/* Brand */
+"brand.a11y.mangox" = "Mangox";

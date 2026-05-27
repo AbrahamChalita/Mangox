@@ -222,7 +222,7 @@ struct DaySummaryStudioView: View {
                 }
                 .buttonStyle(MangoxPressStyle())
                 .transition(.scale.combined(with: .opacity))
-                .accessibilityLabel("Remove background photo")
+                .accessibilityLabel(A11yL10n.removeBackgroundPhoto)
             }
 
             // Gradient scheme cycle (only when on gradient mode)
@@ -242,7 +242,7 @@ struct DaySummaryStudioView: View {
                         .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
                 }
                 .buttonStyle(MangoxPressStyle())
-                .accessibilityLabel("Cycle background color")
+                .accessibilityLabel(A11yL10n.cycleBackgroundColor)
             }
 
             // Brand badge toggle
@@ -260,11 +260,11 @@ struct DaySummaryStudioView: View {
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
             }
             .buttonStyle(MangoxPressStyle())
-            .accessibilityLabel("Brand badge")
+            .accessibilityLabel(A11yL10n.brandBadge)
             .accessibilityValue(viewModel.cardOptions.showBrandBadge ? "Visible" : "Hidden")
         }
-        .animation(.easeInOut(duration: 0.18), value: hasPhoto)
-        .animation(.easeInOut(duration: 0.18), value: viewModel.cardOptions.backgroundSource)
+        .animation(MangoxMotion.exit, value: hasPhoto)
+        .animation(MangoxMotion.exit, value: viewModel.cardOptions.backgroundSource)
     }
 
     private var gradientSwatchColor: Color {
@@ -282,7 +282,7 @@ struct DaySummaryStudioView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(AppColor.fg1)
                 .frame(maxWidth: .infinity)
-                .animation(.easeInOut(duration: 0.18), value: viewModel.cardOptions.template)
+                .animation(MangoxMotion.exit, value: viewModel.cardOptions.template)
             shareButton
         }
         .padding(.horizontal, 16)
@@ -313,7 +313,7 @@ struct DaySummaryStudioView: View {
                 proxy.scrollTo(viewModel.cardOptions.template, anchor: .center)
             }
             .onChange(of: viewModel.cardOptions.template) { _, template in
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(MangoxMotion.standard) {
                     proxy.scrollTo(template, anchor: .center)
                 }
             }

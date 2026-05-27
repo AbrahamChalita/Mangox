@@ -715,7 +715,7 @@ struct DashboardView: View {
         HStack(spacing: 0) {
             ForEach(CompactDashboardPage.allCases) { page in
                 Button {
-                    withAnimation(.easeInOut(duration: 0.22)) {
+                    withAnimation(MangoxMotion.micro) {
                         compactPage = page
                     }
                 } label: {
@@ -908,8 +908,8 @@ struct DashboardView: View {
                 .strokeBorder(AppColor.hair2, lineWidth: 1)
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Distance")
-        .accessibilityValue("\(distance.value) \(distance.unit)")
+        .accessibilityLabel(A11yL10n.distance)
+        .accessibilityValue(A11yL10n.distanceValueFormat(distance.value, distance.unit))
     }
 
     private func compactDetailsPage(isLandscape: Bool) -> some View {
@@ -978,7 +978,7 @@ struct DashboardView: View {
                                 geo.size.width * min(Double(smoothedWatts) / 500.0, 1.0)
                             )
                         )
-                        .animation(.easeOut(duration: 0.3), value: smoothedWatts)
+                        .animation(MangoxMotion.standard, value: smoothedWatts)
                 }
             }
             .frame(height: 5)
@@ -1543,7 +1543,7 @@ struct DashboardView: View {
                         .padding(.vertical, 3)
                         .background(tint.opacity(0.14), in: Capsule())
                         .overlay(Capsule().strokeBorder(tint.opacity(0.28), lineWidth: 1))
-                        .accessibilityLabel("Heart rate zone \(badgeText)")
+                        .accessibilityLabel(A11yL10n.heartRateZone(badgeText))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1588,7 +1588,7 @@ struct DashboardView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Dismiss tip")
+            .accessibilityLabel(A11yL10n.dismissTip)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -1697,7 +1697,7 @@ struct DashboardView: View {
                 Text(GuidedSessionManager.formatCountdown(guidedSession.stepSecondsRemaining))
                     .font(DashboardViewFontToken.mono(size: isUrgent ? (dense ? 16 : 18) : (dense ? 12 : 13), weight: isUrgent ? .bold : .semibold))
                     .foregroundStyle(isUrgent ? AppColor.red : zoneColor)
-                    .animation(.easeInOut(duration: 0.3), value: isUrgent)
+                    .animation(MangoxMotion.standard, value: isUrgent)
             }
 
             Text(step?.label ?? guidedSession.dayTitle)
@@ -1758,7 +1758,7 @@ struct DashboardView: View {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(segmentColor(for: index, currentStepIndex: currentStepIndex, zoneColor: zoneColor))
                             .frame(width: max(1, segmentWidth - 2))
-                            .animation(.easeInOut(duration: 0.3), value: currentStepIndex)
+                            .animation(MangoxMotion.standard, value: currentStepIndex)
                     }
                 }
             }
@@ -2196,7 +2196,7 @@ struct DashboardView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Dismiss tip")
+            .accessibilityLabel(A11yL10n.dismissTip)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -2306,14 +2306,14 @@ struct DashboardView: View {
             AudioServicesPlaySystemSound(1057)
         }
         #endif
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+        withAnimation(MangoxMotion.entrance) {
             viewModel.isMilestoneVisible = true
         }
         milestoneHideTask?.cancel()
         milestoneHideTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.4)) {
+            withAnimation(MangoxMotion.entranceQuick) {
                 viewModel.hideMilestone()
             }
         }

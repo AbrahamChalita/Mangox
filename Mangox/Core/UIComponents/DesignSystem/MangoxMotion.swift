@@ -25,4 +25,6 @@ enum MangoxMotion {
 
     static let highlight = Animation.easeInOut(duration: 0.12)
     static let pulse = Animation.easeInOut(duration: 0.6).repeatForever(autoreverses: true)
+    /// Slow breathing scale used on onboarding permission cards.
+    static let onboardingPulse = Animation.easeInOut(duration: 2.4).repeatForever(autoreverses: true)
 }

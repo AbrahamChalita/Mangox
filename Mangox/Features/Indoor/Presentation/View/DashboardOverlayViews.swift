@@ -33,7 +33,7 @@ struct ScreenLockOverlay: View {
                 .gesture(
                     LongPressGesture(minimumDuration: 0.5)
                         .onEnded { _ in
-                            withAnimation(.easeOut(duration: 0.2)) {
+                            withAnimation(MangoxMotion.micro) {
                                 isScreenLocked = false
                             }
                         }

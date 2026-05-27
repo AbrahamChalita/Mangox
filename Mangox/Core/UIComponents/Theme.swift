@@ -337,7 +337,7 @@ struct MangoxPressStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
             .opacity(configuration.isPressed ? 0.85 : 1.0)
-            .animation(.easeInOut(duration: 0.12), value: configuration.isPressed)
+            .animation(MangoxMotion.press, value: configuration.isPressed)
     }
 }
 

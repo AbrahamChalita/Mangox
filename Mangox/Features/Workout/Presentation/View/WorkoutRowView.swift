@@ -124,6 +124,8 @@ struct WorkoutRowView: View {
                 .stroke(AppColor.hair2, lineWidth: 1)
         )
         .opacity(isValid ? 1.0 : 0.65)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(workoutAccessibilityLabel)
     }
 
     // MARK: - Plan Day Badge
@@ -176,6 +178,20 @@ struct WorkoutRowView: View {
 
     private var formattedDuration: String {
         AppFormat.duration(workout.duration)
+    }
+
+    private var workoutAccessibilityLabel: String {
+        let date = workout.startDate.formatted(date: .abbreviated, time: .shortened)
+        let power = "\(Int(workout.avgPower)) watts \(zone.name)"
+        let dist = String(format: "%.1f kilometers", workout.distance / 1000)
+        let base = "\(date), \(formattedDuration), \(power), \(dist)"
+        if workout.tss > 0 {
+            return "\(base), TSS \(Int(workout.tss))"
+        }
+        if !isValid {
+            return "\(date), \(formattedDuration), too short"
+        }
+        return base
     }
 
     private var tssColor: Color {

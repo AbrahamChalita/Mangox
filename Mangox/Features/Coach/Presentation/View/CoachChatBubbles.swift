@@ -295,7 +295,7 @@ struct CoachUserBubble: View {
             )
             .frame(maxWidth: bubbleMaxWidth, alignment: .trailing)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Your message")
+            .accessibilityLabel(A11yL10n.yourMessage)
             .accessibilityValue(text)
             .contextMenu {
                 Button {
@@ -396,7 +396,7 @@ struct CoachAssistantBubble: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("On-device answer, private on this device")
+                    .accessibilityLabel(A11yL10n.onDeviceAnswer)
                 }
 
                 if message.usedWebSearch {
@@ -411,7 +411,7 @@ struct CoachAssistantBubble: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Answer used live web sources")
+                    .accessibilityLabel(A11yL10n.webSourcesAnswer)
                 }
 
                 if !message.tags.isEmpty {
@@ -478,7 +478,7 @@ struct CoachAssistantBubble: View {
         )
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Coach")
+        .accessibilityLabel(A11yL10n.coach)
         .accessibilityValue(message.content)
         .contextMenu {
             Button {
@@ -575,7 +575,7 @@ struct CoachThinkingDisclosure: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
-                withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() }
+                withAnimation(MangoxMotion.exit) { expanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "brain")
@@ -629,7 +629,7 @@ struct CoachStreamStatusRow: View {
             shape: .rounded(MangoxRadius.sharp.rawValue)
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Coach status: \(text)")
+        .accessibilityLabel(A11yL10n.coachStatusFormat(text))
     }
 }
 
@@ -1115,7 +1115,7 @@ private struct CoachFollowUpBlocksCarousel: View {
                         Capsule()
                             .fill(i == step ? sourceAppearance.accent : Color.white.opacity(0.14))
                             .frame(width: i == step ? 18 : 7, height: 7)
-                            .animation(.easeOut(duration: 0.2), value: step)
+                            .animation(MangoxMotion.micro, value: step)
                     }
                     Spacer(minLength: 0)
                     Text("Step \(min(step + 1, blocks.count)) of \(blocks.count)")
@@ -1123,7 +1123,7 @@ private struct CoachFollowUpBlocksCarousel: View {
                         .foregroundStyle(.white.opacity(0.35))
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Question \(min(step + 1, blocks.count)) of \(blocks.count)")
+                .accessibilityLabel(A11yL10n.questionFormat(min(step + 1, blocks.count), blocks.count))
             }
 
             if hasSubmitted {
@@ -1353,6 +1353,6 @@ struct CoachTypingRow: View {
             if !accessibilityReduceMotion { phase = 1 }
         }
         .onDisappear { phase = 0 }
-        .accessibilityLabel("Coach is typing")
+        .accessibilityLabel(A11yL10n.coachTyping)
     }
 }

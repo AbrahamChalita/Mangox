@@ -145,7 +145,7 @@ struct PowerArcView: View {
             }
             .frame(width: arcSize, height: arcSize)
         }
-        .animation(.easeInOut(duration: 0.3), value: watts)
+        .animation(MangoxMotion.standard, value: watts)
         }
     }
 }

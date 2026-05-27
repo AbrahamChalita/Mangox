@@ -82,6 +82,14 @@ struct LoggedActivityDetailView: View {
         .background(AppColor.bg1)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(AppColor.hair))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            A11yL10n.activityHeaderFormat(
+                activity.displayName,
+                activity.startDate.formatted(date: .long, time: .shortened),
+                LoggedActivityIcon.sourceBadge(for: activity.source).text
+            )
+        )
     }
 
     private func statsGrid(_ activity: LoggedActivity) -> some View {
@@ -104,6 +112,8 @@ struct LoggedActivityDetailView: View {
                     .background(AppColor.bg1)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(AppColor.hair))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(A11yL10n.statFormat(stat.label, stat.value))
                 }
             }
         )
@@ -123,11 +133,13 @@ struct LoggedActivityDetailView: View {
         .background(AppColor.bg1)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(AppColor.hair))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(A11yL10n.notesFormat(activity.notes))
     }
 
     private func sourceCard(_ activity: LoggedActivity) -> some View {
-        HStack {
-            let badge = LoggedActivityIcon.sourceBadge(for: activity.source)
+        let badge = LoggedActivityIcon.sourceBadge(for: activity.source)
+        return HStack {
             Image(systemName: "arrow.up.right.square")
                 .foregroundStyle(badge.color)
             Text("View on \(badge.text)")
@@ -142,6 +154,9 @@ struct LoggedActivityDetailView: View {
         .background(AppColor.bg1)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(AppColor.hair))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(A11yL10n.viewOnSourceFormat(badge.text))
+        .accessibilityAddTraits(.isButton)
     }
 
     private func actionButtons(_ activity: LoggedActivity) -> some View {
@@ -157,6 +172,7 @@ struct LoggedActivityDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(AppColor.hair2))
             }
+            .accessibilityLabel(A11yL10n.editActivity)
 
             Button(role: .destructive) {
                 showDeleteConfirm = true
@@ -168,6 +184,8 @@ struct LoggedActivityDetailView: View {
                     .foregroundStyle(AppColor.red)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
+            .accessibilityLabel(A11yL10n.deleteActivity)
+            .accessibilityHint(A11yL10n.deleteActivityHint)
         }
     }
 

@@ -141,7 +141,7 @@ struct OnboardingView: View {
         if !reduceMotion, viewModel.currentStep == 0 {
             Task { @MainActor in
                 await Task.yield()
-                withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) {
+                withAnimation(MangoxMotion.sheet) {
                     viewModel.welcomeAppeared = true
                 }
             }
@@ -153,7 +153,7 @@ struct OnboardingView: View {
         guard !reduceMotion else { return }
         Task { @MainActor in
             await Task.yield()
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.68)) {
+            withAnimation(MangoxMotion.springy) {
                 viewModel.finishCelebration = true
             }
         }
@@ -172,7 +172,7 @@ struct OnboardingView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Page \(viewModel.currentStep + 1) of \(totalPages)")
+            .accessibilityLabel(A11yL10n.pageFormat(viewModel.currentStep + 1, totalPages))
     }
 
     // MARK: - Action Button
@@ -354,6 +354,8 @@ struct OnboardingView: View {
                             step: weightStep
                         )
                         .tint(AppColor.mango)
+                        .accessibilityLabel(A11yL10n.weight)
+                        .accessibilityValue(A11yL10n.weightValueFormat(Int(displayWeight.rounded()), weightUnit))
 
                         HStack {
                             Text("\(Int(weightRange.lowerBound)) \(weightUnit)")
@@ -488,6 +490,7 @@ struct OnboardingView: View {
                             RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue, style: .continuous)
                                 .strokeBorder(Color.white.opacity(AppOpacity.divider), lineWidth: 1)
                         )
+                        .accessibilityLabel(A11yL10n.displayName)
                         .onChange(of: viewModel.onboardingRiderDisplayName) { _, new in
                             if new.count > 50 {
                                 viewModel.onboardingRiderDisplayName = String(new.prefix(50))
@@ -940,7 +943,7 @@ private struct OnboardingPageView<ExtraContent: View>: View {
             return
         }
         pulseLarge = false
-        withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
+        withAnimation(MangoxMotion.onboardingPulse) {
             pulseLarge = true
         }
     }
@@ -951,7 +954,7 @@ private struct OnboardingPageView<ExtraContent: View>: View {
                 checkPop = true
             } else {
                 checkPop = false
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.62)) {
+                withAnimation(MangoxMotion.bouncy) {
                     checkPop = true
                 }
             }

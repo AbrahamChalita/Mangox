@@ -75,7 +75,7 @@ struct CoachPlansPanel: View {
                     .transition(.opacity)
             }
         }
-        .animation(.smooth, value: destructiveAction)
+        .animation(MangoxMotion.smooth, value: destructiveAction)
         .alert("Can't regenerate", isPresented: $showRegenerateInputsMissing) {
             Button("OK", role: .cancel) {}
         } message: {

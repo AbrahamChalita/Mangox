@@ -114,7 +114,7 @@ struct CoachPlanConfirmBanner: View {
                         .background(AppColor.mango)
                         .foregroundStyle(.black.opacity(0.78))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .animation(.easeInOut(duration: 0.2), value: coachViewModel.planProgress)
+                        .animation(MangoxMotion.micro, value: coachViewModel.planProgress)
                     }
                     .buttonStyle(MangoxPressStyle())
                     .disabled(coachViewModel.generatingPlan)
@@ -143,7 +143,7 @@ struct CoachPlanConfirmBanner: View {
                 )
         )
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Confirm plan generation for \(eventName)")
+        .accessibilityLabel(A11yL10n.confirmPlanGeneration(eventName))
         .onAppear { syncFormFromDraft() }
         .onChange(of: draft.id) { _, _ in syncFormFromDraft() }
     }

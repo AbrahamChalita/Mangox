@@ -206,7 +206,7 @@ struct TrainerControlCard: View {
                     lineWidth: 1
                 )
         )
-        .animation(.easeInOut(duration: 0.3), value: trainerMode.label)
+        .animation(MangoxMotion.standard, value: trainerMode.label)
     }
 
     @ViewBuilder

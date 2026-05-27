@@ -297,7 +297,7 @@ struct SummaryView: View {
                 return
             }
             await prepareSummaryData(force: true)
-            withAnimation(.smooth(duration: 0.5)) {
+            withAnimation(MangoxMotion.smooth) {
                 heroAppeared = true
             }
         }
@@ -1039,7 +1039,7 @@ private struct SummaryContentView: View {
             shape: .rounded(MangoxRadius.sharp.rawValue)
         )
         .sensoryFeedback(.selection, trigger: rpeRating)
-        .animation(.snappy, value: rpeRating)
+        .animation(MangoxMotion.snappy, value: rpeRating)
         .onChange(of: rpeRating) { _, newValue in
             guard workout.rpe != newValue else { return }
             workout.rpe = newValue
@@ -1324,6 +1324,8 @@ private struct SummaryOverviewMetric: View {
             }
         }
         .accessibilityIdentifier(metric.accessibilityIdentifier)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(A11yL10n.metricStatFormat(metric.label, metric.value, metric.unit))
     }
 }
 
@@ -1434,7 +1436,7 @@ private struct SummaryActionMenu: View {
                 .font(.system(size: 18, weight: .semibold))
         }
         .accessibilityIdentifier("summary.action.menu")
-        .accessibilityLabel("Summary actions")
+        .accessibilityLabel(A11yL10n.summaryActions)
     }
 }
 
@@ -2177,7 +2179,7 @@ private struct StravaSheetContentView: View {
                 Button("Reset template", action: onResetDescriptionTemplate)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(AppColor.mango.opacity(0.85))
-                    .accessibilityLabel("Reset description to generated template")
+                    .accessibilityLabel(A11yL10n.resetDescriptionTemplate)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -2190,11 +2192,11 @@ private struct StravaSheetContentView: View {
                     .padding(.vertical, 8)
                     .background(Color.white.opacity(0.04))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .accessibilityLabel("Activity description")
-                    .accessibilityHint("Plain text sent to Strava. Edit freely before uploading.")
+                    .accessibilityLabel(A11yL10n.activityDescription)
+                    .accessibilityHint(A11yL10n.activityDescriptionHint)
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(MangoxMotion.micro) {
                         showDescriptionPreview.toggle()
                     }
                 } label: {
@@ -2319,7 +2321,7 @@ private struct StravaSheetContentView: View {
                 .padding(.vertical, 10)
                 .background(Color.white.opacity(0.04))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
-                .accessibilityLabel("Activity title")
+                .accessibilityLabel(A11yL10n.activityTitle)
         }
 
         Toggle(isOn: $includeDurationInDescription) {
@@ -2334,7 +2336,7 @@ private struct StravaSheetContentView: View {
         }
         .toggleStyle(.switch)
         .tint(AppColor.mango)
-        .accessibilityHint("Regenerates the description template from your ride data.")
+        .accessibilityHint(A11yL10n.includeDurationHint)
 
         Toggle(isOn: $includeDistanceInDescription) {
             VStack(alignment: .leading, spacing: 2) {

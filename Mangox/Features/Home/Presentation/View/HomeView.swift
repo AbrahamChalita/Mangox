@@ -182,6 +182,7 @@ struct HomeView: View {
                     .font(MangoxFont.title.value)
                     .foregroundStyle(textPrimary)
                     .lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
             }
 
             Spacer(minLength: 12)
@@ -327,6 +328,8 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 12)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(A11yL10n.metricDetailFormat(label, value, detail))
     }
 
     private var whoopTrainingStrip: some View {
@@ -437,7 +440,7 @@ struct HomeView: View {
                     .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
                 }
                 .buttonStyle(MangoxPressStyle())
-                .accessibilityLabel("Next workout: \(nw.day.title)")
+                .accessibilityLabel(A11yL10n.nextWorkoutFormat(nw.day.title))
             }
         }
     }
@@ -574,6 +577,8 @@ struct HomeView: View {
             )
         }
         .buttonStyle(MangoxPressStyle())
+        .accessibilityLabel(viewModel.hasSetFTP ? A11yL10n.recalibrateFTP : A11yL10n.setFTP)
+        .accessibilityHint(A11yL10n.ftpTestHint)
     }
 
     // MARK: - Recent Rides
@@ -595,26 +600,17 @@ struct HomeView: View {
                         .mangoxFont(.caption)
                         .foregroundStyle(mango)
                 }
+                .accessibilityLabel(A11yL10n.seeAllWorkouts)
             }
             .padding(.horizontal, 4)
 
             if workouts.isEmpty {
-                // Empty state
-                VStack(spacing: 8) {
-                    Image(systemName: "bicycle")
-                        .font(.system(size: 28))
-                        .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
-                    Text("No rides yet")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(textTertiary)
-                    Text(
-                        "Tap Indoor or Outdoor above to ride. Use the Coach tab for your training plan."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(AppOpacity.textQuaternary))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 30)
+                MangoxEmptyState(
+                    icon: "bicycle",
+                    title: "No rides yet",
+                    message: "Tap Indoor or Outdoor above to ride. Use the Coach tab for your training plan."
+                )
+                .accessibilityLabel(A11yL10n.noRidesYet)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     VStack(spacing: 6) {

@@ -66,7 +66,8 @@ struct PRCelebrationView: View {
         .scaleEffect(appeared ? 1 : 0.9)
         .opacity(appeared ? 1 : 0)
         .onAppear {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+            HapticManager.shared.goalCompleted()
+            withAnimation(MangoxMotion.springy) {
                 appeared = true
             }
         }

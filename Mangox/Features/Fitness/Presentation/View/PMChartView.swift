@@ -303,7 +303,7 @@ struct PMChartView: View {
                 .stroke(status.color.opacity(0.28), lineWidth: 1)
                 .allowsHitTesting(false)
         )
-        .animation(.snappy, value: latest.tsb)
+        .animation(MangoxMotion.snappy, value: latest.tsb)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "Form \(Int(latest.tsb.rounded())), \(status.label). Fitness \(Int(latest.ctl.rounded())), fatigue \(Int(latest.atl.rounded()))."
@@ -329,7 +329,7 @@ struct PMChartView: View {
                         Rectangle()
                             .fill(color)
                             .frame(width: geo.size.width * pct)
-                            .animation(.smooth(duration: 0.4), value: pct)
+                            .animation(MangoxMotion.banner, value: pct)
                     }
                 }
 
@@ -408,7 +408,7 @@ struct PMChartView: View {
         }
         .padding(14)
         .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
-        .animation(.snappy, value: snap.fraction)
+        .animation(MangoxMotion.snappy, value: snap.fraction)
     }
 
     private func adherenceSubline(_ snap: PlanWeekCompliance.Snapshot) -> String {
@@ -423,6 +423,20 @@ struct PMChartView: View {
     }
 
     // MARK: - PMC Chart Card
+
+    private var pmcChartAccessibilitySummary: String {
+        guard let latest = viewModel.pmcData.last else {
+            return "Training load chart, no data"
+        }
+        var parts: [String] = []
+        if viewModel.showCTL { parts.append("Fitness \(Int(latest.ctl.rounded()))") }
+        if viewModel.showATL { parts.append("Fatigue \(Int(latest.atl.rounded()))") }
+        if viewModel.showTSB {
+            let formStatus = latest.tsb >= 0 ? "positive" : "negative"
+            parts.append("Form \(Int(latest.tsb.rounded())) \(formStatus)")
+        }
+        return "Training load chart. \(parts.joined(separator: ", ")). \(viewModel.rangeDays)-day range."
+    }
 
     private var pmcAtFetchCap: Bool { allWorkouts.count >= Self.pmcFetchLimit }
 
@@ -479,7 +493,7 @@ struct PMChartView: View {
                         .contentShape(Rectangle())
                 }
                 .menuOrder(.fixed)
-                .accessibilityLabel("Chart options")
+                .accessibilityLabel(A11yL10n.chartOptions)
                 .popover(isPresented: $showScopeInfo, arrowEdge: .top) {
                     scopeInfoPopover
                 }
@@ -537,7 +551,7 @@ struct PMChartView: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(days)-day range")
+                .accessibilityLabel(A11yL10n.dayRangeFormat(days))
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
@@ -630,7 +644,9 @@ struct PMChartView: View {
                     .foregroundStyle(Color.white.opacity(0.4))
             }
         }
-        .animation(.smooth(duration: 0.35), value: viewModel.pmcData.count)
+        .animation(MangoxMotion.banner, value: viewModel.pmcData.count)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(pmcChartAccessibilitySummary)
     }
 
     private func selectedPMCPoint(for date: Date) -> PMCPoint? {
@@ -804,18 +820,10 @@ struct PMChartView: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "chart.line.uptrend.xyaxis")
-                .font(.system(size: 32))
-                .foregroundStyle(.white.opacity(0.15))
-            Text("Not enough data yet")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.4))
-            Text("Complete a few rides to see your training load trends.")
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.25))
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
+        MangoxEmptyState(
+            icon: "chart.line.uptrend.xyaxis",
+            title: "Not enough data yet",
+            message: "Complete a few rides to see your training load trends."
+        )
     }
 }

@@ -1932,11 +1932,11 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         if !shouldAnimate {
             mapCameraPosition = .camera(camera)
         } else if forcePublish {
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(MangoxMotion.micro) {
                 mapCameraPosition = .camera(camera)
             }
         } else {
-            withAnimation(.easeOut(duration: 0.18)) {
+            withAnimation(MangoxMotion.exit) {
                 mapCameraPosition = .camera(camera)
             }
         }
