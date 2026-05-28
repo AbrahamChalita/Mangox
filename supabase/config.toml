@@ -1,0 +1,6 @@
+# Mangox Supabase project (ref: jvhkplgacbeuksiphgyk)
+# Deploy: supabase link && supabase functions deploy oauth-token-exchange
+
+[functions.oauth-token-exchange]
+# WHOOP/Strava linking must work before the user signs in to Mangox cloud backup.
+verify_jwt = false

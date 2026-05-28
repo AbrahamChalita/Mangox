@@ -7,6 +7,7 @@ enum AppRoute: Hashable {
     case ftpSetup
     case dashboard
     case outdoorDashboard
+    case outdoorPlanRide(planID: String, dayID: String)
     case planDashboard(planID: String, dayID: String)
     /// Indoor guided ride from an imported or saved `CustomWorkoutTemplate` (e.g. ZWO).
     case customWorkoutRide(templateID: UUID)

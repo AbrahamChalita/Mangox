@@ -38,6 +38,17 @@ func appRouteDestination(_ route: AppRoute, path: Binding<NavigationPath>, di: D
             .sensorLiveRouteScope()
             .toolbar(.hidden, for: .navigationBar)
             .toolbar(.hidden, for: .tabBar)
+    case .outdoorPlanRide(let planID, let dayID):
+        OutdoorDashboardView(
+            navigationPath: path,
+            di: di,
+            viewModel: di.makeOutdoorViewModel(),
+            planID: planID,
+            planDayID: dayID
+        )
+            .sensorLiveRouteScope()
+            .toolbar(.hidden, for: .navigationBar)
+            .toolbar(.hidden, for: .tabBar)
     case .planDashboard(let planID, let dayID):
         DashboardView(
             navigationPath: path,

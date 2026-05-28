@@ -2,7 +2,7 @@
 import Foundation
 
 /// Best average power for fixed durations (max over all rides), classic “power curve” buckets.
-enum PowerCurveAnalytics {
+nonisolated enum PowerCurveAnalytics {
     /// Standard durations in seconds (5s … 1h).
     static let standardDurations: [Int] = [5, 15, 30, 60, 120, 300, 480, 1200, 3600]
 

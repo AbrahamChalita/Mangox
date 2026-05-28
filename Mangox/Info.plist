@@ -14,6 +14,8 @@
 	<string>Mangox uses your location during outdoor rides to record GPS tracks and live ride metrics.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Mangox uses motion sensors during outdoor rides to smooth auto-pause and auto-resume when GPS signal is weak.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Mangox uses your photo library to let you choose a profile picture and select custom backgrounds for Instagram story cards.</string>
 	<key>MangoxCoachStaffTier</key>
 	<string>$(MANGOX_COACH_STAFF_TIER)</string>
 	<key>UserDataKey</key>
@@ -31,7 +33,7 @@
 	<key>SUPABASE_PUBLISHABLE_KEY</key>
 	<string>$(SUPABASE_PUBLISHABLE_KEY)</string>
 	<key>FacebookAppID</key>
-	<string>986008587288900</string>
+	<string>$(FACEBOOK_APP_ID)</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

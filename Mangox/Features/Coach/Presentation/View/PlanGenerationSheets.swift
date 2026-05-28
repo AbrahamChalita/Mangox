@@ -371,6 +371,21 @@ struct CoachPlanSuccessBanner: View {
                 }
             }
 
+            if let impact = celebration.forwardImpactSummary, !impact.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Projected race impact")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppColor.mango.opacity(0.9))
+                    Text(impact)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.72))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .background(Color.white.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
             if !celebration.fallbackWeekNumbers.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Retry AI for fallback weeks")
@@ -493,6 +508,16 @@ struct CoachWorkoutConfirmBanner: View {
                 Text(rationale)
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.48))
+            }
+
+            if !draft.validationWarnings.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(draft.validationWarnings.enumerated()), id: \.offset) { _, warning in
+                        Text("• \(warning)")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.45))
+                    }
+                }
             }
 
             VStack(alignment: .leading, spacing: 4) {

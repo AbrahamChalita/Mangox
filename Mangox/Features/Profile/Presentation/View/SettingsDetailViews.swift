@@ -1,4 +1,5 @@
 import PhotosUI
+import SwiftData
 import SwiftUI
 import UIKit
 import UserNotifications
@@ -67,7 +68,7 @@ struct AICoachSettingsView: View {
                     settingsField(
                         title: "Backend URL",
                         text: $baseURLDraft,
-                        placeholder: "https://mangox-backend-production.up.railway.app",
+                        placeholder: MangoxBackendDefaults.productionBaseURL,
                         textContentType: .URL,
                         keyboard: .URL
                     )
@@ -763,7 +764,7 @@ struct StravaSettingsView: View {
                     }
 
                     if !viewModel.stravaIsConfigured {
-                        Text("Strava credentials are not set up in this build.")
+                        Text("Strava linking uses a secure server token exchange. Deploy the oauth-token-exchange Supabase function and set STRAVA_CLIENT_SECRET in project secrets.")
                             .settingsFootnoteMuted()
                     } else {
                         Button {
@@ -866,7 +867,7 @@ struct WhoopSettingsView: View {
                     }
 
                     if !viewModel.whoopIsConfigured {
-                        Text("WHOOP credentials are not set up in this build.")
+                        Text("WHOOP linking uses a secure server token exchange. Deploy the oauth-token-exchange Supabase function and set WHOOP_CLIENT_SECRET in project secrets.")
                             .settingsFootnoteMuted()
                     } else {
                         if viewModel.whoopConnected {
@@ -1587,6 +1588,9 @@ struct GearSettingsView: View {
 struct DataPrivacyNotificationsHubView: View {
     let viewModel: ProfileViewModel
 
+    @Environment(SyncCoordinator.self) private var syncCoordinator
+    @Environment(\.modelContext) private var modelContext
+
     @State private var notifyTomorrow = TrainingNotificationsPreferences.tomorrowSessionReminder
     @State private var notifyHour = TrainingNotificationsPreferences.tomorrowReminderHour
     @State private var notifyMissed = TrainingNotificationsPreferences.missedKeyWorkoutNudge
@@ -1597,6 +1601,13 @@ struct DataPrivacyNotificationsHubView: View {
     @State private var exportURL: URL?
     @State private var showExportShare = false
     @State private var exportError: String?
+
+    // Delete all data flow
+    @State private var showingDeleteConfirm = false
+    @State private var isWiping = false
+    @State private var wipeResult: UserDataWipeService.WipeResult?
+    @State private var wipeError: String?
+    @State private var showingWipeCompleteAlert = false
 
     var body: some View {
         SettingsSubviewShell(title: "Data, Privacy & Alerts") {
@@ -1867,11 +1878,111 @@ struct DataPrivacyNotificationsHubView: View {
                     .buttonStyle(.plain)
                 }
             }
+
+            // MARK: - Danger Zone (full local data wipe)
+            MangoxSectionLabel(title: "Danger Zone")
+            settingsSubCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Delete all local rides, coach history, plans, preferences, and disconnect Strava / WHOOP. Cloud backup (if signed in) is left on the server.")
+                        .settingsFootnoteMuted()
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let wipeError {
+                        Text(wipeError)
+                            .font(MangoxFont.caption.value)
+                            .foregroundStyle(AppColor.orange)
+                    }
+
+                    if let result = wipeResult {
+                        Text("Wipe complete. Deleted \(result.deletedWorkoutCount) rides locally. Integrations disconnected: Strava \(result.disconnectedStrava ? "✓" : "–"), WHOOP \(result.disconnectedWhoop ? "✓" : "–"). Cloud signed out: \(result.signedOutOfCloud ? "yes" : "no").")
+                            .settingsFootnote()
+                            .foregroundStyle(AppColor.success)
+                    }
+
+                    Button(role: .destructive) {
+                        showingDeleteConfirm = true
+                    } label: {
+                        HStack {
+                            if isWiping {
+                                ProgressView()
+                                    .tint(AppColor.red)
+                            }
+                            Text(isWiping ? "Deleting everything..." : "Delete All My Data…")
+                                .font(MangoxFont.callout.value)
+                                .foregroundStyle(AppColor.bg0)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(AppColor.red)
+                        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isWiping)
+                }
+            }
+
+            // MARK: - Quick Diagnostics (helps support + transparency)
+            MangoxSectionLabel(title: "Diagnostics")
+            settingsSubCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Cloud sync configured")
+                            .settingsSecondary()
+                        Spacer()
+                        Text(MangoxSupabase.isConfigured ? "Yes" : "No (local only)")
+                            .font(MangoxFont.caption.value)
+                            .foregroundStyle(MangoxSupabase.isConfigured ? AppColor.success : .white.opacity(0.4))
+                    }
+                    HStack {
+                        Text("Coach context encryption")
+                            .settingsSecondary()
+                        Spacer()
+                        let hasKey = viewModel.hasValidCoachEncryptionKey
+                        Text(hasKey ? "Key present (context encrypted)" : "Key missing in this build")
+                            .font(MangoxFont.caption.value)
+                            .foregroundStyle(hasKey ? AppColor.success : AppColor.orange)
+                    }
+                    HStack {
+                        Text("App version")
+                            .settingsSecondary()
+                        Spacer()
+                        Text(
+                            (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") +
+                            " (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"))"
+                        )
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.35))
+                    }
+                }
+            }
         }
         .task { await refreshAuthLabel() }
         .sheet(isPresented: $showExportShare) {
             if let exportURL {
                 ShareSheet(activityItems: [exportURL])
+            }
+        }
+        .confirmationDialog(
+            "Delete all your local data?",
+            isPresented: $showingDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Everything", role: .destructive) {
+                Task { await performWipe() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently erase from this device:\n• All recorded rides & samples\n• Coach chat history & generated plans\n• All preferences, zones, and custom settings\n• Strava & WHOOP connections (tokens removed)\n\nCloud data (if signed in) stays on the server. You can sign back in later to re-download it, or delete your account from the Account screen.\n\nThis action cannot be undone.")
+        }
+        .alert("Data Deleted", isPresented: $showingWipeCompleteAlert) {
+            Button("OK", role: .cancel) {
+                wipeResult = nil
+            }
+        } message: {
+            if let result = wipeResult {
+                Text("Successfully removed \(result.deletedWorkoutCount) rides and local history. Integrations were disconnected and cloud session ended (if any). The app will feel fresh on next launch or navigation.")
+            } else {
+                Text("Local data has been cleared.")
             }
         }
     }
@@ -1922,6 +2033,31 @@ struct DataPrivacyNotificationsHubView: View {
             case .ephemeral: authStatusText = "Ephemeral"
             @unknown default: authStatusText = "Unknown"
             }
+        }
+    }
+
+    private func performWipe() async {
+        guard !isWiping else { return }
+        isWiping = true
+        wipeError = nil
+        wipeResult = nil
+        defer { isWiping = false }
+
+        do {
+            let result = try await UserDataWipeService.performFullWipe(
+                modelContext: modelContext,
+                stravaService: viewModel.stravaServiceForWipe,
+                whoopService: viewModel.whoopServiceForWipe,
+                syncCoordinator: syncCoordinator,
+                linkedOAuthBridge: syncCoordinator.linkedOAuthBridge
+            )
+            wipeResult = result
+            showingWipeCompleteAlert = true
+
+            // Give the user time to see the inline summary if they want, then the alert takes over
+            try? await Task.sleep(for: .milliseconds(400))
+        } catch {
+            wipeError = "Failed to delete data: \(error.localizedDescription)"
         }
     }
 }

@@ -10,6 +10,7 @@ final class ProfileViewModel {
     private let stravaService: StravaServiceProtocol
     private let ftpRefreshTrigger: FTPRefreshTrigger
     private let healthKitService: HealthKitServiceProtocol
+    private let aiService: AIService?   // for diagnostics (encryption key status, etc.)
 
     // MARK: - Whoop state
     var whoopConnected: Bool { whoopService.isConnected }
@@ -76,13 +77,15 @@ final class ProfileViewModel {
         purchasesService: PurchasesServiceProtocol,
         stravaService: StravaServiceProtocol,
         ftpRefreshTrigger: FTPRefreshTrigger,
-        healthKitService: HealthKitServiceProtocol
+        healthKitService: HealthKitServiceProtocol,
+        aiService: AIService? = nil
     ) {
         self.whoopService = whoopService
         self.purchasesService = purchasesService
         self.stravaService = stravaService
         self.ftpRefreshTrigger = ftpRefreshTrigger
         self.healthKitService = healthKitService
+        self.aiService = aiService
     }
 
     // MARK: - Whoop actions
@@ -100,6 +103,15 @@ final class ProfileViewModel {
 
     func applyHeartBaselinesFromLatestWhoopData() {
         whoopService.applyHeartBaselinesFromLatestWhoopData()
+    }
+
+    // MARK: - Data wipe access (used only by UserDataWipeService from Settings)
+    var stravaServiceForWipe: StravaServiceProtocol? { stravaService }
+    var whoopServiceForWipe: WhoopServiceProtocol? { whoopService }
+
+    // MARK: - Diagnostics (live coach encryption status, etc.)
+    var hasValidCoachEncryptionKey: Bool {
+        aiService?.hasValidCoachEncryptionKey ?? false
     }
 
     // MARK: - Strava actions

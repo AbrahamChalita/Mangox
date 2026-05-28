@@ -60,6 +60,7 @@ final class DIContainer {
     // MARK: - Cloud sync (Supabase)
 
     let authState: AuthState
+    let linkedOAuthBridge: LinkedOAuthSessionBridge
     let syncCoordinator: SyncCoordinator
 
     // MARK: - ViewModels (lazily vended; each VM owns its own lifecycle)
@@ -97,7 +98,8 @@ final class DIContainer {
             purchasesService: purchasesServiceProtocol,
             stravaService: stravaService,
             ftpRefreshTrigger: ftpRefreshTrigger,
-            healthKitService: healthKitService
+            healthKitService: healthKitService,
+            aiService: aiService
         )
     }
 
@@ -132,7 +134,8 @@ final class DIContainer {
             routeService: routeManager,
             healthKitService: healthKitManager,
             liveActivityService: liveActivityManager,
-            workoutPersistenceRepository: workoutPersistenceRepository
+            workoutPersistenceRepository: workoutPersistenceRepository,
+            trainingPlanPersistenceRepository: trainingPlanPersistenceRepository
         )
     }
     func makeSocialViewModel() -> SocialViewModel {
@@ -216,8 +219,10 @@ final class DIContainer {
         fitnessTracker = FitnessTracker.shared
         personalRecords = PersonalRecords.shared
         liveActivityManager = RideLiveActivityManager.shared
-        stravaService = StravaService()
-        whoopService = WhoopService()
+        let strava = StravaService()
+        let whoop = WhoopService()
+        stravaService = strava
+        whoopService = whoop
         purchasesManager = PurchasesManager.shared
         aiService = AIService()
         ftpRefreshTrigger = FTPRefreshTrigger.shared
@@ -232,6 +237,14 @@ final class DIContainer {
 
         let auth = AuthState()
         authState = auth
+
+        linkedOAuthBridge = LinkedOAuthSessionBridge(
+            strava: strava,
+            whoop: whoop,
+            userId: { [weak auth] in auth?.userId }
+        )
+        strava.linkedOAuthBridge = linkedOAuthBridge
+        whoop.linkedOAuthBridge = linkedOAuthBridge
 
         let activityRepo = LoggedActivityRepositoryImpl(
             modelContext: PersistenceContainer.shared.mainContext
@@ -251,7 +264,9 @@ final class DIContainer {
                 ZoneSnapshotSyncDomain(),
                 CustomWorkoutTemplateSyncDomain(),
                 LoggedActivitySyncDomain(),
-            ]
+                LinkedOAuthSyncDomain(bridge: linkedOAuthBridge),
+            ],
+            linkedOAuthBridge: linkedOAuthBridge
         )
 
         // Wire local-change notifications from the repo to the sync coordinator.

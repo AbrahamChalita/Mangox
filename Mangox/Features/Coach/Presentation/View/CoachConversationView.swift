@@ -14,13 +14,6 @@ private enum CoachChatColumnWidthKey: PreferenceKey {
     }
 }
 
-private struct BottomOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 /// Primary coach chat surface: streaming replies and plan-builder entry.
 /// Avoids a root `GeometryReader` so the system keyboard safe area correctly lifts the transcript.
 struct CoachConversationView: View {
@@ -35,11 +28,7 @@ struct CoachConversationView: View {
     /// Pushed (not `.sheet`) so it isn’t torn down by the paywall/plans `item` sheet or full-screen chat cover.
     @State private var showConversationsList = false
     @State private var chatColumnWidth: CGFloat = 400
-    @State private var transcriptViewportHeight: CGFloat = 0
-    @State private var scrollPosition = ScrollPosition()
-    @State private var shouldAutoScrollToBottom = true
-    @State private var scrollToMessageID: UUID?
-    @State private var lastStreamScrollAt: Date = .distantPast
+    @State private var composerFocusScrollNonce = 0
 
     private static let planBuilderSeed =
         "I want to build a structured training plan for an event. Ask me about my goal, target date, weekly training hours, and experience, then outline next steps."
@@ -53,29 +42,11 @@ struct CoachConversationView: View {
         }
     }()
 
-    private var latestAssistantMessageID: UUID? {
-        coachViewModel.messages.last { $0.role == .assistant }?.id
-    }
-
     private static func bubbleMaxWidth(containerWidth: CGFloat) -> CGFloat {
         let horizontalPadding: CGFloat = 32
         // Geometry/preference can report 0 briefly; a near-zero max width makes LazyVStack relayout wildly.
         let w = max(containerWidth, 64)
         return min(580, max(120, w - horizontalPadding))
-    }
-
-    private var transcriptHasContent: Bool {
-        !coachViewModel.messages.isEmpty || coachViewModel.isLoading
-    }
-
-    private var transcriptContentAlignment: Alignment {
-        transcriptHasContent ? .bottom : .center
-    }
-
-    private var startersLoading: Bool {
-        coachViewModel.messages.isEmpty
-            && !coachViewModel.isLoading
-            && coachViewModel.starterContent == nil
     }
 
     var body: some View {
@@ -84,7 +55,23 @@ struct CoachConversationView: View {
             VStack(spacing: 0) {
                 topChrome
                 metricsStrip
-                messageScroll(maxW: Self.bubbleMaxWidth(containerWidth: chatColumnWidth))
+                CoachChatTranscriptView(
+                    bubbleMaxWidth: Self.bubbleMaxWidth(containerWidth: chatColumnWidth),
+                    greetingText: greetingText,
+                    bottomSpacerHeight: coachTranscriptBottomSpacerHeight,
+                    composerFocusScrollNonce: composerFocusScrollNonce,
+                    onSend: send,
+                    onPlanBuilder: { send(Self.planBuilderSeed) },
+                    onPaywall: { auxiliarySheet = .paywall },
+                    onSuggestedAction: handleSuggestedAction,
+                    onRetry: {
+                        HapticManager.shared.coachMessageSent()
+                        Task { @MainActor in
+                            await coachViewModel.retryLastUserMessage(
+                                isPro: coachViewModel.isPro)
+                        }
+                    }
+                )
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background {
@@ -294,249 +281,6 @@ struct CoachConversationView: View {
         .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
     }
 
-    // MARK: Messages
-
-    private func messageScroll(maxW: CGFloat) -> some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                if coachViewModel.messages.isEmpty && !coachViewModel.isLoading {
-                    emptyState(maxW: maxW)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .scrollTargetLayout()
-                } else {
-                    // `VStack` avoids LazyVStack deferring layout until scroll (blank transcript until user drags).
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(coachViewModel.messages) { message in
-                            CoachMessageRow(
-                                message: message,
-                                isLatestAssistant: message.role == .assistant
-                                    && message.id == latestAssistantMessageID,
-                                bubbleMaxWidth: maxW,
-                                suggestionsInteractive: !coachViewModel.isLoading,
-                                onRetry: {
-                                    // Re-run the prior user prompt verbatim instead of
-                                    // sending the literal string "Try again", which the
-                                    // model treated as a fresh (often confusing) turn.
-                                    HapticManager.shared.coachMessageSent()
-                                    Task { @MainActor in
-                                        await coachViewModel.retryLastUserMessage(
-                                            isPro: coachViewModel.isPro)
-                                    }
-                                },
-                                onSuggestedAction: handleSuggestedAction,
-                                onFollowUpBatchComplete: { send($0) }
-                            )
-                        }
-
-                        if coachViewModel.generatingPlan && !coachViewModel.isLoading {
-                            CoachStreamStatusRow(
-                                text: coachViewModel.planProgress?.message ?? "Building your plan…",
-                                style: .cloud
-                            )
-                            .id("planGen")
-                        }
-
-                        CoachStreamingSection()
-
-                        Color.clear
-                            .frame(height: coachTranscriptBottomSpacerHeight)
-                    }
-                    // `LazyVStack` otherwise shrink-wraps to the widest bubble; user rows stay `.trailing` inside
-                    // that narrow width, leaving a dead band on the right (your screenshot).
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 16)
-                    .scrollTargetLayout()
-                }
-
-                Color.clear
-                    .frame(height: 1)
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear
-                                .preference(
-                                    key: BottomOffsetPreferenceKey.self,
-                                    value: proxy.frame(in: .named("scroll-container")).maxY
-                                )
-                        }
-                    }
-            }
-            .frame(
-                maxWidth: .infinity,
-                minHeight: max(transcriptViewportHeight, 0),
-                alignment: transcriptContentAlignment
-            )
-            // No layout animation: instant swaps keep the AI chat feeling responsive
-            // and prevent the empty-state → messages jump from looking laggy.
-        }
-        .background {
-            GeometryReader { proxy in
-                Color.clear
-                    .onAppear { transcriptViewportHeight = proxy.size.height }
-                    .onChange(of: proxy.size.height) { _, newValue in
-                        transcriptViewportHeight = newValue
-                    }
-            }
-        }
-        .scrollBounceBehavior(.basedOnSize, axes: .vertical)
-        .scrollDismissesKeyboard(.interactively)
-        .scrollIndicators(.hidden)
-        .scrollPosition($scrollPosition)
-        .coordinateSpace(name: "scroll-container")
-        .onPreferenceChange(BottomOffsetPreferenceKey.self) { value in
-            let isAtBottom = value <= transcriptViewportHeight + 60
-            if isAtBottom && !shouldAutoScrollToBottom {
-                shouldAutoScrollToBottom = true
-            }
-        }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 1)
-                .onChanged { value in
-                    guard abs(value.translation.height) > abs(value.translation.width) else { return }
-                    shouldAutoScrollToBottom = false
-                }
-        )
-        .onAppear {
-            if !coachViewModel.messages.isEmpty || coachViewModel.isLoading {
-                scrollTranscriptToBottom(animated: false)
-            }
-        }
-        .onChange(of: coachViewModel.messages.count) { oldCount, newCount in
-            if newCount > oldCount {
-                scrollTranscriptToBottom()
-            }
-        }
-        .onChange(of: scrollToMessageID) { _, targetID in
-            guard targetID != nil, shouldAutoScrollToBottom else { return }
-            scrollTranscriptToBottom()
-        }
-        .onChange(of: coachViewModel.isLoading) { _, _ in
-            scrollTranscriptToBottom()
-        }
-        // Throttled scroll-to-bottom while the streaming draft grows. Without this
-        // the visible bottom edge falls off-screen mid-reply for users on fast
-        // networks; ticking every ~220ms keeps the latest text in view without
-        // animating against the user's manual scroll-up gesture.
-        .onChange(of: coachViewModel.streamDraftText) { _, newValue in
-            guard shouldAutoScrollToBottom, !newValue.isEmpty else { return }
-            let now = Date()
-            guard now.timeIntervalSince(lastStreamScrollAt) > 0.22 else { return }
-            lastStreamScrollAt = now
-            // Instant scroll during streaming keeps the bottom edge pinned
-            // without the visual lag of chasing animated scrolls.
-            scrollTranscriptToBottom(animated: false)
-        }
-        .onChange(of: coachViewModel.generatingPlan) { _, g in
-            if g {
-                scrollTranscriptToBottom()
-            }
-        }
-
-        // Plan confirm / success banners live in the bottom safeAreaInset; when they appear the visible
-        // transcript shifts up — nudge scroll so the last message + chips stay above the inset (same idea as keyboard).
-        .onChange(of: coachViewModel.planConfirmationDraft?.id) { _, _ in
-            scrollTranscriptToBottom()
-        }
-        .onChange(of: coachViewModel.planSaveCelebration?.planID) { _, _ in
-            scrollTranscriptToBottom()
-        }
-        .onChange(of: coachViewModel.workoutConfirmationDraft?.id) { _, _ in
-            scrollTranscriptToBottom()
-        }
-        .onChange(of: coachViewModel.workoutSaveCelebration?.id) { _, _ in
-            scrollTranscriptToBottom()
-        }
-    }
-
-    @ViewBuilder
-    private func emptyState(maxW: CGFloat) -> some View {
-        if startersLoading {
-            starterLoadingState(maxW: maxW)
-        } else {
-            let content =
-                coachViewModel.starterContent
-                ?? CoachEmptyStartersContent(
-                    prompts: coachViewModel.contextualQuickPrompts(),
-                    topicTags: []
-                )
-
-            VStack(spacing: 0) {
-                CoachEmptyStartersPanel(
-                    bubbleMaxWidth: maxW,
-                    greetingTitle: greetingText,
-                    headline: "What should we work on?",
-                    subhead:
-                        "Ask about training, recovery, or build a plan. Starters only appear when Mangox has data to support them.",
-                    topicTags: content.topicTags,
-                    prompts: content.prompts,
-                    onPlanBuilder: { send(Self.planBuilderSeed) },
-                    onPrompt: { send($0.text) }
-                )
-                .frame(maxWidth: maxW)
-
-                if coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) {
-                    dailyLimitCard
-                        .padding(.top, 22)
-                }
-
-                Color.clear.frame(height: 1)
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 28)
-            .padding(.bottom, 16)
-        }
-    }
-
-    private func starterLoadingState(maxW: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                ProgressView()
-                    .tint(AppColor.mango)
-                Text("Preparing grounded starters…")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-
-            MangoxChatBubbleSkeleton(isUser: false)
-            MangoxChatBubbleSkeleton(isUser: false)
-        }
-        .frame(maxWidth: maxW, alignment: .leading)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
-    }
-
-    private var dailyLimitCard: some View {
-        VStack(spacing: 12) {
-            Text("Daily limit reached")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
-            Text("Pro unlocks unlimited coach messages.")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.45))
-                .multilineTextAlignment(.center)
-            Button {
-                auxiliarySheet = .paywall
-            } label: {
-                Text("Upgrade")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.black.opacity(0.8))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(AppColor.mango)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(MangoxPressStyle())
-        }
-        .padding(18)
-        .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(AppColor.mango.opacity(0.2), lineWidth: 1)
-        )
-    }
-
     // MARK: Input
 
     private var showComposerLimitBanner: Bool {
@@ -564,8 +308,7 @@ struct CoachConversationView: View {
             sendAction: { send($0) },
             onFocusChanged: { focused in
                 if focused && !coachViewModel.messages.isEmpty {
-                    shouldAutoScrollToBottom = true
-                    scrollTranscriptToBottom()
+                    composerFocusScrollNonce += 1
                 }
             }
         )
@@ -578,22 +321,9 @@ struct CoachConversationView: View {
     private func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        shouldAutoScrollToBottom = true
         HapticManager.shared.coachMessageSent()
         Task { @MainActor in
             await coachViewModel.sendMessage(trimmed, isPro: coachViewModel.isPro)
-        }
-    }
-
-    private func scrollTranscriptToBottom(animated: Bool = true) {
-        guard shouldAutoScrollToBottom else { return }
-        let action = {
-            scrollPosition.scrollTo(edge: .bottom)
-        }
-        if animated {
-            withAnimation(MangoxMotion.snappy, action)
-        } else {
-            action()
         }
     }
 

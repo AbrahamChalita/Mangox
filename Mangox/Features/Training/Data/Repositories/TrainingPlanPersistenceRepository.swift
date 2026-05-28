@@ -26,6 +26,7 @@ final class TrainingPlanPersistenceRepository: TrainingPlanPersistenceRepository
         )
         modelContext.insert(progress)
         try modelContext.save()
+        PrecisionCoachInstrumentation.planStarted(planID: plan.id)
     }
 
     func save(progress: TrainingPlanProgress?) throws {

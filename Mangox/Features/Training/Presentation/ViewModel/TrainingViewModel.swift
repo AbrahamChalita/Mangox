@@ -34,6 +34,7 @@ final class TrainingViewModel {
     enum TrainingNavigationAction: Equatable {
         case paywall
         case connectionForPlan(planID: String, dayID: String)
+        case outdoorPlanRide(planID: String, dayID: String)
         case ftpSetup
     }
 
@@ -118,6 +119,10 @@ final class TrainingViewModel {
 
     func requestPlanWorkout(planID: String, dayID: String) {
         pendingNavigation = .connectionForPlan(planID: planID, dayID: dayID)
+    }
+
+    func requestOutdoorPlanWorkout(planID: String, dayID: String) {
+        pendingNavigation = .outdoorPlanRide(planID: planID, dayID: dayID)
     }
 
     func requestFTPSetup() {

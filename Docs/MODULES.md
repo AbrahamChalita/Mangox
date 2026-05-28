@@ -18,7 +18,7 @@ The app target remains a **single Swift module** (`Mangox`) so nothing breaks at
 | **`Core/Extensions/`** | Shared extensions (e.g. `MapPolylineSanitize`). |
 | **`Features/ActivityLog/`** | Cross-source activity logging (manual, Whoop, Strava import) with `Domain/Data/Presentation` layers. |
 | **`Features/Coach/`** | AI coaching chat, plan generation, on-device coach with `Domain/Data/Presentation` layers. |
-| **`Features/Fitness/`** | Fitness analytics: power curves, HR zones, FTP timeline, aerobic decoupling, health readiness. |
+| **`Features/Fitness/`** | Fitness analytics: power curves, HR zones, FTP timeline, aerobic decoupling, health readiness, **TrainingMath** (PMC projection/trends for precision coach). |
 | **`Features/Home/`** | Home dashboard with training status, recent rides, and workout suggestions. |
 | **`Features/Indoor/`** | BLE/Wi-Fi trainer stack, indoor dashboard, guided sessions, workout controls. |
 | **`Features/Onboarding/`** | First-launch flow, launch screen, cloud setup page. |
@@ -26,11 +26,11 @@ The app target remains a **single Swift module** (`Mangox`) so nothing breaks at
 | **`Features/Paywall/`** | RevenueCat subscription paywall. |
 | **`Features/Profile/`** | Settings, account, rider profile, Strava/Whoop integrations, data export. |
 | **`Features/Social/`** | Instagram story cards, day summary studio, Strava post builder. |
-| **`Features/Training/`** | Training plans, FTP testing, calendar view, plan compliance. |
+| **`Features/Training/`** | Training plans, FTP testing, calendar view, plan compliance, **PlanCritic**, **PlanTSSVectorBuilder**. |
 | **`Features/Workout/`** | Workout recording, summary, FIT/TCX/GPX export, workout insights, RAG indexing. |
 | **`MangoxTests/`** | Unit and integration tests (~84 test methods). |
 | **`MangoxUITests/`** | UI tests (~34 test methods). |
-| **`Docs/`** | Product and engineering notes. |
+| **`Docs/`** | Product and engineering notes (see `PRECISION_COACH.md` for coach math tools). |
 | **`backend/`** | TypeScript helper package for coach parsing and schema utilities. |
 
 **Assets**, **Info.plist**, **PrivacyInfo**, **entitlements** stay at `Mangox/` root.

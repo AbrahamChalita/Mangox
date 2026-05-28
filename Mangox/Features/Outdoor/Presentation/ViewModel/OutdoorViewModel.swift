@@ -95,6 +95,10 @@ final class OutdoorViewModel {
     private let healthKitService: HealthKitServiceProtocol
     private let liveActivityService: LiveActivityServiceProtocol
     let workoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol
+    private let trainingPlanPersistenceRepository: TrainingPlanPersistenceRepositoryProtocol
+
+    var activePlanID: String?
+    var activePlanDayID: String?
     let navigationService = NavigationService()
     private var liveActivityLoopTask: Task<Void, Never>?
 
@@ -164,7 +168,8 @@ final class OutdoorViewModel {
         routeService: RouteServiceProtocol,
         healthKitService: HealthKitServiceProtocol,
         liveActivityService: LiveActivityServiceProtocol,
-        workoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol
+        workoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol,
+        trainingPlanPersistenceRepository: TrainingPlanPersistenceRepositoryProtocol
     ) {
         self.locationService = locationService
         self.bleService = bleService
@@ -172,6 +177,12 @@ final class OutdoorViewModel {
         self.healthKitService = healthKitService
         self.liveActivityService = liveActivityService
         self.workoutPersistenceRepository = workoutPersistenceRepository
+        self.trainingPlanPersistenceRepository = trainingPlanPersistenceRepository
+    }
+
+    func configurePlanContext(planID: String?, planDayID: String?) {
+        activePlanID = planID
+        activePlanDayID = planDayID
     }
 
     // MARK: - BLE action methods
@@ -662,6 +673,23 @@ final class OutdoorViewModel {
         do {
             try workoutPersistenceRepository.saveOutdoorRide(workout: workout, splits: splits)
             clearPendingRideSave()
+
+            if let planID = activePlanID, let dayID = activePlanDayID {
+                let plan = PlanLibrary.resolvePlan(
+                    planID: planID,
+                    modelContext: PersistenceContainer.shared.mainContext
+                )
+                let planDay = plan?.day(id: dayID)
+                PlanWorkoutCompletion.completePlanLinkedRide(
+                    workout: workout,
+                    planID: planID,
+                    dayID: dayID,
+                    planDay: planDay,
+                    modelContext: PersistenceContainer.shared.mainContext,
+                    trainingPlanPersistenceRepository: trainingPlanPersistenceRepository,
+                    source: "outdoor_auto"
+                )
+            }
         } catch {
             rideCompletionError = "Could not save this ride. Please try ending again."
             persistPendingRideSave(rideDraft)

@@ -1,6 +1,10 @@
 import Foundation
 import os.log
 
+enum MangoxBackendDefaults {
+    static let productionBaseURL = "https://mangox-backend.ferrari458chalita.workers.dev"
+}
+
 enum ChatProviderKind: String {
     case mangoxBackend
 
@@ -93,7 +97,7 @@ struct ChatProviderResolver {
         let chosen =
             (rawBaseURL?.isEmpty == false ? rawBaseURL : nil)
             ?? bundle.object(forInfoDictionaryKey: Keys.mangoxBaseURL) as? String
-            ?? "https://mangox-backend-production.up.railway.app"
+            ?? MangoxBackendDefaults.productionBaseURL
         let baseURL = MangoxBackendBaseURLFormatting.normalizedRoot(chosen)
 
         return ChatProviderConfiguration(

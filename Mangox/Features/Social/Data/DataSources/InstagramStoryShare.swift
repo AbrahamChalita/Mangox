@@ -30,13 +30,16 @@ enum InstagramStoryShare {
     /// Exported story bitmap (9:16 @1080pt — meets minimum size and recommended aspect from Meta’s doc).
     static let storySize = CGSize(width: 1080, height: 1920)
 
-    /// Numeric Facebook / Meta App ID from `FacebookAppID` in Info.plist (build setting `FACEBOOK_APP_ID`).
+    /// Numeric Facebook / Meta App ID from `FacebookAppID` in Info.plist (sourced from `FACEBOOK_APP_ID` xcconfig).
     static var facebookAppID: String? {
         guard let raw = Bundle.main.object(forInfoDictionaryKey: "FacebookAppID") as? String else {
             return nil
         }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        guard !trimmed.isEmpty else { return nil }
+        // Strip unresolved xcconfig placeholders (e.g. $(FACEBOOK_APP_ID) when not defined)
+        if trimmed.hasPrefix("$(") && trimmed.hasSuffix(")") { return nil }
+        return trimmed
     }
 
     /// `instagram-stories://share?source_application=<Facebook App ID>` — required for Instagram to accept the share.
@@ -147,7 +150,7 @@ enum InstagramStoryShare {
     ) -> Bool {
         guard let storiesURL = instagramStoriesShareURL() else {
             instagramStoryLogger.error(
-                "Instagram Stories: set FACEBOOK_APP_ID in Xcode build settings (FacebookAppID in Info.plist). See https://developers.facebook.com/docs/instagram-platform/sharing-to-stories/"
+                "Instagram Stories: FACEBOOK_APP_ID not configured (via xcconfig → FacebookAppID in Info.plist). See https://developers.facebook.com/docs/instagram-platform/sharing-to-stories/"
             )
             return false
         }

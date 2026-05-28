@@ -404,7 +404,7 @@ final class SocialViewModel {
         guard InstagramStoryShare.facebookAppID != nil else {
             isSharing = false
             onError(
-                "Instagram Stories needs a Meta/Facebook App ID. Add a FacebookAppID key to Info.plist."
+                "Instagram Stories sharing requires a Facebook App ID (FACEBOOK_APP_ID). Configure it via xcconfig."
             )
             return
         }

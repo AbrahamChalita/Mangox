@@ -164,6 +164,8 @@ struct TrainingPlanView: View {
                 navigationPath.append(AppRoute.paywall)
             case .connectionForPlan(let planID, let dayID):
                 navigationPath.append(AppRoute.connectionForPlan(planID: planID, dayID: dayID))
+            case .outdoorPlanRide(let planID, let dayID):
+                navigationPath.append(AppRoute.outdoorPlanRide(planID: planID, dayID: dayID))
             case .ftpSetup:
                 navigationPath.append(AppRoute.ftpSetup)
             }
@@ -1119,6 +1121,11 @@ struct TrainingPlanView: View {
                 } else {
                     actionButton("Start Ride", icon: "play.fill", style: .primary(AppColor.mango)) {
                         viewModel.requestPlanWorkout(planID: plan.id, dayID: day.id)
+                    }
+                    if day.dayType == .commute || day.dayType == .optionalWorkout {
+                        actionButton("Ride Outside", icon: "figure.outdoor.cycle", style: .secondary(AppColor.blue)) {
+                            viewModel.requestOutdoorPlanWorkout(planID: plan.id, dayID: day.id)
+                        }
                     }
                     actionButton("Done", icon: "checkmark", style: .secondary(AppColor.success)) {
                         viewModel.markCompleted(day.id, progress: progress)

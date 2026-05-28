@@ -134,6 +134,20 @@ struct UserContext: Encodable {
     let whoopHrvMs: Int?
     /// Max HR from WHOOP body-measurement endpoint when present (not workout peak).
     let whoopMaxHeartRate: Int?
+    /// Current chronic training load when PMC history is loaded.
+    let currentCtl: Double?
+    /// Current acute training load when PMC history is loaded.
+    let currentAtl: Double?
+    /// Current training stress balance when PMC history is loaded.
+    let currentTsb: Double?
+    /// 14/28-day PMC delta summary when enough history exists.
+    let pmcTrendSummary: String?
+    /// Multi-ride aerobic decoupling trend when enough steady rides exist.
+    let aerobicDecouplingTrend: String?
+    /// Compact best-power curve summary from recent rides.
+    let powerCurveSummary: String?
+    /// Two-parameter critical power fit when enough curve points exist.
+    let criticalPowerSummary: String?
 }
 
 struct LastRideContext: Encodable {
@@ -183,6 +197,7 @@ struct WorkoutGenerationRequest: Encodable {
 struct WorkoutGenerationResponse: Decodable {
     let workout: GeneratedWorkout
     let request_id: String?
+    let validation_warnings: [String]?
 }
 
 struct ToolCall: Codable, Identifiable, Equatable, Sendable {
@@ -729,7 +744,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
         }
         let raw =
             Bundle.main.object(forInfoDictionaryKey: "MangoxAPIBaseURL") as? String
-            ?? "https://mangox-backend-production.up.railway.app"
+            ?? MangoxBackendDefaults.productionBaseURL
         return MangoxBackendBaseURLFormatting.normalizedRoot(raw)
     }
 
@@ -742,8 +757,9 @@ final class AIService: AIServiceProtocol, CoachRepository {
         return new
     }
 
-    /// AES-256-GCM key from build-time `UserDataKey` Info.plist var.
-    /// Nil when not configured (dev builds without the key set).
+    /// AES-256-GCM key from build-time `UserDataKey` Info.plist var (populated via USER_DATA_KEY in xcconfig).
+    /// When present, all rich user context (FTP, recent workouts, plans, etc.) sent to the Mangox cloud coach
+    /// is encrypted before leaving the device. When nil we fall back to plaintext (only acceptable in DEBUG).
     private var encryptionKey: SymmetricKey? {
         guard let b64 = Bundle.main.object(forInfoDictionaryKey: "UserDataKey") as? String,
             !b64.isEmpty,
@@ -751,6 +767,12 @@ final class AIService: AIServiceProtocol, CoachRepository {
             keyData.count == 32
         else { return nil }
         return SymmetricKey(data: keyData)
+    }
+
+    /// Publicly observable: does this build have a valid encryption key for coach context?
+    /// Exposed so Settings/Diagnostics can surface the state and so we can enforce policy.
+    var hasValidCoachEncryptionKey: Bool {
+        encryptionKey != nil
     }
 
     /// Encrypts `context` as AES-256-GCM and returns base64(nonce ‖ ciphertext ‖ tag).
@@ -810,6 +832,23 @@ final class AIService: AIServiceProtocol, CoachRepository {
         let history = buildHistory()
         let context = buildUserContext(modelContext: modelContext)
         let encryptedContext = encryptUserContext(context)
+
+        // Strong release guard: never send rich training context (FTP, recent workouts, plans, etc.)
+        // in plaintext to the cloud coach from a production build.
+        #if !DEBUG
+        if encryptedContext == nil {
+            logger.critical("USER_DATA_KEY missing or invalid in RELEASE build — refusing to send unencrypted UserContext to cloud coach.")
+            appendAssistantErrorBubble(
+                "Coach cloud security is not configured for this build. Falling back to on-device only.",
+                category: "error",
+                modelContext: modelContext
+            )
+            self.error = "Coach context encryption key not configured"
+            resetStreamingState(clearLoading: true)
+            return
+        }
+        #endif
+
         let request = ChatRequest(
             message: userText,
             history: history,
@@ -1057,6 +1096,10 @@ final class AIService: AIServiceProtocol, CoachRepository {
             logCoachFlow("coachFlow sendMessage abort reason=dailyLimit isPro=\(isPro)")
             return
         }
+        guard !isLoading else {
+            logCoachFlow("coachFlow sendMessage abort reason=alreadyLoading")
+            return
+        }
 
         let sessionBefore = currentSessionID
         let deliveryLogLabel = "cloudOnly"
@@ -1078,16 +1121,12 @@ final class AIService: AIServiceProtocol, CoachRepository {
         let userMsg = ChatMessage.user(trimmed)
         do {
             try persistCoachMessage(userMsg, modelContext: modelContext)
-            withAnimation(MangoxMotion.sheet) {
-                messages.append(userMsg)
-            }
+            messages.append(userMsg)
         } catch {
             logger.error("sendMessage user persist failed: \(error)")
             self.error = "Couldn't save your message: \(error.localizedDescription)"
             // Still show it locally so the user sees what they typed.
-            withAnimation(MangoxMotion.sheet) {
-                messages.append(userMsg)
-            }
+            messages.append(userMsg)
         }
 
         // Update session title from first user message
@@ -1141,6 +1180,20 @@ final class AIService: AIServiceProtocol, CoachRepository {
             MangoxOnDeviceActivePlanTool(
                 digest: coachActivePlanContextToolPayload(modelContext: modelContext)
             ),
+            MangoxOnDeviceDecouplingTrendTool(
+                digest: coachDecouplingTrendToolPayload(modelContext: modelContext)
+            ),
+            MangoxOnDevicePowerCurveSummaryTool(
+                digest: coachPowerCurveSummaryToolPayload(modelContext: modelContext)
+            ),
+            MangoxOnDeviceCriticalPowerTool(
+                digest: coachCriticalPowerToolPayload(modelContext: modelContext)
+            ),
+            MangoxOnDevicePlanForwardSimTool(
+                dailyTSSFromPlan: coachPlanForwardDailyTSSForTools(modelContext: modelContext)
+            ),
+            // Precision coach foundation: the narrow model can now run real PMC forward simulations
+            MangoxOnDevicePMCProjectionTool(),
         ]
         let session = OnDeviceCoachEngine.makeNarrowSession(tools: tools)
 
@@ -1217,6 +1270,14 @@ final class AIService: AIServiceProtocol, CoachRepository {
         }
 
         let encrypted = encryptUserContext(buildUserContext(modelContext: modelContext))
+
+        #if !DEBUG
+        if encrypted == nil {
+            logger.critical("USER_DATA_KEY missing in RELEASE build during plan generation — cloud will receive no context.")
+            // We still proceed (backend can handle missing context), but this should never happen in App Store builds.
+        }
+        #endif
+
         let request = PlanGenerationRequest(
             inputs: inputs,
             is_pro: isPro,
@@ -1253,8 +1314,15 @@ final class AIService: AIServiceProtocol, CoachRepository {
         inputs: WorkoutGenerationInputs,
         isPro: Bool,
         modelContext: ModelContext
-    ) async throws -> GeneratedWorkout {
+    ) async throws -> (workout: GeneratedWorkout, serverWarnings: [String]) {
         let encrypted = encryptUserContext(buildUserContext(modelContext: modelContext))
+
+        #if !DEBUG
+        if encrypted == nil {
+            logger.critical("USER_DATA_KEY missing in RELEASE build during workout generation — cloud will receive no context.")
+        }
+        #endif
+
         let request = WorkoutGenerationRequest(
             inputs: inputs,
             is_pro: isPro,
@@ -1266,7 +1334,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
             path: "/api/generate-workout",
             body: request
         )
-        return response.workout
+        return (response.workout, response.validation_warnings ?? [])
     }
 
     /// Streaming plan generation with SSE progress events.
@@ -1369,6 +1437,16 @@ final class AIService: AIServiceProtocol, CoachRepository {
             modelContext: modelContext,
             idempotencyKey: draft.id.uuidString
         )
+        let critic = PlanCritic.validate(plan: result.plan, ftp: PowerZone.ftp)
+        var mergedWarnings = result.validationWarnings
+        mergedWarnings.append(contentsOf: critic.warnings.map(\.message))
+
+        PrecisionCoachInstrumentation.planGenerated(
+            planID: result.plan.id,
+            criticWarnings: critic.warnings.count,
+            criticErrors: critic.errors.count
+        )
+
         guard let json = try? JSONEncoder().encode(result.plan) else {
             throw URLError(.cannotCreateFile)
         }
@@ -1385,13 +1463,18 @@ final class AIService: AIServiceProtocol, CoachRepository {
         planConfirmationDraft = nil
         let snap = try? JSONEncoder().encode(result.plan)
         let fb = result.generationMetrics?.fallbackWeekNumbers ?? []
+        let forwardImpact = PlanForwardImpactSummary.compute(
+            plan: result.plan,
+            eventDateString: draft.inputs.event_date
+        )
         planSaveCelebration = PlanSaveCelebration(
             planID: result.plan.id,
             planName: result.plan.name,
-            warnings: result.validationWarnings,
+            warnings: mergedWarnings,
             fallbackWeekNumbers: fb,
             planSnapshotJSON: snap,
-            planInputs: draft.inputs
+            planInputs: draft.inputs,
+            forwardImpactSummary: forwardImpact
         )
 
         appendLocalAssistantMessage(
@@ -1493,7 +1576,8 @@ final class AIService: AIServiceProtocol, CoachRepository {
             warnings: celebration.warnings,
             fallbackWeekNumbers: newFallback,
             planSnapshotJSON: json,
-            planInputs: inputs
+            planInputs: inputs,
+            forwardImpactSummary: celebration.forwardImpactSummary
         )
     }
 
@@ -1628,12 +1712,29 @@ final class AIService: AIServiceProtocol, CoachRepository {
         )
 
         do {
-            let generated = try await generateWorkout(
+            let generation = try await generateWorkout(
                 inputs: inputs,
                 isPro: isPro,
                 modelContext: modelContext
             )
-            workoutConfirmationDraft = WorkoutGenerationDraft(inputs: inputs, workout: generated)
+            let critic = WorkoutCritic.validate(
+                workout: generation.workout,
+                inputs: inputs,
+                ftp: PowerZone.ftp
+            )
+            var warnings = generation.serverWarnings
+            for message in critic.warnings.map(\.message) where !warnings.contains(message) {
+                warnings.append(message)
+            }
+            PrecisionCoachInstrumentation.workoutGenerated(
+                title: generation.workout.title,
+                warningCount: warnings.count
+            )
+            workoutConfirmationDraft = WorkoutGenerationDraft(
+                inputs: inputs,
+                workout: generation.workout,
+                validationWarnings: warnings
+            )
         } catch {
             logger.error("generate_workout endpoint failed: \(error.localizedDescription)")
             appendLocalAssistantMessage(
@@ -1841,6 +1942,46 @@ final class AIService: AIServiceProtocol, CoachRepository {
         let whoopRhr = whoopLinked ? whoop?.latestRecoveryRestingHR : nil
         let whoopHrv = whoopLinked ? whoop?.latestRecoveryHRV : nil
 
+        let ft = FitnessTracker.shared
+        let pmcTrendSummary = ft.isLoaded ? PMCTrend.compactTrendLine(history: ft.history) : nil
+
+        let decouplingSamples: [AerobicDecouplingTrend.RideSample] = lastRides
+            .filter(\.isValid)
+            .prefix(12)
+            .reversed()
+            .compactMap { ride in
+                guard let result = AerobicDecouplingAnalytics.compute(from: ride),
+                      result.status != .insufficientData
+                else { return nil }
+                return AerobicDecouplingTrend.RideSample(
+                    date: ride.startDate,
+                    decouplingPercent: result.decouplingPercent,
+                    status: result.status
+                )
+            }
+        let decouplingTrend = AerobicDecouplingTrend.analyze(rides: decouplingSamples)
+        let aerobicDecouplingTrendSummary =
+            decouplingTrend.direction == .insufficientData
+            ? nil
+            : decouplingTrend.plainLanguageSummary
+
+        let powerCurveCandidates = WorkoutMetricsSnapshot.powerCurveCandidates(
+            from: lastRides.filter(\.isValid),
+            rangeDays: PowerCurveSummary.defaultRangeDays
+        )
+        let powerCurvePoints = PowerCurveAnalytics.compute(
+            from: powerCurveCandidates.map(\.sortedPowers)
+        )
+        let powerCurveSummaryText = powerCurvePoints.isEmpty
+            ? nil
+            : PowerCurveSummary.format(
+                points: powerCurvePoints,
+                ftp: ftp,
+                rangeDays: PowerCurveSummary.defaultRangeDays
+            )
+
+        let criticalPowerSummaryText = CriticalPowerModel.fit(from: powerCurvePoints).map(\.plainLanguageSummary)
+
         return UserContext(
             ftp: ftp,
             maxHR: maxHR,
@@ -1868,7 +2009,14 @@ final class AIService: AIServiceProtocol, CoachRepository {
             whoopRecoveryPercent: whoopPct,
             whoopRestingHR: whoopRhr,
             whoopHrvMs: whoopHrv,
-            whoopMaxHeartRate: whoopLinked ? whoop?.latestMaxHeartRateFromProfile : nil
+            whoopMaxHeartRate: whoopLinked ? whoop?.latestMaxHeartRateFromProfile : nil,
+            currentCtl: ft.isLoaded ? ft.currentCTL : nil,
+            currentAtl: ft.isLoaded ? ft.currentATL : nil,
+            currentTsb: ft.isLoaded ? ft.currentTSB : nil,
+            pmcTrendSummary: pmcTrendSummary,
+            aerobicDecouplingTrend: aerobicDecouplingTrendSummary,
+            powerCurveSummary: powerCurveSummaryText,
+            criticalPowerSummary: criticalPowerSummaryText
         )
     }
 

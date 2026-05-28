@@ -1,14 +1,20 @@
 import Foundation
 
 extension URLRequest {
-    /// Free ngrok (`*.ngrok-free.app` / `*.ngrok-free.dev`) may return an HTML interstitial or edge error page
-    /// unless clients send a skip header and a non-empty User-Agent (URLSession defaults are sometimes treated as “browserless”).
+    /// Applies headers required for our Mangox cloud backend.
+    ///
+    /// - Always sets an honest `User-Agent` (unless already overridden) so the backend can identify the client.
+    /// - Adds ngrok-specific headers only when the base URL indicates a tunnel (dev convenience).
     mutating func mangox_applyDevTunnelHeadersIfNeeded(mangoxBaseURL: String) {
+        // Honest identification for all Mangox backend calls (chat, plan gen, workout gen, etc.)
+        if value(forHTTPHeaderField: "User-Agent") == nil {
+            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+            setValue("Mangox/\(version) (iOS)", forHTTPHeaderField: "User-Agent")
+        }
+
         let s = mangoxBaseURL.lowercased()
         guard s.contains("ngrok") else { return }
+
         setValue("true", forHTTPHeaderField: "ngrok-skip-browser-warning")
-        if value(forHTTPHeaderField: "User-Agent") == nil {
-            setValue("MangoxCoach/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
-        }
     }
 }

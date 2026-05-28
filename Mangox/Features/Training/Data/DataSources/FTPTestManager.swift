@@ -349,10 +349,16 @@ final class FTPTestManager {
 
     func applyEstimatedFTP() {
         guard estimatedFTP > 0 else { return }
+        let oldFTP = PowerZone.ftp
         PowerZone.setFTP(estimatedFTP)
         if let id = lastResultID {
             FTPTestHistory.markApplied(id: id)
         }
+        PrecisionCoachInstrumentation.ftpApplied(
+            oldFTP: oldFTP,
+            newFTP: estimatedFTP,
+            source: "ftp_test"
+        )
     }
 
     // MARK: - Event-Driven BLE Ingestion

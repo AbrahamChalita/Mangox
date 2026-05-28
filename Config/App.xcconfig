@@ -10,7 +10,11 @@ REVENUECAT_API_KEY =
 USER_DATA_KEY =
 MANGOX_COACH_STAFF_TIER =
 
+FACEBOOK_APP_ID = 986008587288900
+
 SUPABASE_URL_HOST = jvhkplgacbeuksiphgyk.supabase.co
 SUPABASE_PUBLISHABLE_KEY = sb_publishable_m2mgjTsNA9Gi2wPMwewwgg_oS8-aerC
+
+USER_DATA_KEY = k/HLYyW/m+bCknTBbVvU8zETdyQJ+P8jl+FqDcutR8g=
 
 #include? "Secrets.xcconfig"

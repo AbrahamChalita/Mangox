@@ -138,6 +138,8 @@ struct PlanSaveCelebration: Identifiable, Equatable {
     /// Latest full plan JSON (for week regeneration + persistence).
     let planSnapshotJSON: Data?
     let planInputs: PlanInputs?
+    /// PMC forward-impact summary when enough plan + fitness context exists.
+    let forwardImpactSummary: String?
 
     var id: String { planID }
 }
@@ -189,11 +191,18 @@ struct WorkoutGenerationDraft: Identifiable, Equatable {
     let id: UUID
     var inputs: WorkoutGenerationInputs
     var workout: GeneratedWorkout
+    var validationWarnings: [String]
 
-    init(id: UUID = UUID(), inputs: WorkoutGenerationInputs, workout: GeneratedWorkout) {
+    init(
+        id: UUID = UUID(),
+        inputs: WorkoutGenerationInputs,
+        workout: GeneratedWorkout,
+        validationWarnings: [String] = []
+    ) {
         self.id = id
         self.inputs = inputs
         self.workout = workout
+        self.validationWarnings = validationWarnings
     }
 }
 

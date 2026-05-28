@@ -443,7 +443,7 @@ struct StravaConnectionCard: View {
             }
 
             if !viewModel.stravaIsConfigured {
-                Text("Set STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET in build settings.")
+                Text("Strava linking requires the oauth-token-exchange Supabase function and STRAVA_CLIENT_SECRET in project secrets.")
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.32))
             } else {

@@ -227,53 +227,56 @@ struct CoachMessageRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        Group {
             if message.role == .user {
-                CoachUserBubble(text: message.content, bubbleMaxWidth: bubbleMaxWidth)
-            } else {
-                if message.category == "error" {
-                    CoachErrorBubble(text: message.content, onRetry: onRetry, bubbleMaxWidth: bubbleMaxWidth)
-                } else {
-                    CoachAssistantBubble(message: message, bubbleMaxWidth: bubbleMaxWidth)
+                HStack {
+                    Spacer(minLength: 48)
+                    CoachUserBubble(text: message.content, bubbleMaxWidth: bubbleMaxWidth)
                 }
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    if message.category == "error" {
+                        CoachErrorBubble(text: message.content, onRetry: onRetry, bubbleMaxWidth: bubbleMaxWidth)
+                    } else {
+                        CoachAssistantBubble(message: message, bubbleMaxWidth: bubbleMaxWidth)
+                    }
 
-                if showReplyPanel {
-                    if message.followUpBlocks.isEmpty {
-                        CoachFollowUpRepliesPanel(
-                            followUpQuestion: message.followUpQuestion,
-                            actions: message.suggestedActions,
-                            bubbleMaxWidth: bubbleMaxWidth,
-                            sourceAppearance: responseAppearance,
-                            isEnabled: suggestionsInteractive,
-                            onSelect: onSuggestedAction
-                        )
-                    } else if message.followUpBlocks.count > 1 {
-                        CoachFollowUpBlocksCarousel(
-                            messageId: message.id,
-                            blocks: message.followUpBlocks,
-                            bubbleMaxWidth: bubbleMaxWidth,
-                            sourceAppearance: responseAppearance,
-                            isEnabled: suggestionsInteractive,
-                            onImmediateAction: onSuggestedAction,
-                            onBatchComplete: onFollowUpBatchComplete
-                        )
-                    } else if let block = message.followUpBlocks.first {
-                        CoachFollowUpRepliesPanel(
-                            followUpQuestion: block.question,
-                            actions: block.suggestedActions,
-                            bubbleMaxWidth: bubbleMaxWidth,
-                            sourceAppearance: responseAppearance,
-                            isEnabled: suggestionsInteractive,
-                            onSelect: onSuggestedAction
-                        )
+                    if showReplyPanel {
+                        if message.followUpBlocks.isEmpty {
+                            CoachFollowUpRepliesPanel(
+                                followUpQuestion: message.followUpQuestion,
+                                actions: message.suggestedActions,
+                                bubbleMaxWidth: bubbleMaxWidth,
+                                sourceAppearance: responseAppearance,
+                                isEnabled: suggestionsInteractive,
+                                onSelect: onSuggestedAction
+                            )
+                        } else if message.followUpBlocks.count > 1 {
+                            CoachFollowUpBlocksCarousel(
+                                messageId: message.id,
+                                blocks: message.followUpBlocks,
+                                bubbleMaxWidth: bubbleMaxWidth,
+                                sourceAppearance: responseAppearance,
+                                isEnabled: suggestionsInteractive,
+                                onImmediateAction: onSuggestedAction,
+                                onBatchComplete: onFollowUpBatchComplete
+                            )
+                        } else if let block = message.followUpBlocks.first {
+                            CoachFollowUpRepliesPanel(
+                                followUpQuestion: block.question,
+                                actions: block.suggestedActions,
+                                bubbleMaxWidth: bubbleMaxWidth,
+                                sourceAppearance: responseAppearance,
+                                isEnabled: suggestionsInteractive,
+                                onSelect: onSuggestedAction
+                            )
+                        }
                     }
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
         .padding(.vertical, 6)
-        // Row entrance is owned by the parent LazyVStack's animation; duplicating it
-        // here caused doubled transitions when new messages were inserted.
     }
 }
 
@@ -582,6 +585,11 @@ struct CoachThinkingDisclosure: View {
                         .font(.system(size: 10, weight: .medium))
                     Text("Reasoning")
                         .font(.system(size: 11, weight: .semibold))
+                    if steps.count > 1 {
+                        Text("\(steps.count) steps")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.22))
+                    }
                     Spacer(minLength: 0)
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
@@ -753,6 +761,17 @@ struct CoachPendingReplyBubble: View {
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.55))
                     .lineLimit(2)
+                Spacer(minLength: 0)
+            }
+        } else if isThinking {
+            HStack(spacing: 8) {
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(responseAppearance.accent.opacity(0.85))
+                    .symbolEffect(.pulse, options: .repeating)
+                Text("Working through your question…")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.55))
                 Spacer(minLength: 0)
             }
         } else {

@@ -96,6 +96,7 @@ Keep the same-user delay in place to protect the sender reputation.
 | `goals` | Distance / duration / TSS / streak goals (period-scoped). |
 | `chat_sessions` | AI coach conversation threads. |
 | `chat_messages` | Messages within a session. |
+| `linked_oauth_accounts` | Encrypted Strava/WHOOP OAuth sessions (AES-256-GCM with `USER_DATA_KEY`). Restored on sign-in after reinstall. |
 
 ### AI-friendly views & RPCs
 
@@ -184,8 +185,112 @@ Use the Supabase MCP `apply_migration` tool with snake_case names. Migrations ap
 7. `07_rls_policies`
 8. `08_views_and_rpc_for_ai`
 9. `09_harden_functions_and_indexes`
+10. `20260527120000_linked_oauth_accounts` (in-repo SQL under `supabase/migrations/`)
 
 After any DDL change, run `get_advisors` (security + performance) and address WARN-level findings before shipping.
+
+### Migration history mismatch (`db pull` / `db push` errors)
+
+The core schema (`profiles`, `workouts`, etc.) was applied remotely via MCP with version IDs that are **not** checked into this repo. Only newer migrations live under `supabase/migrations/`. The CLI then reports:
+
+> Remote migration versions not found in local migrations directory
+
+**Do not use `supabase db pull` to fix this** unless you intend to replace repo migrations with a full remote dump (and you have `SUPABASE_DB_PASSWORD` set for the linked project).
+
+**Recommended fix** (history bookkeeping only — does not drop existing tables):
+
+```bash
+supabase link --project-ref jvhkplgacbeuksiphgyk
+./scripts/repair-supabase-migration-history.sh
+```
+
+Or manually:
+
+```bash
+supabase migration repair --status reverted \
+  20260506211213 20260506211236 20260506211305 20260506211336 \
+  20260506211414 20260506211426 20260506211450 20260506211514 \
+  20260506211548 20260506211745 20260507022847
+
+supabase db push
+```
+
+If you already ran the `linked_oauth_accounts` SQL in the dashboard:
+
+```bash
+supabase migration repair --status applied 20260527120000
+```
+
+**Alternative:** paste `supabase/migrations/20260527120000_linked_oauth_accounts.sql` into the Supabase SQL editor and run it, then mark applied as above.
+
+### Cleanup
+
+| Goal | What to do |
+| --- | --- |
+| **Fix CLI migration history (one-time)** | `./scripts/repair-supabase-migration-history.sh` — does not delete data |
+| **Local CLI cache** | Delete `supabase/.temp/` (ignored by git; recreated on `supabase link`) |
+| **Unlink project on this machine** | `supabase unlink` |
+| **Remove encrypted Strava/WHOOP backups** | Disconnect each service in Settings, or sign in and use “Delete all my data” (also wipes local + cloud OAuth rows) |
+| **Remove cloud account data, keep local rides** | Settings → Account → Sign out (OAuth backups stay until you disconnect integrations) |
+| **Drop `linked_oauth_accounts` table** | Dashboard SQL: `drop table if exists public.linked_oauth_accounts cascade;` then `supabase migration repair --status reverted 20260527120000` |
+
+**Do not** run `supabase db reset` on the hosted project — that targets local Docker, not production. Never `drop schema public` on `jvhkplgacbeuksiphgyk` unless you intend to destroy all user data.
+
+**Steady state after repair:** only `supabase/migrations/*.sql` in git drives new changes; use `supabase db push` for future migrations. Skip `db pull` unless you are intentionally rebaselining the migrations folder.
+
+### Linked OAuth (Strava / WHOOP)
+
+Apply migration `supabase/migrations/20260527120000_linked_oauth_accounts.sql` to the project (via `db push` after repair, or SQL editor).
+
+When the user is signed in to cloud backup:
+
+1. Connecting Strava or WHOOP encrypts the session JSON and upserts `linked_oauth_accounts`.
+2. Sign-in / sync **pull** restores tokens into Keychain if the device has no newer local copy.
+3. Disconnect or “Delete all my data” removes the cloud row.
+
+Requires `USER_DATA_KEY` in the build (same key as coach context encryption). App Store builds share one key per release; custom `Secrets.xcconfig` overrides break cross-device restore for that dev build.
+
+## WHOOP / Strava OAuth (server-side token exchange)
+
+[WHOOP](https://developer.whoop.com/docs/developing/oauth/) and [Strava](https://developers.strava.com/docs/authentication/) both require a **client secret** when exchanging authorization codes or refresh tokens. The secret must not ship in the iOS app. Mangox proxies token exchange through the Supabase Edge Function `oauth-token-exchange` (`supabase/functions/oauth-token-exchange/`).
+
+The app still embeds **client IDs** and redirect URIs in `Config/App.xcconfig` (for the browser OAuth step). Only the secrets live on Supabase.
+
+### Deploy
+
+```bash
+# One-time: link the Supabase CLI to project jvhkplgacbeuksiphgyk
+supabase link --project-ref jvhkplgacbeuksiphgyk
+
+# Set secrets (values from WHOOP Developer Dashboard / Strava API settings)
+supabase secrets set \
+  WHOOP_CLIENT_ID='your-whoop-client-id' \
+  WHOOP_CLIENT_SECRET='your-whoop-client-secret' \
+  STRAVA_CLIENT_ID='your-strava-client-id' \
+  STRAVA_CLIENT_SECRET='your-strava-client-secret'
+
+# Deploy the function
+supabase functions deploy oauth-token-exchange
+```
+
+Or run `scripts/deploy-oauth-edge-function.sh` after exporting the four env vars above.
+
+`verify_jwt` is **false** for this function so users can link WHOOP/Strava before signing in to cloud backup. The publishable anon key is still required on each request.
+
+### Redirect URIs
+
+Allowed by default:
+
+- `mangox://localhost/whoop-auth`
+- `mangox://localhost/strava-auth`
+
+Register the same URLs in the WHOOP and Strava developer consoles. Optional extra URIs: set `OAUTH_ALLOWED_REDIRECT_URIS` (comma-separated) in Supabase secrets.
+
+### iOS behavior
+
+- `WhoopService` / `StravaService` call `OAuthTokenExchangeClient`, which invokes `oauth-token-exchange` via `supabase-swift`.
+- `isConfigured` is true when the app has a client ID, redirect URI, and Supabase URL/key in the build — not when xcconfig contains a client secret.
+- If secrets are missing on the server, connect fails with a clear proxy error in Settings.
 
 ## Things still to do (manual)
 

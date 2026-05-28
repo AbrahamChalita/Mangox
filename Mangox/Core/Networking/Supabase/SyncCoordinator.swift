@@ -51,14 +51,21 @@ final class SyncCoordinator {
     private let auth: AuthState
     private let context: ModelContext
     private let domains: [SupabaseSyncDomain]
+    let linkedOAuthBridge: LinkedOAuthSessionBridge?
 
     private var debounceTask: Task<Void, Never>?
     private var authObservationTask: Task<Void, Never>?
 
-    init(auth: AuthState, context: ModelContext, domains: [SupabaseSyncDomain]) {
+    init(
+        auth: AuthState,
+        context: ModelContext,
+        domains: [SupabaseSyncDomain],
+        linkedOAuthBridge: LinkedOAuthSessionBridge? = nil
+    ) {
         self.auth = auth
         self.context = context
         self.domains = domains
+        self.linkedOAuthBridge = linkedOAuthBridge
         startObservingAuth()
     }
 
@@ -87,7 +94,10 @@ final class SyncCoordinator {
                 #endif
             }
         }
-        for domain in domains {
+        // Restore Strava/WHOOP tokens before other pulls so a fresh install can import.
+        let linkedOAuth = domains.filter { $0.name == "linked_oauth_accounts" }
+        let otherDomains = domains.filter { $0.name != "linked_oauth_accounts" }
+        for domain in linkedOAuth + otherDomains {
             do {
                 try await domain.pull(userId: userId, client: client, context: context)
             } catch {

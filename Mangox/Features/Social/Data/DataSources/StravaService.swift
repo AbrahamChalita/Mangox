@@ -225,7 +225,7 @@ final class StravaService: StravaServiceProtocol {
         var errorDescription: String? {
             switch self {
             case .notConfigured:
-                return "Strava uploads require server-side OAuth token exchange before this build can connect."
+                return "Strava linking requires Mangox cloud backup (Supabase) and the oauth-token-exchange edge function with Strava secrets deployed."
             case .invalidAuthURL:
                 return "Unable to build Strava authorization URL."
             case .userCancelled:
@@ -267,7 +267,7 @@ final class StravaService: StravaServiceProtocol {
     var lastError: String?
 
     var isConfigured: Bool {
-        !clientID.isEmpty && !clientSecret.isEmpty && !redirectURIString.isEmpty
+        !clientID.isEmpty && !redirectURIString.isEmpty && OAuthTokenExchangeClient.isAvailable
     }
 
     private static let tokenURL = URL(string: "https://www.strava.com/oauth/token")!
@@ -276,6 +276,14 @@ final class StravaService: StravaServiceProtocol {
     private static let athleteURL = URL(string: "https://www.strava.com/api/v3/athlete")!
     static let athleteActivitiesURL = URL(string: "https://www.strava.com/api/v3/athlete/activities")!
     private static let keychainAccount = "strava.session.v1"
+    private static let localSavedAtKey = "mangox.linked_oauth.strava.saved_at"
+
+    weak var linkedOAuthBridge: LinkedOAuthSessionBridge?
+
+    var linkedAccountLocalSavedAt: Date? {
+        let t = UserDefaults.standard.double(forKey: Self.localSavedAtKey)
+        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }
     private static let requestTimeout: TimeInterval = 20
     private static let uploadTimeout: TimeInterval = 45
     private static let resourceTimeout: TimeInterval = 90
@@ -465,6 +473,30 @@ final class StravaService: StravaServiceProtocol {
         isConnected = false
         lastError = nil
         _ = try? KeychainStorage.delete(account: Self.keychainAccount)
+        UserDefaults.standard.removeObject(forKey: Self.localSavedAtKey)
+        let bridge = linkedOAuthBridge
+        Task { await bridge?.deleteCloudSession(provider: .strava) }
+    }
+
+    func exportSessionJSONForCloudBackup() -> Data? {
+        guard let session else { return nil }
+        return try? JSONEncoder().encode(session)
+    }
+
+    func restoreSessionFromCloudIfNeeded(sessionJSON: Data, remoteUpdatedAt: Date) {
+        if isConnected, let localAt = linkedAccountLocalSavedAt, localAt >= remoteUpdatedAt {
+            return
+        }
+        do {
+            let restored = try JSONDecoder().decode(Session.self, from: sessionJSON)
+            try persistSession(restored, notifyCloud: false)
+            applySession(restored)
+            markLinkedAccountSaved(at: remoteUpdatedAt)
+            lastError = nil
+            stravaLogger.info("Strava session restored from cloud backup")
+        } catch {
+            stravaLogger.error("Strava cloud restore failed: \(error.localizedDescription)")
+        }
     }
 
     /// Updates an existing Strava activity with custom metadata.
@@ -762,35 +794,26 @@ final class StravaService: StravaServiceProtocol {
         code: String? = nil,
         refreshToken: String? = nil
     ) async throws -> TokenResponse {
-        var request = URLRequest(url: Self.tokenURL)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = Self.requestTimeout
-
-        var items: [URLQueryItem] = [
-            URLQueryItem(name: "client_id", value: clientID),
-            URLQueryItem(name: "client_secret", value: clientSecret),
-            URLQueryItem(name: "grant_type", value: grantType),
-        ]
-        if let code {
-            items.append(URLQueryItem(name: "code", value: code))
-        }
-        if let refreshToken {
-            items.append(URLQueryItem(name: "refresh_token", value: refreshToken))
-        }
-
-        var body = URLComponents()
-        body.queryItems = items
-        request.httpBody = body.percentEncodedQuery?.data(using: .utf8)
-
-        let (data, response) = try await send(request, context: "Strava sign-in")
-        guard let http = response as? HTTPURLResponse else {
-            throw StravaError.invalidResponse
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
-            throw StravaError.tokenExchangeFailed(message)
+        let data: Data
+        do {
+            data = try await OAuthTokenExchangeClient.exchange(
+                provider: .strava,
+                grantType: grantType,
+                code: code,
+                refreshToken: refreshToken,
+                redirectURI: code != nil ? redirectURIString : nil
+            )
+        } catch let error as OAuthTokenExchangeClient.ExchangeError {
+            switch error {
+            case .notConfigured:
+                throw StravaError.notConfigured
+            case .invalidResponse:
+                throw StravaError.tokenExchangeFailed("Invalid response from OAuth proxy.")
+            case .serverError(let message):
+                throw StravaError.tokenExchangeFailed(message)
+            }
+        } catch {
+            throw StravaError.tokenExchangeFailed(error.localizedDescription)
         }
 
         do {
@@ -1072,9 +1095,18 @@ final class StravaService: StravaServiceProtocol {
         )
     }
 
-    private func persistSession(_ session: Session) throws {
+    private func persistSession(_ session: Session, notifyCloud: Bool = true) throws {
         let data = try JSONEncoder().encode(session)
         try KeychainStorage.save(data: data, account: Self.keychainAccount)
+        if notifyCloud {
+            markLinkedAccountSaved(at: Date())
+            let bridge = linkedOAuthBridge
+            Task { await bridge?.pushProviderToCloud(.strava) }
+        }
+    }
+
+    private func markLinkedAccountSaved(at date: Date) {
+        UserDefaults.standard.set(date.timeIntervalSince1970, forKey: Self.localSavedAtKey)
     }
 
     private func restoreSession() {

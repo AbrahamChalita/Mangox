@@ -33,7 +33,7 @@ final class WhoopService: WhoopServiceProtocol {
         var errorDescription: String? {
             switch self {
             case .notConfigured:
-                return "WHOOP requires server-side OAuth token exchange before this build can connect."
+                return "WHOOP linking requires Mangox cloud backup (Supabase) and the oauth-token-exchange edge function with WHOOP secrets deployed."
             case .invalidAuthURL:
                 return "Unable to build WHOOP authorization URL."
             case .userCancelled:
@@ -131,7 +131,7 @@ final class WhoopService: WhoopServiceProtocol {
     private(set) var latestMaxHeartRateFromProfile: Int?
 
     var isConfigured: Bool {
-        !clientID.isEmpty && !clientSecret.isEmpty && !redirectURIString.isEmpty
+        !clientID.isEmpty && !redirectURIString.isEmpty && OAuthTokenExchangeClient.isAvailable
     }
 
     private static let authorizeURL = URL(string: "https://api.prod.whoop.com/oauth/oauth2/auth")!
@@ -139,6 +139,14 @@ final class WhoopService: WhoopServiceProtocol {
     /// REST resources live under `/developer` (OAuth endpoints do not).
     private static let apiBase = URL(string: "https://api.prod.whoop.com/developer")!
     private static let keychainAccount = "whoop.session.v1"
+    private static let localSavedAtKey = "mangox.linked_oauth.whoop.saved_at"
+
+    weak var linkedOAuthBridge: LinkedOAuthSessionBridge?
+
+    var linkedAccountLocalSavedAt: Date? {
+        let t = UserDefaults.standard.double(forKey: Self.localSavedAtKey)
+        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }
     private static let requestTimeout: TimeInterval = 25
     private static let resourceTimeout: TimeInterval = 60
     /// Space-delimited OAuth scopes ([WHOOP API docs](https://developer.whoop.com/api/)).
@@ -373,6 +381,30 @@ final class WhoopService: WhoopServiceProtocol {
         lastError = nil
         lastSuccessfulRefreshAt = nil
         _ = try? WhoopKeychainStorage.delete(account: Self.keychainAccount)
+        UserDefaults.standard.removeObject(forKey: Self.localSavedAtKey)
+        let bridge = linkedOAuthBridge
+        Task { await bridge?.deleteCloudSession(provider: .whoop) }
+    }
+
+    func exportSessionJSONForCloudBackup() -> Data? {
+        guard let session else { return nil }
+        return try? JSONEncoder().encode(session)
+    }
+
+    func restoreSessionFromCloudIfNeeded(sessionJSON: Data, remoteUpdatedAt: Date) {
+        if isConnected, let localAt = linkedAccountLocalSavedAt, localAt >= remoteUpdatedAt {
+            return
+        }
+        do {
+            let restored = try JSONDecoder().decode(Session.self, from: sessionJSON)
+            try persistSession(restored, notifyCloud: false)
+            applySession(restored)
+            markLinkedAccountSaved(at: remoteUpdatedAt)
+            lastError = nil
+            whoopLogger.info("WHOOP session restored from cloud backup")
+        } catch {
+            whoopLogger.error("WHOOP cloud restore failed: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - OAuth
@@ -479,36 +511,26 @@ final class WhoopService: WhoopServiceProtocol {
         code: String? = nil,
         refreshToken: String? = nil
     ) async throws -> TokenResponse {
-        var request = URLRequest(url: Self.tokenURL)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = Self.requestTimeout
-
-        var items: [URLQueryItem] = [
-            URLQueryItem(name: "client_id", value: clientID),
-            URLQueryItem(name: "client_secret", value: clientSecret),
-            URLQueryItem(name: "grant_type", value: grantType),
-        ]
-        if let code {
-            items.append(URLQueryItem(name: "code", value: code))
-            items.append(URLQueryItem(name: "redirect_uri", value: redirectURIString))
-        }
-        if let refreshToken {
-            items.append(URLQueryItem(name: "refresh_token", value: refreshToken))
-            items.append(URLQueryItem(name: "scope", value: "offline"))
-        }
-        var body = URLComponents()
-        body.queryItems = items
-        request.httpBody = body.percentEncodedQuery?.data(using: .utf8)
-
-        let (data, response) = try await send(request, context: "WHOOP sign-in")
-        guard let http = response as? HTTPURLResponse else {
-            throw WhoopError.invalidResponse
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
-            throw WhoopError.tokenExchangeFailed(message)
+        let data: Data
+        do {
+            data = try await OAuthTokenExchangeClient.exchange(
+                provider: .whoop,
+                grantType: grantType,
+                code: code,
+                refreshToken: refreshToken,
+                redirectURI: code != nil ? redirectURIString : nil
+            )
+        } catch let error as OAuthTokenExchangeClient.ExchangeError {
+            switch error {
+            case .notConfigured:
+                throw WhoopError.notConfigured
+            case .invalidResponse:
+                throw WhoopError.tokenExchangeFailed("Invalid response from OAuth proxy.")
+            case .serverError(let message):
+                throw WhoopError.tokenExchangeFailed(message)
+            }
+        } catch {
+            throw WhoopError.tokenExchangeFailed(error.localizedDescription)
         }
 
         do {
@@ -674,9 +696,18 @@ final class WhoopService: WhoopServiceProtocol {
         return URLSession(configuration: configuration)
     }
 
-    private func persistSession(_ session: Session) throws {
+    private func persistSession(_ session: Session, notifyCloud: Bool = true) throws {
         let data = try JSONEncoder().encode(session)
         try WhoopKeychainStorage.save(data: data, account: Self.keychainAccount)
+        if notifyCloud {
+            markLinkedAccountSaved(at: Date())
+            let bridge = linkedOAuthBridge
+            Task { await bridge?.pushProviderToCloud(.whoop) }
+        }
+    }
+
+    private func markLinkedAccountSaved(at date: Date) {
+        UserDefaults.standard.set(date.timeIntervalSince1970, forKey: Self.localSavedAtKey)
     }
 
     private func restoreSession() {

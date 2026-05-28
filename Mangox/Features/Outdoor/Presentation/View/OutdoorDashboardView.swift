@@ -313,11 +313,22 @@ struct OutdoorDashboardView: View {
     /// Match `LocationManager` acceptable accuracy for a “ready” outdoor fix.
     private let outdoorReadyAccuracyMeters: Double = 50
 
-    init(navigationPath: Binding<NavigationPath>, di: DIContainer, viewModel: OutdoorViewModel) {
+    init(
+        navigationPath: Binding<NavigationPath>,
+        di: DIContainer,
+        viewModel: OutdoorViewModel,
+        planID: String? = nil,
+        planDayID: String? = nil
+    ) {
         self._navigationPath = navigationPath
         self.di = di
         self._viewModel = State(initialValue: viewModel)
+        self.planID = planID
+        self.planDayID = planDayID
     }
+
+    private let planID: String?
+    private let planDayID: String?
 
     /// Shorthand for the location service — replaces the removed `@Environment(LocationManager.self)`.
     private var ls: LocationServiceProtocol { viewModel.locationService }
@@ -626,6 +637,7 @@ struct OutdoorDashboardView: View {
     // MARK: - Lifecycle (body wiring)
 
     private func handleViewAppear() {
+        viewModel.configurePlanContext(planID: planID, planDayID: planDayID)
         viewModel.handleAppear(
             locationManager: ls,
             autoLapIntervalMeters: prefs.outdoorAutoLapIntervalMeters,

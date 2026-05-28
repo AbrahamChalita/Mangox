@@ -910,6 +910,26 @@ extension AIService {
         if let goal = ctx.seasonGoalSummary, !goal.isEmpty {
             lines.append("Season goal: \(goal)")
         }
+
+        // Current PMC state (precision coach signal)
+        let ft = FitnessTracker.shared
+        if ft.isLoaded {
+            lines.append(String(format: "Current training load: CTL %.1f (fitness), ATL %.1f (fatigue), TSB %+.1f (form).", ft.currentCTL, ft.currentATL, ft.currentTSB))
+            if let trend = PMCTrend.compactTrendLine(history: ft.history) {
+                lines.append(trend)
+            }
+        }
+
+        if let decouplingTrend = ctx.aerobicDecouplingTrend, !decouplingTrend.isEmpty {
+            lines.append("Decoupling trend: \(decouplingTrend)")
+        }
+        if let curve = ctx.powerCurveSummary, !curve.isEmpty {
+            lines.append(curve)
+        }
+        if let cp = ctx.criticalPowerSummary, !cp.isEmpty {
+            lines.append("Critical power: \(cp)")
+        }
+
         if let ride = ctx.lastRide {
             lines.append("Last completed ride (\(ride.date)): \(ride.summary).")
         } else {
@@ -950,6 +970,19 @@ extension AIService {
         } else {
             lines.append("No active plan.")
         }
+
+        // Compact PMC for token budget
+        let ft = FitnessTracker.shared
+        if ft.isLoaded {
+            lines.append(String(format: "Load: CTL %.0f / ATL %.0f / TSB %+.0f", ft.currentCTL, ft.currentATL, ft.currentTSB))
+            if let w14 = PMCTrend.windowSummary(history: ft.history, days: 14) {
+                lines.append("14d PMC: \(w14.plainLanguageSummary)")
+            }
+        }
+        if let decouplingTrend = ctx.aerobicDecouplingTrend, !decouplingTrend.isEmpty {
+            lines.append("Decoupling: \(decouplingTrend)")
+        }
+
         if let ride = ctx.lastRide {
             lines.append("Last ride (\(ride.date)): \(ride.summary)")
         } else {
@@ -1141,7 +1174,123 @@ extension AIService {
         if let hint = ctx.planKeyDaySemanticsHint, !hint.isEmpty {
             lines.append("Plan note: \(hint)")
         }
+
+        // Live PMC state so the coach can run accurate forward projections
+        let ft = FitnessTracker.shared
+        if ft.isLoaded {
+            lines.append(String(format: "Current PMC: CTL %.1f, ATL %.1f, TSB %+.1f", ft.currentCTL, ft.currentATL, ft.currentTSB))
+        }
         return lines.joined(separator: "\n")
+    }
+
+    func coachDecouplingTrendToolPayload(modelContext: ModelContext, rideLimit: Int = 12) -> String {
+        let descriptor = FetchDescriptor<Workout>(
+            predicate: #Predicate<Workout> { $0.statusRaw == "completed" },
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        let rides = ((try? modelContext.fetch(descriptor)) ?? []).filter(\.isValid)
+
+        let samples: [AerobicDecouplingTrend.RideSample] = rides
+            .prefix(rideLimit)
+            .reversed()
+            .compactMap { ride in
+                guard let result = AerobicDecouplingAnalytics.compute(from: ride),
+                      result.status != .insufficientData
+                else { return nil }
+                return AerobicDecouplingTrend.RideSample(
+                    date: ride.startDate,
+                    decouplingPercent: result.decouplingPercent,
+                    status: result.status
+                )
+            }
+
+        let trend = AerobicDecouplingTrend.analyze(rides: samples)
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .none
+
+        var lines: [String] = [
+            trend.plainLanguageSummary,
+            String(format: "Slope: %+.2f%%/ride (significant: %@)", trend.slopePercentPerRide, trend.isSignificant ? "yes" : "no"),
+        ]
+
+        if samples.isEmpty {
+            lines.append("Per-ride decoupling: none with enough steady power+HR data.")
+        } else {
+            lines.append("Per-ride decoupling (oldest → newest):")
+            for sample in samples {
+                lines.append(
+                    String(
+                        format: "%@: %.1f%% (%@)",
+                        df.string(from: sample.date),
+                        sample.decouplingPercent,
+                        sample.status.rawValue
+                    )
+                )
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    func coachPowerCurveSummaryToolPayload(
+        modelContext: ModelContext,
+        rangeDays: Int = PowerCurveSummary.defaultRangeDays
+    ) -> String {
+        let descriptor = FetchDescriptor<Workout>(
+            predicate: #Predicate<Workout> { $0.statusRaw == "completed" },
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        let workouts = ((try? modelContext.fetch(descriptor)) ?? []).filter(\.isValid)
+        let candidates = WorkoutMetricsSnapshot.powerCurveCandidates(
+            from: workouts,
+            rangeDays: rangeDays
+        )
+        let points = PowerCurveAnalytics.compute(from: candidates.map(\.sortedPowers))
+        return PowerCurveSummary.format(points: points, ftp: PowerZone.ftp, rangeDays: rangeDays)
+    }
+
+    func coachCriticalPowerToolPayload(modelContext: ModelContext) -> String {
+        let descriptor = FetchDescriptor<Workout>(
+            predicate: #Predicate<Workout> { $0.statusRaw == "completed" },
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        let workouts = ((try? modelContext.fetch(descriptor)) ?? []).filter(\.isValid)
+        let candidates = WorkoutMetricsSnapshot.powerCurveCandidates(
+            from: workouts,
+            rangeDays: PowerCurveSummary.defaultRangeDays
+        )
+        let points = PowerCurveAnalytics.compute(from: candidates.map(\.sortedPowers))
+        guard let fit = CriticalPowerModel.fit(from: points) else {
+            return "Not enough duration-diverse power data for a CP/W′ fit (need ≥3 efforts ≥3min)."
+        }
+        PrecisionCoachInstrumentation.criticalPowerFit(
+            cpWatts: fit.criticalPowerWatts,
+            wPrimeKJ: fit.wPrimeJoules / 1000,
+            rSquared: fit.rSquared
+        )
+        var lines = [fit.plainLanguageSummary]
+        if let p20 = CriticalPowerModel.predictedPower(durationSeconds: 1200, fit: fit) {
+            lines.append("Model 20m power: \(p20)W")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    func coachPlanForwardDailyTSSForTools(
+        modelContext: ModelContext,
+        horizonDays: Int = 42
+    ) -> [Double] {
+        let progressDescriptor = FetchDescriptor<TrainingPlanProgress>(
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        guard let progress = (try? modelContext.fetch(progressDescriptor))?.first,
+              let plan = PlanLibrary.resolvePlan(planID: progress.planID, modelContext: modelContext)
+        else { return [] }
+
+        return PlanTSSVectorBuilder.forwardDailyTSS(
+            plan: plan,
+            progress: PlanProgressFields(from: progress),
+            horizonDays: horizonDays
+        )
     }
 
     func starterPromptAvailability(modelContext: ModelContext) -> CoachStarterPromptAvailability {

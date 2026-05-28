@@ -3,7 +3,7 @@ import Foundation
 
 /// Estimates Pw:HR aerobic decoupling for steady endurance-style rides.
 /// Positive values mean heart rate rose relative to power in the second half.
-enum AerobicDecouplingAnalytics {
+nonisolated enum AerobicDecouplingAnalytics {
     struct Sample: Sendable {
         let elapsedSeconds: Int
         let power: Int

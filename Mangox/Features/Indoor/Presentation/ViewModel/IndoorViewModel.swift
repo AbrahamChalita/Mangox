@@ -634,8 +634,7 @@ final class IndoorViewModel {
                 dayID: dayID,
                 resolvedPlanID: resolvedPlanID,
                 linkedPlanDay: linkedPlanDay,
-                completedWorkout: completedWorkout,
-                allProgress: allProgress
+                completedWorkout: completedWorkout
             )
         }
 
@@ -658,33 +657,17 @@ final class IndoorViewModel {
         dayID: String,
         resolvedPlanID: String,
         linkedPlanDay: PlanDay?,
-        completedWorkout: Workout?,
-        allProgress: [TrainingPlanProgress]
+        completedWorkout: Workout?
     ) {
-        if let progress = allProgress.first(where: { $0.planID == resolvedPlanID }) {
-            do {
-                try trainingPlanPersistenceRepository.markCompleted(dayID, progress: progress)
-            } catch {
-                lastPersistenceError =
-                    (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            }
-        }
-
-        if let workout = completedWorkout,
-            let linkedPlanDay,
-            let progress = allProgress.first(where: { $0.planID == resolvedPlanID })
-        {
-            AdaptiveTrainingAdjuster.adjustAfterCompletedPlanWorkout(
-                workout: workout,
-                planDay: linkedPlanDay,
-                progress: progress
-            )
-            do {
-                try trainingPlanPersistenceRepository.save(progress: progress)
-            } catch {
-                lastPersistenceError =
-                    (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            }
-        }
+        guard let workout = completedWorkout else { return }
+        PlanWorkoutCompletion.completePlanLinkedRide(
+            workout: workout,
+            planID: resolvedPlanID,
+            dayID: dayID,
+            planDay: linkedPlanDay,
+            modelContext: PersistenceContainer.shared.mainContext,
+            trainingPlanPersistenceRepository: trainingPlanPersistenceRepository,
+            source: "indoor_auto"
+        )
     }
 }
