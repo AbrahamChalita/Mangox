@@ -53,10 +53,10 @@ function firstQuestionFromProse(content: string): string | null {
 
 function planIntakeClarificationChips(): SuggestedAction[] {
   return [
-    { label: "Target event & date", type: "ask_followup" },
-    { label: "Distance & elevation", type: "ask_followup" },
-    { label: "FTP & hours per week", type: "ask_followup" },
-    { label: "I'm new — guide me step by step", type: "ask_followup" },
+    { label: "Gran Fondo or century ride", type: "ask_followup" },
+    { label: "L'Étape or sportive event", type: "ask_followup" },
+    { label: "About 8 hours per week", type: "ask_followup" },
+    { label: "Guide me step by step", type: "ask_followup" },
   ];
 }
 

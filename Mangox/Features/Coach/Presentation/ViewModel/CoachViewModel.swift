@@ -21,6 +21,7 @@ final class CoachViewModel {
     var streamDraftText: String { coach.streamDraftText }
     var streamStatusText: String? { coach.streamStatusText }
     var streamIsThinking: Bool { coach.streamIsThinking }
+    var streamIsSearchingWeb: Bool { coach.streamIsSearchingWeb }
     var todayMessageCount: Int { coach.todayMessageCount }
     var contextWindowSize: Int { coach.contextWindowSize }
     var currentContextCount: Int { coach.currentContextCount }
@@ -93,9 +94,19 @@ final class CoachViewModel {
 
     func sendMessage(
         _ text: String,
-        isPro: Bool
+        isPro: Bool,
+        forcePlanIntake: Bool = false
     ) async {
-        await coach.sendMessage(text, isPro: isPro)
+        await coach.sendMessage(text, isPro: isPro, forcePlanIntake: forcePlanIntake)
+    }
+
+    @discardableResult
+    func prepareOutgoingMessage(_ text: String, isPro: Bool) -> Bool {
+        coach.prepareOutgoingMessage(text, isPro: isPro)
+    }
+
+    func cancelActiveChatTurn() {
+        coach.cancelActiveChatTurn()
     }
 
     func createNewSession() {
@@ -120,7 +131,7 @@ final class CoachViewModel {
         guard let lastUser = messages.last(where: { $0.role == .user })?.content,
               !lastUser.isEmpty
         else { return }
-        await coach.sendMessage(lastUser, isPro: isPro)
+        await coach.sendMessage(lastUser, isPro: isPro, forcePlanIntake: false)
     }
 
     func submitFeedback(for messageID: UUID, score: Int) {

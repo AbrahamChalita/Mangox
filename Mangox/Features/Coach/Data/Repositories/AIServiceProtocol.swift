@@ -19,6 +19,7 @@ protocol AIServiceProtocol: AnyObject {
     var streamDraftText: String { get }
     var streamStatusText: String? { get }
     var streamIsThinking: Bool { get }
+    var streamIsSearchingWeb: Bool { get }
     var currentSessionID: UUID? { get }
     var todayMessageCount: Int { get }
 
@@ -29,8 +30,14 @@ protocol AIServiceProtocol: AnyObject {
 
     func sendMessage(
         _ text: String,
-        isPro: Bool
+        isPro: Bool,
+        forcePlanIntake: Bool
     ) async
+
+    @discardableResult
+    func prepareOutgoingMessage(_ text: String, isPro: Bool) -> Bool
+
+    func cancelActiveChatTurn()
 
     @discardableResult
     func generatePlan(

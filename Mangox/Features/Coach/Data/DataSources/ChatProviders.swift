@@ -164,6 +164,10 @@ private struct MangoxBackendChatProvider: ChatProviderAdapter {
                                     if let delta = event.delta {
                                         continuation.yield(.textDelta(delta))
                                     }
+                                case "reasoning_delta":
+                                    if let delta = event.delta {
+                                        continuation.yield(.reasoningDelta(delta))
+                                    }
                                 case "final":
                                     if let message = event.message {
                                         if !message.toolCalls.isEmpty {

@@ -29,6 +29,7 @@ struct CoachConversationView: View {
     @State private var showConversationsList = false
     @State private var chatColumnWidth: CGFloat = 400
     @State private var composerFocusScrollNonce = 0
+    @State private var sentChipKey: String?
 
     private static let planBuilderSeed =
         "I want to build a structured training plan for an event. Ask me about my goal, target date, weekly training hours, and experience, then outline next steps."
@@ -60,8 +61,9 @@ struct CoachConversationView: View {
                     greetingText: greetingText,
                     bottomSpacerHeight: coachTranscriptBottomSpacerHeight,
                     composerFocusScrollNonce: composerFocusScrollNonce,
-                    onSend: send,
-                    onPlanBuilder: { send(Self.planBuilderSeed) },
+                    sentChipKey: sentChipKey,
+                    onSend: { send($0) },
+                    onPlanBuilder: { send(Self.planBuilderSeed, forcePlanIntake: true) },
                     onPaywall: { auxiliarySheet = .paywall },
                     onSuggestedAction: handleSuggestedAction,
                     onRetry: {
@@ -108,6 +110,16 @@ struct CoachConversationView: View {
         .task(id: "\(coachViewModel.currentSessionID?.uuidString ?? "none")") {
             await coachViewModel.refreshStarterContentIfNeeded()
         }
+        .onChange(of: coachViewModel.isLoading) { _, loading in
+            if !loading {
+                sentChipKey = nil
+            }
+        }
+        .onChange(of: coachViewModel.error) { _, error in
+            if error != nil, !coachViewModel.isLoading {
+                sentChipKey = nil
+            }
+        }
     }
 
     // MARK: Top chrome
@@ -145,7 +157,7 @@ struct CoachConversationView: View {
                     .accessibilityLabel(A11yL10n.conversations)
 
                     Button {
-                        send(Self.planBuilderSeed)
+                        send(Self.planBuilderSeed, forcePlanIntake: true)
                     } label: {
                         Image(systemName: "calendar.badge.plus")
                             .font(.system(size: 17, weight: .medium))
@@ -296,7 +308,8 @@ struct CoachConversationView: View {
 
     /// Extra lift so the last coach bubble clears the plan card; smaller spacer when the inset is tall.
     private var coachTranscriptBottomSpacerHeight: CGFloat {
-        coachPlanSheetActive ? 12 : 28
+        if coachPlanSheetActive { return 44 }
+        return 28
     }
 
     private var inputBar: some View {
@@ -318,17 +331,28 @@ struct CoachConversationView: View {
         )
     }
 
-    private func send(_ text: String) {
+    private func send(_ text: String, forcePlanIntake: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        guard !coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) else {
+            auxiliarySheet = .paywall
+            return
+        }
+        guard coachViewModel.prepareOutgoingMessage(trimmed, isPro: coachViewModel.isPro) else {
+            return
+        }
         HapticManager.shared.coachMessageSent()
         Task { @MainActor in
-            await coachViewModel.sendMessage(trimmed, isPro: coachViewModel.isPro)
+            await coachViewModel.sendMessage(
+                trimmed,
+                isPro: coachViewModel.isPro,
+                forcePlanIntake: forcePlanIntake || AIService.shouldForcePlanIntake(for: trimmed)
+            )
         }
     }
 
     /// Taps on model-provided `suggestedActions` chips (same JSON contract as the Mangox Cloud coach).
-    private func handleSuggestedAction(_ action: SuggestedAction) {
+    private func handleSuggestedAction(from messageID: UUID, _ action: SuggestedAction) {
         guard !coachViewModel.isLoading else { return }
         let kind = action.type.lowercased()
         guard !coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) else {
@@ -347,7 +371,9 @@ struct CoachConversationView: View {
             coachViewModel.clearWorkoutSaveCelebration()
             chatSheetPresented = false
         default:
-            send(CoachChipPresentation.outgoingText(for: action))
+            sentChipKey = CoachChipSentState.key(messageID: messageID, action: action)
+            let outgoing = CoachChipPresentation.outgoingText(for: action)
+            send(outgoing, forcePlanIntake: AIService.shouldForcePlanIntake(for: outgoing))
         }
     }
 }
@@ -357,19 +383,18 @@ struct CoachStreamingSection: View {
 
     var body: some View {
         if coachViewModel.isLoading {
-            // ONE persistent bubble for the entire pending turn. Internal state
-            // (typing dots → status → reasoning → streaming text) swaps inside the
-            // same shell so the row never resizes or re-flows. This eliminates the
-            // "thinking bubble flicker" and guarantees a placeholder is visible
-            // immediately on the very first message — the bubble shell mounts as
-            // soon as `isLoading` flips, before any stream events arrive.
             CoachPendingReplyBubble(
                 streamingText: coachViewModel.streamDraftText,
-                statusText: coachViewModel.streamStatusText,
-                isThinking: coachViewModel.streamIsThinking,
+                isSearchingWeb: coachViewModel.streamIsSearchingWeb,
                 style: .cloud
             )
             .id("pending-bubble")
+            .transition(
+                .asymmetric(
+                    insertion: .move(edge: .bottom).combined(with: .opacity),
+                    removal: .opacity
+                )
+            )
         }
     }
 }

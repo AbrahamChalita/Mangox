@@ -1,0 +1,623 @@
+version: 1
+plan:
+  name: 'Mangox iOS 26+ code audit (SwiftUI, concurrency, performance, architecture)'
+  max_concurrency: 4
+  max_consecutive_failures: 2
+  max_cycles: 6
+  verifier_config:
+    default_verifiers: [verifier]
+    audit_sample_rate: 0.0
+tasks:
+  - id: swiftui-ios26-audit
+    title: 'SwiftUI / iOS 26+ Liquid Glass audit of Mangox'
+    assigned_to: coder
+    timeout_ms: 1800000
+    prompt: |
+      You are auditing the Mangox iOS app for SwiftUI and iOS 26+ best practices, with a
+      specific focus on native Liquid Glass adoption. Be programmatic — read real code,
+      cite file:line for every finding, show before/after snippets from this codebase.
+      Do NOT give generic iOS advice. Every claim must be backed by a file in this repo.
+
+      PROJECT FACTS (verified):
+        - iOS deployment target: 26.2 (read it from Mangox.xcodeproj/project.pbxproj to confirm)
+        - Swift 6.0, SWIFT_STRICT_CONCURRENCY=complete, SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
+        - 289 Swift files across Mangox/Features/* and Mangox/Core/
+        - Has Docs/NativeLiquidGlassGuide.md mapping Apple Liquid Glass APIs to Mangox placement
+        - Architecture: DIContainer, MVVM with Data/Domain/Presentation per feature
+
+      LOAD THESE SKILLS (in this order):
+        1. swiftui-pro
+        2. swiftui-liquid-glass
+        3. swiftui-animation
+
+      SCOPE — read these directories and produce findings:
+        - Mangox/App/ (MangoxApp.swift, ContentView.swift, DIContainer.swift, AppRouter.swift)
+        - Mangox/Core/UIComponents/ (Theme, DesignSystem, Components, A11yL10n, etc.)
+        - Mangox/Features/*/Presentation/View/ (every feature's view layer)
+        - Docs/NativeLiquidGlassGuide.md (read the planned placement map, then audit adoption)
+
+      FINDING CATEGORIES — for each, look for:
+        1. **Liquid Glass adoption gaps**: opportunities to use glassEffect, GlassEffectContainer,
+           glassEffectID, GlassEffectTransition, GlassButtonStyle where the guide plans them
+           but the code uses custom blurs, materials, overlays, or ZStack workarounds.
+        2. **Outdated SwiftUI patterns**: NavigationView, NavigationLink(isActive:), .onAppear
+           for state, manual ObservableObject @Published, @ObservedObject where @State is
+           more correct, missing @Observable macros, Force-unwraps in views, etc.
+        3. **Animation / transition issues**: imperative animations, missing reduce-motion
+           guards, missing matchedGeometry for hero transitions, animation(_:value:) misuse.
+        4. **Navigation**: NavigationStack vs NavigationView, programmatic vs declarative
+           routing, deep link handling.
+        5. **Accessibility / a11y**: missing labels, traits, Dynamic Type, VoiceOver, Reduce
+           Motion, color contrast tokens, A11yL10n usage consistency.
+        6. **Design system drift**: hardcoded colors, fonts, spacing that should use the
+           shared Theme / DesignSystem tokens.
+        7. **SwiftUI lifecycle**: scenePhase, background tasks, onChange misuse, scene
+           storage, state restoration.
+
+      DELIVERABLE — write to .mavis/audit/deliverables/01-swiftui-ios26.md with this exact
+      structure:
+
+        # Mangox SwiftUI / iOS 26+ Audit
+
+        ## Summary
+        - Total findings: N
+        - By severity: Critical N / Important N / Nice-to-have N
+        - One-paragraph executive read
+
+        ## Findings (sorted by severity)
+
+        For EACH finding use this exact format:
+
+        ### F-001 — [short title]
+        - **Severity**: Critical | Important | Nice-to-have
+        - **Category**: Liquid Glass | Pattern | Animation | Navigation | a11y | Design system | Lifecycle
+        - **Location**: `path/to/file.swift:LINE` (cite the exact line; if multi-line, cite the start)
+        - **Observed**: <what the code does today, with 2-10 line snippet>
+        - **Why it matters**: <concrete impact: e.g. "misses iOS 26.2 system toolbar blur, custom ZStack overlay is re-rendered on every state change at 60Hz during workout recording"]
+        - **Recommended fix**: <concrete replacement code that fits Mangox's existing patterns, citing Docs/NativeLiquidGlassGuide.md placement map if relevant>
+        - **Effort**: S | M | L
+        - **Related findings**: F-XXX, F-YYY (cross-reference findings across categories)
+
+        ## Cross-Cutting Themes
+        3-7 short paragraphs on patterns you saw repeated across features (e.g. "every
+        feature's settings screen has the same custom blur overlay — should be one shared
+        GlassEffectContainer primitive").
+
+        ## Coverage Notes
+        - Files actually read: <count>
+        - Directories skipped: <list with reason>
+        - Limitations: <e.g. "did not run xcodebuild, did not profile with Instruments">
+
+      RULES:
+        - Severity = Critical (correctness, crashes, data loss, or clear iOS 26.2 API
+          contract violation), Important (clear best-practice gap with measurable impact),
+          Nice-to-have (style / consistency / polish).
+        - Do not invent file:line — only cite what you actually read.
+        - If you cannot find a specific issue in a category, say so explicitly. Do not pad.
+        - Effort: S = < 1 hour, M = 1-4 hours, L = > 4 hours or cross-feature refactor.
+        - At the end of your work, write a one-line summary to stdout: "DELIVERABLE_WRITTEN: 01-swiftui-ios26.md (N findings)"
+
+    verified_by: verifier
+    verify_prompt: |
+      Verify .mavis/audit/deliverables/01-swiftui-ios26.md by re-deriving, not re-reading.
+
+      1. Count findings by severity. Note the totals.
+      2. Pick 2 of the Critical/Important findings. For each, open the cited file at
+         the cited line range and verify:
+         - The code actually does what the "Observed" snippet claims.
+         - The cited file:line is correct (within ±2 lines of the relevant code).
+         - The recommended fix is consistent with iOS 26.2 SwiftUI APIs and fits
+           Mangox's existing patterns (check a sibling file for the same pattern).
+      3. Verify every Critical finding cites a real, readable file. Open each cited
+         file and confirm it exists and is a SwiftUI view file under Mangox/.
+      4. Check that at least one finding in the "Liquid Glass" category exists —
+         this is a stated project goal (Docs/NativeLiquidGlassGuide.md). FAIL if
+         the entire category is empty AND not explicitly justified.
+
+      Report PASS or FAIL. If FAIL, name the specific F-IDs that are wrong and
+      what the code actually says.
+
+  - id: concurrency-audit
+    title: 'Swift 6 strict concurrency audit of Mangox'
+    assigned_to: coder
+    timeout_ms: 1800000
+    prompt: |
+      You are auditing Mangox for Swift 6 strict-concurrency safety. The project has
+      SWIFT_STRICT_CONCURRENCY=complete and warnings-as-errors, so any warning IS a build
+      failure waiting to happen. Be programmatic — read real code, cite file:line for
+      every finding, show actual code from the repo. Do NOT give generic Swift 6 advice.
+
+      PROJECT FACTS (verified):
+        - iOS 26.2, Swift 6.0, SWIFT_STRICT_CONCURRENCY=complete
+        - Recent commits show "Swift 6 concurrency hardening" and refactors resolving
+          data race issues in WorkoutRAGIndex — pattern is ongoing
+        - Heavy async surface: BLE (Core Bluetooth), WiFi trainer, HealthKit, Location,
+          Strava, Whoop, RevenueCat, Supabase, AI coach streaming responses
+        - Uncommitted Coach feature work in Mangox/Features/Coach/
+
+      LOAD THIS SKILL FIRST:
+        - swift-concurrency-expert (or swift-concurrency / ios-swift-concurrency-expert
+          — pick the most relevant available; the skill description says Swift 6.2+ focus
+          which matches iOS 26.2)
+
+      SCOPE — read these directories and produce findings:
+        - Mangox/App/ (DIContainer, content views — services are exposed via environment)
+        - Mangox/Core/ (especially Networking, Persistence, Extensions)
+        - Mangox/Features/*/Data/ (Repositories, DataSources, Engines)
+        - Mangox/Features/*/Presentation/ViewModel/ (all ViewModels)
+        - MangoxLiveActivityExtension/ (Activity attributes shared with main app)
+        - Run `grep -r "Task { " Mangox/ | wc -l` and `grep -r "@MainActor" Mangox/ | wc -l`
+          and `grep -r "Sendable" Mangox/ | wc -l` to size the surface area
+
+      FINDING CATEGORIES — for each, look for:
+        1. **Missing Sendable conformance**: models passed across actor boundaries (Task,
+           async function args, NotificationCenter, Combine subjects) that are not Sendable
+           or have mutable properties.
+        2. **Incorrect actor isolation**: MainActor leaking into background, background
+           work touching @MainActor state, missing @MainActor on UI-touching code, main
+           thread blocks in async paths.
+        3. **Data race risks**: shared mutable state, classes accessed from multiple
+           actors, race conditions in BLE / HealthKit / sensor pipelines that emit at
+           high frequency.
+        4. **Task lifecycle bugs**: unstructured Task { } that should be Task.detached or
+           stored as a property, missing cancellation handling, fire-and-forget tasks
+           that leak, retain cycles via [weak self] vs [unowned self].
+        5. **AsyncSequence / AsyncStream misuse**: missing buffering policies, iterator
+           never finishing, multi-consumer subscription (AsyncStream vs AsyncChannel).
+        6. **Notification / Combine → async interop**: places that still use NotificationCenter
+           addObserver / Combine sinks that could be replaced with AsyncSequence.
+        7. **Region-based isolation (Swift 6.2) opportunities**: pure synchronous code that
+           could benefit from isolated conformances or @concurrent.
+
+      DELIVERABLE — write to .mavis/audit/deliverables/02-concurrency.md with this exact
+      structure:
+
+        # Mangox Swift 6 Concurrency Audit
+
+        ## Summary
+        - Total findings: N
+        - By severity: Critical N / Important N / Nice-to-have N
+        - Files surveyed: <count>
+        - One-paragraph executive read
+
+        ## Findings (sorted by severity)
+
+        Same per-finding format as track 01:
+          F-NNN, Severity, Category, Location, Observed (with snippet), Why it matters,
+          Recommended fix, Effort, Related findings
+
+        Categories for this track:
+          Sendable | Actor isolation | Data race | Task lifecycle |
+          AsyncSequence | Notification/Combine interop | Region isolation
+
+        ## Cross-Cutting Themes
+        Patterns repeated across the codebase. E.g. "9 ViewModels use the same
+        `Task { @MainActor in ... }` pattern after every repository call — a helper
+        could halve the boilerplate and reduce places where isolation can leak."
+
+        ## Quick Wins
+        Top 5 changes that eliminate the most warnings / risk for the least code churn.
+
+        ## Coverage Notes
+        Files actually read, directories skipped, limitations.
+
+      RULES:
+        - Critical: any actual data race, any potential sendable violation across
+          actor boundaries, any Task that retains self and may never cancel.
+        - Important: structural pattern that will likely warn once Swift 6.2 enforces
+          region-isolated conformances; a class that is shared but should be a struct.
+        - Do not invent file:line. Do not pad. If a category is clean, say so.
+        - At the end, print: "DELIVERABLE_WRITTEN: 02-concurrency.md (N findings)"
+
+    verified_by: verifier
+    verify_prompt: |
+      Verify .mavis/audit/deliverables/02-concurrency.md by re-deriving, not re-reading.
+
+      1. Count findings by severity. Note the totals.
+      2. Pick 2 of the Critical findings. For each:
+         - Open the cited file at the cited line range.
+         - Independently assess: is this actually a Sendable / actor-isolation /
+           data-race issue under Swift 6 strict concurrency? Or is the producer
+           being overly cautious?
+         - Verify the recommended fix doesn't introduce a new isolation violation.
+      3. Pick one Quick Win from the report. Verify the code change is small and
+         doesn't break other call sites in the same file.
+      4. Verify at least one finding cites code in a high-frequency sensor pipeline
+         (BLE / HealthKit / Location). FAIL if all findings are about isolated
+         ViewModels that aren't on the hot path.
+
+      Report PASS or FAIL. If FAIL, name the F-IDs and what the code actually shows.
+
+  - id: performance-audit
+    title: 'SwiftUI runtime performance audit of Mangox'
+    assigned_to: coder
+    timeout_ms: 1800000
+    prompt: |
+      You are auditing Mangox for SwiftUI runtime performance. The app is a real-time
+      cycling / trainer app with high-frequency sensor updates (BLE power/cadence at
+      ~1Hz, GPS at 1Hz, location checkpoints, live workout recording, live activity
+      updates). View body re-renders and slow list rendering will directly impact UX.
+      Be programmatic — read real code, cite file:line, show snippets.
+
+      PROJECT FACTS (verified):
+        - iOS 26.2, Swift 6.0, SwiftData
+        - Real-time pipelines: BLE, WiFi trainer, HealthKit, GPS, location
+        - Active workout UI is a primary use case (Outdoor, Indoor, Workout features)
+        - Live Activity extension in MangoxLiveActivityExtension/
+        - DIContainer exposes services via SwiftUI environment (many @Environment)
+
+      LOAD THIS SKILL FIRST:
+        - swiftui-performance-audit
+
+      SCOPE — read these directories and produce findings:
+        - Mangox/Features/Outdoor/Presentation/ (live ride HUD, map, metrics)
+        - Mangox/Features/Indoor/Presentation/ (trainer control, real-time power display)
+        - Mangox/Features/Workout/Presentation/ (workout detail, charts, summaries)
+        - Mangox/Features/Fitness/Presentation/ (PMC trends, power curve — heavy charts)
+        - Mangox/Features/Home/Presentation/ (dashboard — recently refactored to subviews)
+        - Mangox/Core/UIComponents/ (shared components, design system)
+        - MangoxLiveActivityExtension/ (Live Activity — locked-screen + Dynamic Island)
+
+      FINDING CATEGORIES — for each, look for:
+        1. **View body purity**: side effects, @Query in tight loops, expensive computation
+           in body, allocation in body (e.g. formatters, DateFormatter), Date() called
+           in body (clock reads).
+        2. **State observation**: classes used as @State, @ObservedObject vs @State for
+           value types, missing @Equatable, missing @Bindable, missing @Observable
+           for ObservableObject.
+        3. **Derived state**: computed properties that should be cached, missing
+           dependency tracking, redundant recomputation on every parent re-render.
+        4. **List / LazyVStack performance**: ForEach over large collections, missing
+           id:, ScrollView where List is correct, geometry reads triggering redraws,
+           images not lazy-loaded.
+        5. **Animation / transition cost**: implicit animations on the live HUD that
+           re-render the whole view tree at 60Hz, missing animation(value:) so animations
+           fire on every parent update.
+        6. **Image / asset loading**: synchronous image decode, missing AsyncImage for
+           remote images, missing resizable/cache for large assets, SF Symbol misuse.
+        7. **High-frequency sensor pipeline**: how the BLE / GPS / HealthKit streams
+           reach the view, whether updates are throttled / debounced, whether SwiftUI
+           is being asked to redraw more than 10Hz.
+        8. **Live Activity / Widget**: activity attributes, timeline policy, view body
+           purity in the widget extension, glance vs expanded view cost.
+
+      DELIVERABLE — write to .mavis/audit/deliverables/03-performance.md with this exact
+      structure:
+
+        # Mangox SwiftUI Performance Audit
+
+        ## Summary
+        - Total findings: N
+        - By severity: Critical N / Important N / Nice-to-have N
+        - One-paragraph executive read
+
+        ## Findings (sorted by severity)
+
+        Same per-finding format as track 01:
+          F-NNN, Severity, Category, Location, Observed (snippet), Why it matters
+          (quantify where possible: "called 30x/sec during ride from sensor pipeline"),
+          Recommended fix, Effort, Related findings
+
+        Categories for this track:
+          View body purity | State observation | Derived state | List/ForEach |
+          Animation cost | Image / assets | Sensor pipeline | Live Activity / Widget
+
+        ## Hot Paths Spotted
+        List the 3-5 highest-frequency code paths that drive view updates, with file:line
+        for the call site. These are where optimization pays off the most.
+
+        ## Instruments Guidance
+        For the top 3 critical/important findings, give the user a 3-step Instruments
+        recipe to confirm the issue on a real device or simulator (SwiftUI template,
+        Time Profiler, Allocations, etc.). This is what they should run to verify
+        your claim.
+
+        ## Coverage Notes
+        Files read, skipped, limitations.
+
+      RULES:
+        - Critical: view body that re-runs at sensor frequency without diffing, image
+          decode on the main thread in a List, list with thousands of rows without
+          lazy IDs.
+        - Important: implicit animation on live data, formatter allocation in body,
+          missing Equatable on a value-type view that depends on it.
+        - Do not invent. If a path is clean, say so.
+        - At the end, print: "DELIVERABLE_WRITTEN: 03-performance.md (N findings)"
+
+    verified_by: verifier
+    verify_prompt: |
+      Verify .mavis/audit/deliverables/03-performance.md by re-deriving, not re-reading.
+
+      1. Count findings by severity. Note the totals.
+      2. Pick 2 of the Critical/Important findings. For each:
+         - Open the cited file. Confirm the code matches the "Observed" snippet.
+         - Confirm the cited line range actually contains the issue.
+         - Decide independently: is this truly a SwiftUI performance concern, or
+           is the producer over-calling it? (e.g. a one-time Date() call in body
+           that runs on a settings screen, not on a hot path.)
+      3. Check the "Hot Paths Spotted" section cites real, high-frequency code
+         paths. Open at least one and verify the call site exists.
+      4. Check the "Instruments Guidance" gives an actual runnable recipe
+         (template name + steps), not a generic "use Instruments".
+
+      Report PASS or FAIL. If FAIL, name F-IDs and what the code actually shows.
+
+  - id: architecture-logic-audit
+    title: 'Mangox architecture, data flow, and logic audit'
+    assigned_to: coder
+    timeout_ms: 1800000
+    prompt: |
+      You are auditing Mangox's architecture, data flow, and business logic. Focus on
+      the structural decisions and "better logic" opportunities the user asked for —
+      not on UI styling. Be programmatic — read real code, cite file:line, show
+      snippets. Do NOT give generic clean-architecture advice.
+
+      PROJECT FACTS (verified):
+        - iOS 26.2, Swift 6.0, SwiftData
+        - Architecture: DIContainer (single root) → Services → ViewModels → Views
+        - Per-feature structure: Data / Domain / Presentation
+        - Persistence: SwiftData via PersistenceContainer (Core/Persistence/)
+        - Networking: APIClient (Core/Networking/) with Supabase REST
+        - Heavy async surface: BLE, WiFi trainer, HealthKit, Strava, Whoop, RevenueCat
+        - Has uncommitted Coach feature changes — read them as the most recent intent
+        - Live Activity extension + shared activity attributes
+        - Docs/ has MODULES.md, SUPABASE_SETUP.md, MONETIZATION_SETUP.md, AI_CONNECTION.md,
+          NativeLiquidGlassGuide.md, enterprise-refactor-register.md
+        - 30 test files in MangoxTests/
+
+      LOAD THIS SKILL (general purpose):
+        - No dedicated skill; use general coder reasoning and read Docs/MODULES.md first
+
+      SCOPE — read these directories and produce findings:
+        - Mangox/App/ (DIContainer.swift is the single most important file — read it fully)
+        - Mangox/Core/ (Networking, Persistence, UIComponents, Extensions, Utilities)
+        - Mangox/Features/*/Data/ (Repositories, DataSources, Engines — focus on
+          dependency boundaries, error propagation, retry/backoff, caching)
+        - Mangox/Features/*/Domain/ (entities, use cases — focus on purity, validation)
+        - Mangox/Features/*/Presentation/ViewModel/ (focus on state machine clarity,
+          side effects, error → UI mapping)
+        - MangoxTests/ (note: is there parity between features and test coverage? Are
+          there test gaps in critical paths?)
+        - supabase/ (storage schema and edge functions — note any obvious contract mismatches
+          with the iOS models)
+
+      FINDING CATEGORIES — for each, look for:
+        1. **DIContainer drift**: services that should be protocol-injected but are
+           concrete types, ambient singletons that bypass the container, services that
+           leak implementation across feature boundaries, missing @MainActor placement.
+        2. **Persistence (SwiftData)**:
+           - ModelContainer lifecycle, schema migration safety, missing @Model
+           - Background context usage, main-thread reads, fetch limits / pagination
+           - Privacy-sensitive data (HealthKit, location) — should it be in SwiftData
+             or Keychain / encrypted storage?
+           - Look at UserDataCryptoTests and EncryptionTests for the encryption story
+        3. **Networking**:
+           - APIClient error mapping, retry/backoff policy, idempotency keys
+           - Auth token refresh — Supabase OAuth has known edge cases
+           - Request signing / API key handling — look for hardcoded secrets
+           - DevTunnel handling (URLRequest+DevTunnel.swift) — is it leaking into prod?
+        4. **Service layer logic**:
+           - BLE / WiFi trainer connection lifecycle, reconnection strategy, battery cost
+           - HealthKit authorization and reading strategy
+           - Strava / Whoop OAuth flows and token refresh
+           - RevenueCat paywall and entitlement check (Docs/MONETIZATION_SETUP.md)
+           - AI coach prompt construction, streaming parse, cost guardrails
+             (Docs/AI_CONNECTION.md, Docs/PRECISION_COACH.md)
+        5. **State machine clarity** in ViewModels:
+           - Are states exhaustive? Are transitions explicit?
+           - Are async side effects scoped to a single Task? Are errors mapped to UI?
+           - Are there race conditions between user input and async completion?
+        6. **Test coverage gaps**:
+           - Cross-reference MangoxTests/ files vs production files in Mangox/Features/
+           - Identify the 5 most important code paths that have NO test
+        7. **Config / secrets hygiene**:
+           - Config/ contents, .mcp.json, .gitignore effectiveness
+           - Hardcoded URLs, API endpoints, identifiers
+        8. **Coach feature** (in-progress):
+           - Read the uncommitted changes in Mangox/Features/Coach/ — they are
+             "the most recent intent" and deserve a specific callout if they
+             introduce structural debt, leaks, or missing tests
+        9. **Live Activity contract**:
+           - Are Activity attributes shared cleanly between main app and extension?
+           - Is the extension accidentally importing app-only modules?
+
+      DELIVERABLE — write to .mavis/audit/deliverables/04-architecture.md with this exact
+      structure:
+
+        # Mangox Architecture & Logic Audit
+
+        ## Summary
+        - Total findings: N
+        - By severity: Critical N / Important N / Nice-to-have N
+        - One-paragraph executive read
+
+        ## Findings (sorted by severity)
+
+        Same per-finding format as track 01:
+          F-NNN, Severity, Category, Location, Observed (snippet), Why it matters,
+          Recommended fix, Effort, Related findings
+
+        Categories for this track:
+          DIContainer | Persistence | Networking | Service layer | ViewModel state |
+          Test coverage | Config / secrets | Coach feature | Live Activity
+
+        ## DIContainer Map
+        Short table: Service name, file:line, protocol or concrete, scope (singleton /
+        per-screen), who consumes it. This makes the dependency graph visible.
+
+        ## Service Layer Health
+        One short paragraph per major service (BLE, WiFi trainer, HealthKit, Strava,
+        Whoop, RevenueCat, Supabase, AI coach, LiveActivity, syncCoordinator) covering:
+        current pattern, risks, "would refactor X first".
+
+        ## Test Coverage Gaps
+        List the 5-10 most important code paths with no test, with file:line and a
+        one-sentence "what to add".
+
+        ## Coverage Notes
+        Files read, skipped, limitations.
+
+      RULES:
+        - Critical: hardcoded secret, data path that bypasses auth, unencrypted PII,
+          test gap in a money/health/safety flow.
+        - Important: state machine that allows invalid transitions, error path that
+          silently swallows, service that bypasses DIContainer.
+        - Do not invent. If a path is clean, say so.
+        - At the end, print: "DELIVERABLE_WRITTEN: 04-architecture.md (N findings)"
+
+    verified_by: verifier
+    verify_prompt: |
+      Verify .mavis/audit/deliverables/04-architecture.md by re-deriving, not re-reading.
+
+      1. Count findings by severity. Note the totals.
+      2. Open Mangox/App/DIContainer.swift. Independently:
+         - Read it top to bottom.
+         - Check the "DIContainer Map" section in the deliverable. Verify at least
+           3 of the listed services actually exist in DIContainer.swift with the
+           stated scope (singleton / per-screen). FAIL if the table is fabricated.
+      3. Pick 1 finding from "Test Coverage Gaps". For each:
+         - Open the cited production file at the cited line.
+         - Verify there is no corresponding test in MangoxTests/ that exercises it.
+         - The "what to add" suggestion should be plausible (small, focused test).
+      4. Pick 1 finding about the Coach feature. Verify the cited file is in
+         Mangox/Features/Coach/ and the uncommitted work is referenced.
+      5. Check for hardcoded secrets. Run `grep -rE "(api[_-]?key|secret|token|password)\s*=\s*\"[A-Za-z0-9_-]{10,}\"" Mangox/ Mangox.xcodeproj/ Config/ 2>/dev/null | head -20`
+         and verify the report's "Config / secrets" findings are consistent with
+         what grep returns.
+
+      Report PASS or FAIL. If FAIL, name F-IDs and what the code/grep actually shows.
+
+  - id: synthesis-report
+    title: 'Integrate 4 audit tracks into final prioritized Mangox audit report'
+    assigned_to: general
+    depends_on: [swiftui-ios26-audit, concurrency-audit, performance-audit, architecture-logic-audit]
+    timeout_ms: 1800000
+    prompt: |
+      The four parallel audit tracks have completed and written to:
+        - .mavis/audit/deliverables/01-swiftui-ios26.md
+        - .mavis/audit/deliverables/02-concurrency.md
+        - .mavis/audit/deliverables/03-performance.md
+        - .mavis/audit/deliverables/04-architecture.md
+
+      Your job is to read all four, then produce ONE integrated, prioritized report at
+      .mavis/audit/Mangox-Audit-Report.md. The user asked "how would you improve mangox?
+      are we on best ios26+ practices? are there optimizations? better logic? help me
+      audit." — so the report must answer that question directly.
+
+      LOAD THIS SKILL: read references/report.md via the mavis-team skill if you need
+      format guidance, but the structure below is mandatory.
+
+      DELIVERABLE STRUCTURE — write to .mavis/audit/Mangox-Audit-Report.md:
+
+        # Mangox iOS 26+ Audit Report
+        *Generated 2026-06-01 — covers Mangox @ iOS 26.2 / Swift 6.0 / strict concurrency*
+
+        ## 1. TL;DR (≤ 250 words)
+        - Top 5 things to fix, in order.
+        - One-sentence verdict on "are we on best iOS 26+ practices?"
+        - Estimated total effort.
+
+        ## 2. Scorecard
+        Table:
+        | Dimension            | Status | Top issue | Effort to reach "good" |
+        | -------------------- | ------ | --------- | ---------------------- |
+        | SwiftUI / Liquid Glass | 🟡 / 🟢 / 🔴 | ... | ... |
+        | Swift 6 Concurrency    | ... | ... | ... |
+        | Runtime Performance    | ... | ... | ... |
+        | Architecture & Logic   | ... | ... | ... |
+
+        🟢 = on best practices, 🟡 = mixed, 🔴 = significant gap.
+
+        ## 3. Top 20 Findings (cross-track prioritized)
+        A single ranked list of the most impactful 20 findings across all four tracks.
+        Each row: F-ID, severity, title, track (01/02/03/04), file:line, one-line impact,
+        effort. Use this as the "what to do next week" view.
+
+        ## 4. Detailed Findings
+        Organize by severity first (Critical → Important → Nice-to-have), then within
+        severity group by track. For each finding:
+          - F-NNN, Severity, Track
+          - Title, Location
+          - Observed (with snippet, copied from track deliverable)
+          - Why it matters (with quantified impact where the track gave it)
+          - Recommended fix (with the snippet the track proposed)
+          - Effort, Related findings
+
+        Group related findings from different tracks together when they point at the
+        same root cause (e.g. a state machine gap that shows up as both a logic issue
+        and a perf issue). Add a one-line synthesis explaining the connection.
+
+        ## 5. Cross-Cutting Themes
+        5-10 themes that span multiple tracks. Examples:
+          - "DIContainer is exposing concrete types instead of protocols in 11 places"
+            (architecture) → "ViewModels can't be tested in isolation" (test gap) →
+            "unmocked services leak into UI tests" (architecture drift).
+          - "Live Activity is reading from main-app-only services" (architecture) →
+            "widget timeline policy doesn't reflect update frequency" (perf).
+
+        For each theme, name the contributing findings (F-IDs) and the single
+        high-leverage refactor that would address all of them.
+
+        ## 6. Quick Wins (≤ 1 day each)
+        List 8-15 changes that can ship immediately. Each: F-ID, one-line change,
+        file:line, expected impact. These are the "this week's PRs".
+
+        ## 7. Medium-Term Refactors (1-2 weeks each)
+        5-10 changes that need a dedicated branch. Each: scope, F-IDs in scope, why
+        it pays for itself.
+
+        ## 8. Open Questions & Unknowns
+        Things the audit could not determine from code alone. E.g. "the BLE reconnect
+        strategy depends on the specific trainer firmware — recommend a hardware lab
+        session". E.g. "the Supabase schema in supabase/ should be cross-referenced
+        with the SwiftData models — out of scope for this audit".
+
+        ## 9. Coverage Matrix
+        For each track, list the top categories audited and the number of files read.
+
+        ## 10. Evidence Index
+        Pointer to the four track deliverables so the user can drill in.
+
+      RULES:
+        - Do NOT introduce findings not in the track reports. If a track missed
+          something, note it in Open Questions.
+        - Cross-reference by F-ID, not by re-pasting content.
+        - All file:line citations come from the track reports — preserve them exactly.
+        - Use the severity framework consistently: Critical = correctness/safety/data,
+          Important = clear best-practice gap with measurable impact,
+          Nice-to-have = polish.
+        - Keep the TL;DR tight. The detail is for people who want to dig in.
+        - At the end, print: "DELIVERABLE_WRITTEN: Mangox-Audit-Report.md (N total findings, M critical)"
+
+    verified_by: verifier
+    verify_prompt: |
+      You are verifying the final integrated Mangox audit report. The four track
+      deliverables are at:
+        - .mavis/audit/deliverables/01-swiftui-ios26.md
+        - .mavis/audit/deliverables/02-concurrency.md
+        - .mavis/audit/deliverables/03-performance.md
+        - .mavis/audit/deliverables/04-architecture.md
+
+      The synthesis is at .mavis/audit/Mangox-Audit-Report.md.
+
+      Do NOT re-read the synthesis and rubber-stamp it. Re-derive:
+
+      1. Open .mavis/audit/Mangox-Audit-Report.md. Count total findings and critical
+         findings reported in the TL;DR.
+      2. For each track deliverable, count its findings by severity.
+      3. Sum the four track counts. Compare to the synthesis totals.
+         - FAIL if totals don't match (a finding was dropped or invented).
+      4. Pick 3 of the highest-severity findings in the synthesis. For each, open
+         the cited file at the cited line and verify:
+         - The code at that line matches the "Observed" snippet.
+         - The cited line number is within ±2 of the actual relevant code.
+         - The recommended fix is plausible (does not break Swift 6.0 strict concurrency,
+           fits Mangox's existing patterns in the same file or a sibling file).
+         FAIL if 2 or more are wrong.
+      5. Verify the Cross-Cutting Themes section actually cites F-IDs from at least
+         2 different tracks per theme. FAIL if themes are single-track.
+      6. Verify every Critical finding from the tracks appears in the synthesis
+         (none silently dropped). FAIL if any are missing.
+
+      Report PASS or FAIL with the specific discrepancies. If FAIL, name the
+      missing F-IDs or the file:line mismatches.

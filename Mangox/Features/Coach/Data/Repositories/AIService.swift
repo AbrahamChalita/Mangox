@@ -20,6 +20,27 @@ struct ChatRequest: Encodable {
     let client_local_date: String
     /// IANA zone id (e.g. `America/Los_Angeles`).
     let client_time_zone: String
+    /// When true, backend prepends plan-intake booster and forces full tier + user context.
+    let force_plan_intake: Bool?
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(message, forKey: .message)
+        try container.encodeIfPresent(history, forKey: .history)
+        try container.encodeIfPresent(user_context, forKey: .user_context)
+        try container.encodeIfPresent(user_context_encrypted, forKey: .user_context_encrypted)
+        try container.encode(is_pro, forKey: .is_pro)
+        try container.encode(client_local_date, forKey: .client_local_date)
+        try container.encode(client_time_zone, forKey: .client_time_zone)
+        if force_plan_intake == true {
+            try container.encode(true, forKey: .force_plan_intake)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case message, history, user_context, user_context_encrypted
+        case is_pro, client_local_date, client_time_zone, force_plan_intake
+    }
 }
 
 struct HistoryTurn: Encodable {
@@ -375,6 +396,7 @@ private enum PlanEventDateNormalization {
 enum ChatRuntimeEvent: Sendable {
     case status(String)
     case textDelta(String)
+    case reasoningDelta(String)
     case toolCalls([ToolCall])
     case completed(ChatAPIResponse)
     case failed(String)
@@ -418,13 +440,19 @@ final class AIService: AIServiceProtocol, CoachRepository {
     /// Shown while the backend streams the coach reply (`/api/chat/stream` extracts `content` text).
     /// Refreshes on a short debounce so the UI does not repaint every token.
     var streamDraftText: String = ""
-    /// Short status from SSE before the first content delta (e.g. "Reviewing your training context").
+    /// Short status from SSE (VoiceOver only — not shown in the pending bubble UI).
     var streamStatusText: String?
     /// True while the model is emitting a `<think>` block with no visible content yet.
     var streamIsThinking: Bool = false
+    /// Set when the backend reports a web-search status before the first content delta.
+    var streamIsSearchingWeb: Bool = false
 
     private var streamRawBuffer: String = ""
     private var streamDisplayThrottleTask: Task<Void, Never>?
+    private var activeChatTurnTask: Task<Void, Never>?
+    private var activeChatTurnGeneration: UInt64 = 0
+    /// Stays true after plan builder entry until session change or plan confirm clears it.
+    private var planIntakeModeActive = false
 
     /// The currently active chat session. Nil means no session selected.
     var currentSessionID: UUID?
@@ -446,9 +474,15 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
     func sendMessage(
         _ text: String,
-        isPro: Bool
+        isPro: Bool,
+        forcePlanIntake: Bool = false
     ) async {
-        await sendMessage(text, isPro: isPro, modelContext: persistenceContext)
+        await sendMessage(
+            text,
+            isPro: isPro,
+            forcePlanIntake: forcePlanIntake,
+            modelContext: persistenceContext
+        )
     }
 
     @discardableResult
@@ -623,13 +657,87 @@ final class AIService: AIServiceProtocol, CoachRepository {
     }
 
     /// Concrete next-step chips when the API omits structured follow-ups (e.g. Gemma JSON parse failure).
+    /// Labels are sent verbatim as user messages — must be real answers, not UI section headers.
     private static func planIntakeClarificationChips() -> [SuggestedAction] {
         [
-            SuggestedAction(label: "Target event & date", type: "ask_followup"),
-            SuggestedAction(label: "Distance & elevation", type: "ask_followup"),
-            SuggestedAction(label: "FTP & hours per week", type: "ask_followup"),
-            SuggestedAction(label: "I’m new — guide me step by step", type: "ask_followup"),
+            SuggestedAction(label: "Gran Fondo or century ride", type: "ask_followup"),
+            SuggestedAction(label: "L'Étape or sportive event", type: "ask_followup"),
+            SuggestedAction(label: "About 8 hours per week", type: "ask_followup"),
+            SuggestedAction(label: "Guide me step by step", type: "ask_followup"),
         ]
+    }
+
+    /// Client-side plan builder entry points should set `force_plan_intake` on the cloud request.
+    static func shouldForcePlanIntake(for text: String) -> Bool {
+        let lower = text.lowercased()
+        let markers = [
+            "build a structured training plan",
+            "build a training plan",
+            "create a training plan",
+            "generate my plan",
+            "help me build a plan",
+            "start plan builder",
+        ]
+        if markers.contains(where: { lower.contains($0) }) { return true }
+        if lower.hasPrefix("here are my answers:") { return true }
+        return false
+    }
+
+    private static func isPlanIntakeContinuation(_ text: String) -> Bool {
+        shouldForcePlanIntake(for: text)
+    }
+
+    private static func looksLikePlanIntakeAssistantTurn(
+        blocks: [CoachFollowUpBlock],
+        followUp: String?,
+        content: String,
+        toolCalls: [ToolCall]
+    ) -> Bool {
+        if toolCalls.contains(where: { $0.name == "generate_plan" && $0.state == "pending" }) {
+            return false
+        }
+        if !blocks.isEmpty { return true }
+        let q = (followUp ?? "").lowercased()
+        let planQuestionMarkers = [
+            "event", "goal", "race", "date", "hour", "week", "experience", "plan",
+            "route", "training for", "volume", "level",
+        ]
+        if planQuestionMarkers.contains(where: { q.contains($0) }) { return true }
+        let lower = content.lowercased()
+        if lower.contains("build your plan")
+            || lower.contains("plan intake")
+            || lower.contains("collect the key details")
+            || lower.contains("training plan")
+        {
+            return true
+        }
+        return false
+    }
+
+    private func syncPlanIntakeMode(
+        userText: String,
+        forcePlanIntake: Bool,
+        response: ChatAPIResponse?,
+        blocks: [CoachFollowUpBlock],
+        panelFollowUp: String?
+    ) {
+        if forcePlanIntake || Self.isPlanIntakeContinuation(userText) {
+            planIntakeModeActive = true
+            return
+        }
+        guard let response else { return }
+        if Self.looksLikePlanIntakeAssistantTurn(
+            blocks: blocks,
+            followUp: panelFollowUp,
+            content: response.content,
+            toolCalls: response.toolCalls
+        ) {
+            planIntakeModeActive = true
+        }
+    }
+
+    private func clearPlanIntakeMode() {
+        planIntakeModeActive = false
     }
 
     private static func looksLikeSingleWorkoutRequest(_ text: String) -> Bool {
@@ -817,9 +925,34 @@ final class AIService: AIServiceProtocol, CoachRepository {
         streamDisplayThrottleTask = nil
         streamStatusText = nil
         streamIsThinking = false
+        streamIsSearchingWeb = false
         if clearLoading {
             isLoading = false
         }
+    }
+
+    /// Flips loading + pending bubble immediately so chip/starter taps feel instant (before async work).
+    @discardableResult
+    func prepareOutgoingMessage(_ text: String, isPro: Bool) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard !hasReachedFreeLimit(isPro: isPro) else { return false }
+        guard !isLoading else { return false }
+        isLoading = true
+        error = nil
+        resetStreamingState(clearLoading: false)
+        return true
+    }
+
+    private func cancelActiveChatTurnIfNeeded() {
+        activeChatTurnTask?.cancel()
+        activeChatTurnTask = nil
+        activeChatTurnGeneration &+= 1
+        resetStreamingState(clearLoading: true)
+    }
+
+    func cancelActiveChatTurn() {
+        cancelActiveChatTurnIfNeeded()
     }
 
     // MARK: - Mangox Cloud coach turn (no new user row)
@@ -827,6 +960,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
     private func runMangoxCloudCoachTurn(
         userText: String,
         isPro: Bool,
+        forcePlanIntake: Bool,
         modelContext: ModelContext
     ) async {
         let history = buildHistory()
@@ -856,7 +990,8 @@ final class AIService: AIServiceProtocol, CoachRepository {
             user_context_encrypted: encryptedContext,
             is_pro: isPro,
             client_local_date: Self.dateFormatter.string(from: .now),
-            client_time_zone: TimeZone.current.identifier
+            client_time_zone: TimeZone.current.identifier,
+            force_plan_intake: forcePlanIntake ? true : nil
         )
 
         let provider = ChatProviderResolver().resolve()
@@ -881,10 +1016,15 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 switch event {
                 case .status(let s):
                     streamStatusText = s
+                    streamIsSearchingWeb = s.localizedCaseInsensitiveContains("search")
                 case .textDelta(let delta):
                     streamRawBuffer += delta
                     streamStatusText = nil
+                    streamIsThinking = false
+                    streamIsSearchingWeb = false
                     scheduleStreamDraftDisplayFlush()
+                case .reasoningDelta:
+                    streamIsThinking = true
                 case .toolCalls:
                     break
                 case .completed(let message):
@@ -973,6 +1113,14 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 confidence: response.confidence
             )
             commitAssistantMessage(aiMsg, modelContext: modelContext)
+
+            syncPlanIntakeMode(
+                userText: userText,
+                forcePlanIntake: forcePlanIntake,
+                response: response,
+                blocks: blocks,
+                panelFollowUp: panelFollowUp
+            )
 
             logCoachFlow(
                 "coachFlow cloud success category=\(response.category) suggestedActions=\(panelActions.count) followUpBlocks=\(blocks.count)"
@@ -1085,24 +1233,39 @@ final class AIService: AIServiceProtocol, CoachRepository {
     func sendMessage(
         _ text: String,
         isPro: Bool,
+        forcePlanIntake: Bool = false,
         modelContext: ModelContext
     ) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let planIntake = forcePlanIntake || planIntakeModeActive || Self.shouldForcePlanIntake(for: trimmed)
+        let alreadyPrepared = isLoading
+
+        if planIntake {
+            planIntakeModeActive = true
+        }
+
         guard !trimmed.isEmpty else {
             logCoachFlow("coachFlow sendMessage abort reason=empty")
+            if alreadyPrepared { resetStreamingState(clearLoading: true) }
             return
         }
         guard !hasReachedFreeLimit(isPro: isPro) else {
             logCoachFlow("coachFlow sendMessage abort reason=dailyLimit isPro=\(isPro)")
+            if alreadyPrepared { resetStreamingState(clearLoading: true) }
             return
         }
-        guard !isLoading else {
-            logCoachFlow("coachFlow sendMessage abort reason=alreadyLoading")
-            return
+        if !alreadyPrepared {
+            guard !isLoading else {
+                logCoachFlow("coachFlow sendMessage abort reason=alreadyLoading")
+                return
+            }
+            isLoading = true
+            error = nil
+            resetStreamingState(clearLoading: false)
         }
 
         let sessionBefore = currentSessionID
-        let deliveryLogLabel = "cloudOnly"
+        let deliveryLogLabel = planIntake ? "cloudPlanIntake" : "cloudOnly"
 
         logCoachFlow(
             "coachFlow sendMessage start delivery=\(deliveryLogLabel) isPro=\(isPro) chars=\(trimmed.count) session=\(sessionBefore?.uuidString ?? "nil")"
@@ -1112,7 +1275,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
         // Auto-create a session if none exists
         if currentSessionID == nil {
-            createNewSession(modelContext: modelContext)
+            createNewSession(modelContext: modelContext, cancelInFlightTurn: false)
             logCoachFlow(
                 "coachFlow sendMessage createdSession id=\(currentSessionID?.uuidString ?? "?")"
             )
@@ -1132,20 +1295,49 @@ final class AIService: AIServiceProtocol, CoachRepository {
         // Update session title from first user message
         updateSessionTitleIfNeeded(modelContext: modelContext)
 
-        isLoading = true
-        error = nil
-        resetStreamingState(clearLoading: false)
-
-        if await tryOnDeviceNarrowTurn(
-            userText: trimmed,
-            modelContext: modelContext
-        ) {
-            logCoachFlow("coachFlow sendMessage path=onDeviceNarrow")
-            return
+        if !alreadyPrepared {
+            error = nil
+            resetStreamingState(clearLoading: false)
+        } else {
+            error = nil
         }
 
-        logCoachFlow("coachFlow sendMessage path=cloudOnly")
-        await runMangoxCloudCoachTurn(userText: trimmed, isPro: isPro, modelContext: modelContext)
+        activeChatTurnTask?.cancel()
+        activeChatTurnGeneration &+= 1
+        let turnGeneration = activeChatTurnGeneration
+        let turnTask = Task {
+            if planIntake {
+                logCoachFlow("coachFlow sendMessage path=cloudPlanIntake")
+                await runMangoxCloudCoachTurn(
+                    userText: trimmed,
+                    isPro: isPro,
+                    forcePlanIntake: true,
+                    modelContext: modelContext
+                )
+                return
+            }
+
+            if await tryOnDeviceNarrowTurn(
+                userText: trimmed,
+                modelContext: modelContext
+            ) {
+                logCoachFlow("coachFlow sendMessage path=onDeviceNarrow")
+                return
+            }
+
+            logCoachFlow("coachFlow sendMessage path=cloudOnly")
+            await runMangoxCloudCoachTurn(
+                userText: trimmed,
+                isPro: isPro,
+                forcePlanIntake: false,
+                modelContext: modelContext
+            )
+        }
+        activeChatTurnTask = turnTask
+        await turnTask.value
+        if activeChatTurnGeneration == turnGeneration {
+            activeChatTurnTask = nil
+        }
     }
 
     // MARK: - On-device narrow routing
@@ -1208,6 +1400,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
                     self.streamRawBuffer = body
                     self.streamStatusText = nil
                     self.streamIsThinking = body.isEmpty
+                    self.streamIsSearchingWeb = false
                     self.scheduleStreamDraftDisplayFlush()
                 }
             }
@@ -2073,13 +2266,17 @@ final class AIService: AIServiceProtocol, CoachRepository {
     }
 
     /// Creates a new chat session and sets it as the active session.
-    func createNewSession(modelContext: ModelContext) {
+    func createNewSession(modelContext: ModelContext, cancelInFlightTurn: Bool = true) {
+        if cancelInFlightTurn {
+            cancelActiveChatTurnIfNeeded()
+        }
         let session = ChatSession()
         modelContext.insert(session)
         do {
             try modelContext.save()
             currentSessionID = session.id
             messages.removeAll()
+            clearPlanIntakeMode()
             planConfirmationDraft = nil
             planSaveCelebration = nil
             workoutConfirmationDraft = nil
@@ -2092,7 +2289,9 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
     /// Switches to an existing session by ID.
     func switchToSession(_ sessionID: UUID, modelContext: ModelContext) {
+        cancelActiveChatTurnIfNeeded()
         currentSessionID = sessionID
+        clearPlanIntakeMode()
         planConfirmationDraft = nil
         planSaveCelebration = nil
         workoutConfirmationDraft = nil
@@ -2112,6 +2311,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 if currentSessionID == sessionID {
                     messages.removeAll()
                     currentSessionID = nil
+                    clearPlanIntakeMode()
                     planConfirmationDraft = nil
                     planSaveCelebration = nil
                     workoutConfirmationDraft = nil

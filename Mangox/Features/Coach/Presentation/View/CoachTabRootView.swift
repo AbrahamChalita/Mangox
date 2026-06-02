@@ -15,7 +15,9 @@ struct CoachTabRootView: View {
     var body: some View {
         CoachHubView(navigationPath: $navigationPath, showChat: $showChat)
             .environment(viewModel)
-            .fullScreenCover(isPresented: $showChat) {
+            .fullScreenCover(isPresented: $showChat, onDismiss: {
+                viewModel.cancelActiveChatTurn()
+            }) {
                 NavigationStack {
                     CoachConversationView(
                         navigationPath: $navigationPath,

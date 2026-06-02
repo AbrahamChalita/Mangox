@@ -1137,7 +1137,9 @@ extension AIService {
 
     func coachWhoopRecoveryToolPayload(modelContext: ModelContext) -> String {
         let ctx = buildUserContext(modelContext: modelContext)
-        guard ctx.whoopLinked else { return "No WHOOP account connected." }
+        guard ctx.whoopLinked else {
+            return "WHOOP not linked. Do not ask the athlete to connect WHOOP; use ride history, FTP, and how they feel instead."
+        }
 
         var lines = ["WHOOP connected."]
         if let pct = ctx.whoopRecoveryPercent {

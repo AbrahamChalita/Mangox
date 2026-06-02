@@ -4,16 +4,18 @@ import SwiftUI
 /// Uses a single `VStack` subtree (no empty ↔ lazy branch swap) plus one debounced pin coordinator.
 struct CoachChatTranscriptView: View {
     @Environment(CoachViewModel.self) private var coachViewModel
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     let bubbleMaxWidth: CGFloat
     let greetingText: String
     let bottomSpacerHeight: CGFloat
     /// Increment from the composer when focus should re-pin the transcript above the keyboard.
     let composerFocusScrollNonce: Int
+    var sentChipKey: String? = nil
     let onSend: (String) -> Void
     let onPlanBuilder: () -> Void
     let onPaywall: () -> Void
-    let onSuggestedAction: (SuggestedAction) -> Void
+    let onSuggestedAction: (UUID, SuggestedAction) -> Void
     let onRetry: () -> Void
 
     @State private var viewportHeight: CGFloat = 0
@@ -25,10 +27,6 @@ struct CoachChatTranscriptView: View {
 
     private var showEmptyState: Bool {
         coachViewModel.messages.isEmpty && !coachViewModel.isLoading
-    }
-
-    private var contentAlignment: Alignment {
-        showEmptyState ? .center : .bottom
     }
 
     private var startersLoading: Bool {
@@ -45,18 +43,38 @@ struct CoachChatTranscriptView: View {
                 if showEmptyState {
                     emptyState
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(
+                            .asymmetric(
+                                insertion: .opacity,
+                                removal: .move(edge: .bottom).combined(with: .opacity)
+                            )
+                        )
                 }
 
                 ForEach(coachViewModel.messages) { message in
+                    let index = coachViewModel.messages.firstIndex(where: { $0.id == message.id }) ?? 0
                     CoachMessageRow(
                         message: message,
                         isLatestAssistant: message.role == .assistant
                             && message.id == latestAssistantMessageID,
                         bubbleMaxWidth: bubbleMaxWidth,
                         suggestionsInteractive: !coachViewModel.isLoading,
+                        sentChipKey: sentChipKey,
+                        showTimestamp: CoachMessageTimestampFormatting.shouldShow(
+                            previousTimestamp: index > 0
+                                ? coachViewModel.messages[index - 1].timestamp
+                                : nil,
+                            current: message.timestamp
+                        ),
                         onRetry: onRetry,
-                        onSuggestedAction: onSuggestedAction,
+                        onSuggestedAction: { onSuggestedAction(message.id, $0) },
                         onFollowUpBatchComplete: onSend
+                    )
+                    .transition(
+                        .asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .opacity
+                        )
                     )
                 }
 
@@ -85,7 +103,7 @@ struct CoachChatTranscriptView: View {
             .frame(
                 maxWidth: .infinity,
                 minHeight: max(viewportHeight, 1),
-                alignment: contentAlignment
+                alignment: .top
             )
         }
         .background {
@@ -98,7 +116,7 @@ struct CoachChatTranscriptView: View {
             }
         }
         .defaultScrollAnchor(.bottom)
-        .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+        .scrollBounceBehavior(.always, axes: .vertical)
         .scrollDismissesKeyboard(.interactively)
         .scrollIndicators(.hidden)
         .scrollPosition($scrollPosition)
@@ -164,6 +182,18 @@ struct CoachChatTranscriptView: View {
             stickToBottom = true
             schedulePinToBottom(animated: true)
         }
+        .animation(
+            CoachChatMotionSupport.animation(reduceMotion: accessibilityReduceMotion, MangoxMotion.smooth),
+            value: showEmptyState
+        )
+        .animation(
+            CoachChatMotionSupport.animation(reduceMotion: accessibilityReduceMotion, MangoxMotion.snappy),
+            value: coachViewModel.messages.count
+        )
+        .animation(
+            CoachChatMotionSupport.animation(reduceMotion: accessibilityReduceMotion, MangoxMotion.snappy),
+            value: coachViewModel.isLoading
+        )
     }
 
     // MARK: - Empty state
@@ -189,6 +219,7 @@ struct CoachChatTranscriptView: View {
                         "Ask about training, recovery, or build a plan. Starters only appear when Mangox has data to support them.",
                     topicTags: content.topicTags,
                     prompts: content.prompts,
+                    startersEnabled: !coachViewModel.isLoading,
                     onPlanBuilder: onPlanBuilder,
                     onPrompt: { onSend($0.text) }
                 )
@@ -270,7 +301,10 @@ struct CoachChatTranscriptView: View {
                 scrollPosition.scrollTo(id: Self.bottomAnchorID, anchor: .bottom)
             }
             if animated {
-                withAnimation(MangoxMotion.snappy, pin)
+                withAnimation(
+                    CoachChatMotionSupport.animation(reduceMotion: accessibilityReduceMotion, MangoxMotion.snappy),
+                    pin
+                )
             } else {
                 pin()
             }
