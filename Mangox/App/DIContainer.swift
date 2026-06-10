@@ -224,13 +224,13 @@ final class DIContainer {
         stravaService = strava
         whoopService = whoop
         purchasesManager = PurchasesManager.shared
-        aiService = AIService()
         ftpRefreshTrigger = FTPRefreshTrigger.shared
         trainingPlanLookupService = TrainingPlanLookupService()
         workoutPersistenceRepository = WorkoutPersistenceRepository(
             modelContext: PersistenceContainer.shared.mainContext,
             modelContainer: PersistenceContainer.shared
         )
+        aiService = AIService(workoutPersistence: workoutPersistenceRepository)
         trainingPlanPersistenceRepository = TrainingPlanPersistenceRepository(
             modelContext: PersistenceContainer.shared.mainContext
         )
@@ -273,6 +273,12 @@ final class DIContainer {
         // Done after syncCoordinator is initialized so the capture is valid.
         activityRepo.setOnLocalChange { [weak syncCoordinator] in
             syncCoordinator?.notifyLocalChange()
+        }
+
+        if let workoutRepo = workoutPersistenceRepository as? WorkoutPersistenceRepository {
+            workoutRepo.setOnLocalChange { [weak syncCoordinator] in
+                syncCoordinator?.notifyLocalChange()
+            }
         }
     }
 }

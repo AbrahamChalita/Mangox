@@ -7,121 +7,6 @@ enum CoachSuggestedActionNavigation {
     }
 }
 
-enum CoachResponseAppearance {
-    case cloud
-    case onDevice
-
-    init(messageCategory: String?) {
-        self = messageCategory == "on_device_coach" ? .onDevice : .cloud
-    }
-
-    var icon: String {
-        switch self {
-        case .cloud: "sparkles"
-        case .onDevice: "apple.intelligence"
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .cloud: "Coach"
-        case .onDevice: "On-device"
-        }
-    }
-
-    var accent: Color {
-        switch self {
-        case .cloud: AppColor.mango
-        case .onDevice: Color.cyan.opacity(0.9)
-        }
-    }
-
-    var stripGradient: LinearGradient {
-        switch self {
-        case .cloud:
-            LinearGradient(
-                colors: [AppColor.mango.opacity(0.9), AppColor.mango.opacity(0.32)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        case .onDevice:
-            LinearGradient(
-                colors: [Color.cyan.opacity(0.85), Color.blue.opacity(0.34)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-    }
-
-    var bubbleFill: LinearGradient {
-        switch self {
-        case .cloud:
-            LinearGradient(
-                colors: [Color.white.opacity(0.09), Color.white.opacity(0.045)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        case .onDevice:
-            LinearGradient(
-                colors: [Color.cyan.opacity(0.11), Color.white.opacity(0.05)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-    }
-
-    var bubbleStroke: LinearGradient {
-        switch self {
-        case .cloud:
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(0.14),
-                    Color.white.opacity(0.06),
-                    AppColor.mango.opacity(0.12),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        case .onDevice:
-            LinearGradient(
-                colors: [
-                    Color.cyan.opacity(0.34),
-                    Color.white.opacity(0.08),
-                    Color.blue.opacity(0.18),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-    }
-
-    var statusFill: Color {
-        switch self {
-        case .cloud: Color.white.opacity(0.05)
-        case .onDevice: Color.cyan.opacity(0.08)
-        }
-    }
-
-    var statusStroke: Color {
-        switch self {
-        case .cloud: AppColor.mango.opacity(0.24)
-        case .onDevice: Color.cyan.opacity(0.26)
-        }
-    }
-}
-
-// MARK: - Coach metadata tag pills (message.tags, API snake_case)
-
-enum CoachTagPillFormatting {
-    /// `on_device` → "On Device"; keeps cloud/API tags readable in capsule pills.
-    static func displayLabel(for raw: String) -> String {
-        let spaced = raw.replacingOccurrences(of: "_", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !spaced.isEmpty else { return raw }
-        return spaced.localizedCapitalized
-    }
-}
-
 // MARK: - Suggested reply chip colors
 
 enum CoachReplyChipPalette {
@@ -204,6 +89,8 @@ struct CoachMessageRow: View {
     var sentChipKey: String? = nil
     var showTimestamp: Bool = false
     var onRetry: () -> Void = {}
+    var onRetryCloud: () -> Void = {}
+    var onFeedback: (Int) -> Void = { _ in }
     var onSuggestedAction: (SuggestedAction) -> Void = { _ in }
     /// When `followUpBlocks.count > 1`, the user answers all cards locally; this sends one combined user message.
     var onFollowUpBatchComplete: (String) -> Void = { _ in }
@@ -228,6 +115,10 @@ struct CoachMessageRow: View {
         CoachResponseAppearance(messageCategory: message.category)
     }
 
+    private var compactFollowUp: Bool {
+        CoachMessagePresentation.shouldUseCompactFollowUp(for: message)
+    }
+
     var body: some View {
         Group {
             if showTimestamp {
@@ -250,12 +141,33 @@ struct CoachMessageRow: View {
             } else {
                 VStack(alignment: .leading, spacing: 10) {
                     if message.category == "error" {
-                        CoachErrorBubble(text: message.content, onRetry: onRetry, bubbleMaxWidth: bubbleMaxWidth)
+                        CoachErrorBubble(
+                            text: message.content,
+                            failedTier: message.tags.first.flatMap { CoachDeliveryPath(rawValue: $0) },
+                            onRetry: onRetry,
+                            onRetryCloud: onRetryCloud,
+                            bubbleMaxWidth: bubbleMaxWidth
+                        )
                     } else {
-                        CoachAssistantBubble(message: message, bubbleMaxWidth: bubbleMaxWidth)
+                        CoachAssistantBubble(
+                            message: message,
+                            bubbleMaxWidth: bubbleMaxWidth,
+                            inlineFollowUp: compactFollowUp && showReplyPanel
+                                ? CoachInlineFollowUpModel(
+                                    question: message.followUpQuestion,
+                                    actions: message.suggestedActions,
+                                    isEnabled: suggestionsInteractive,
+                                    messageID: message.id,
+                                    sentChipKey: sentChipKey,
+                                    onSelect: onSuggestedAction
+                                )
+                                : nil,
+                            showsFeedback: isLatestAssistant,
+                            onFeedback: isLatestAssistant ? { onFeedback($0) } : nil
+                        )
                     }
 
-                    if showReplyPanel {
+                    if showReplyPanel, !compactFollowUp {
                         // Multi-card carousel renders its own progress strip; avoid duplicating "Plan setup".
                         if message.followUpBlocks.count <= 1,
                             let progress = CoachPlanIntakeProgress.snapshot(for: message)
@@ -354,39 +266,33 @@ struct CoachUserBubble: View {
 struct CoachAssistantBubble: View {
     let message: ChatMessage
     let bubbleMaxWidth: CGFloat
+    var inlineFollowUp: CoachInlineFollowUpModel? = nil
+    var showsFeedback: Bool = false
+    var onFeedback: ((Int) -> Void)? = nil
+
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @State private var expandedLongBody = false
+    @State private var metadataRevealStage = 0
+    @State private var sourcesExpanded = false
 
     private var displayText: AttributedString {
-        CoachAssistantFormatting.attributedContent(from: message.content)
+        CoachAssistantFormatting.attributedContent(from: message.content, category: message.category)
     }
 
     private var responseAppearance: CoachResponseAppearance {
         CoachResponseAppearance(messageCategory: message.category)
     }
 
+    private var headerCategory: String? {
+        CoachMessagePresentation.headerCategory(message: message, appearance: responseAppearance)
+    }
+
     private var categoryIcon: String {
-        switch message.category {
-        case "training_advice": "bicycle"
-        case "plan_analysis": "chart.bar.fill"
-        case "nutrition": "fork.knife"
-        case "recovery": "waveform.path.ecg"
-        case "equipment": "gearshape.fill"
-        case "clarification": "questionmark.circle.fill"
-        case "on_device_coach": responseAppearance.icon
-        default: "sparkles"
-        }
+        CoachResponseAppearance.headerIcon(category: headerCategory, appearance: responseAppearance)
     }
 
     private var categoryLabel: String {
-        switch message.category {
-        case "training_advice": "Training"
-        case "plan_analysis": "Plan"
-        case "nutrition": "Nutrition"
-        case "recovery": "Recovery"
-        case "equipment": "Equipment"
-        case "clarification": "Clarify"
-        case "on_device_coach": responseAppearance.label
-        default: "Coach"
-        }
+        CoachResponseAppearance.headerLabel(category: headerCategory, appearance: responseAppearance)
     }
 
     private var categoryAccent: Color {
@@ -397,37 +303,92 @@ struct CoachAssistantBubble: View {
         responseAppearance.stripGradient
     }
 
+    private var isShortReply: Bool {
+        let trimmed = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count < 140
+            && !trimmed.contains("\n")
+            && message.tags.count <= 1
+            && message.references.isEmpty
+            && message.thinkingSteps.isEmpty
+    }
+
+    private var shouldTruncateBody: Bool {
+        message.content.count > 420
+            || message.content.components(separatedBy: "\n").count > 6
+    }
+
+    private var visibleTags: [String] {
+        CoachMessagePresentation.displayTags(for: message, isShortReply: isShortReply)
+    }
+
+    private var showWebSourcesBadge: Bool {
+        message.usedWebSearch && message.references.isEmpty
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             RoundedRectangle(cornerRadius: 2, style: .continuous)
                 .fill(stripGradient)
                 .frame(width: 3)
-                .padding(.vertical, 14)
+                .padding(.vertical, isShortReply ? 10 : 14)
                 .padding(.leading, 12)
 
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 6) {
-                    Image(systemName: categoryIcon)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(categoryAccent)
-                    Text(categoryLabel.uppercased())
-                        .font(.system(size: 9, weight: .heavy))
-                        .foregroundStyle(.white.opacity(0.38))
-                        .tracking(0.65)
-                    Spacer(minLength: 0)
+                if isShortReply {
+                    HStack(alignment: .top, spacing: 0) {
+                        Spacer(minLength: 0)
+                        CoachDeliveryBadge(appearance: responseAppearance, compact: true)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                    .padding(.bottom, 4)
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: categoryIcon)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(categoryAccent)
+                        Text(categoryLabel.uppercased())
+                            .font(.system(size: 9, weight: .heavy))
+                            .foregroundStyle(.white.opacity(0.38))
+                            .tracking(0.65)
+                        Text("·")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.22))
+                        Text(responseAppearance.label)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(categoryAccent.opacity(0.72))
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 12)
+                    .padding(.bottom, 6)
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 12)
-                .padding(.bottom, 6)
 
-                Text(displayText)
-                    .font(.body)
-                    .foregroundStyle(.white.opacity(0.94))
-                    .lineSpacing(5)
+                Group {
+                    Text(displayText)
+                        .font(.body)
+                        .foregroundStyle(.white.opacity(0.94))
+                        .lineSpacing(5)
+                        .lineLimit(expandedLongBody || !shouldTruncateBody ? nil : 8)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, isShortReply ? 0 : 0)
+                .padding(.bottom, shouldTruncateBody && !expandedLongBody ? 4 : 10)
+
+                if shouldTruncateBody {
+                    Button {
+                        withAnimation(MangoxMotion.snappy) { expandedLongBody.toggle() }
+                    } label: {
+                        Text(expandedLongBody ? "Show less" : "Show more")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(categoryAccent.opacity(0.9))
+                    }
+                    .buttonStyle(.plain)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
+                }
 
-                if message.category == "on_device_coach" {
+                if responseAppearance.showsOnDevicePrivacyFooter, !isShortReply {
                     HStack(alignment: .center, spacing: 6) {
                         Image(systemName: "lock.fill")
                             .font(.system(size: 11, weight: .semibold))
@@ -442,7 +403,7 @@ struct CoachAssistantBubble: View {
                     .accessibilityLabel(A11yL10n.onDeviceAnswer)
                 }
 
-                if message.usedWebSearch {
+                if showWebSourcesBadge {
                     HStack(alignment: .center, spacing: 6) {
                         Image(systemName: "globe")
                             .font(.system(size: 11, weight: .semibold))
@@ -457,61 +418,65 @@ struct CoachAssistantBubble: View {
                     .accessibilityLabel(A11yL10n.webSourcesAnswer)
                 }
 
-                if !message.tags.isEmpty {
+                if !visibleTags.isEmpty, metadataRevealStage >= 2 {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
-                            ForEach(message.tags, id: \.self) { tag in
+                            ForEach(visibleTags, id: \.self) { tag in
+                                let palette = CoachTagPillPalette.forTag(tag)
                                 Text(CoachTagPillFormatting.displayLabel(for: tag))
                                     .mangoxFont(.micro)
-                                    .foregroundStyle(AppColor.fg2)
+                                    .foregroundStyle(palette.foreground)
                                     .padding(.horizontal, 9)
                                     .padding(.vertical, 5)
-                                    .mangoxSurface(.flatSubtle, shape: .rounded(MangoxRadius.sharp.rawValue))
+                                    .background(
+                                        Capsule(style: .continuous)
+                                            .fill(palette.fill)
+                                    )
+                                    .overlay(
+                                        Capsule(style: .continuous)
+                                            .strokeBorder(palette.stroke, lineWidth: 1)
+                                    )
                                     .accessibilityLabel(CoachTagPillFormatting.displayLabel(for: tag))
                             }
                         }
                         .padding(.horizontal, 14)
                     }
                     .padding(.bottom, 10)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                if !message.thinkingSteps.isEmpty {
+                if !message.thinkingSteps.isEmpty, metadataRevealStage >= 3 {
                     Divider()
                         .background(Color.white.opacity(0.08))
                         .padding(.horizontal, 12)
                     CoachThinkingDisclosure(steps: message.thinkingSteps)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                if !message.references.isEmpty {
-                    Divider()
-                        .background(Color.white.opacity(0.1))
-                        .padding(.horizontal, 12)
+                if !message.references.isEmpty, metadataRevealStage >= 3 {
+                    CoachCollapsedSourcesSection(
+                        references: message.references,
+                        isExpanded: $sourcesExpanded,
+                        accent: categoryAccent
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Sources")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.32))
-                            .tracking(0.5)
-                            .padding(.horizontal, 14)
-                            .padding(.top, 10)
+                if let inlineFollowUp, metadataRevealStage >= 3 {
+                    CoachInlineFollowUpSection(
+                        model: inlineFollowUp,
+                        accent: categoryAccent
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
 
-                        ForEach(Array(message.references.enumerated()), id: \.offset) { _, ref in
-                            if let urlStr = ref.url, !urlStr.isEmpty,
-                               let url = URL(string: urlStr),
-                               let scheme = url.scheme?.lowercased(),
-                               scheme == "http" || scheme == "https" {
-                                Link(destination: url) {
-                                    referenceRow(title: ref.title, snippet: ref.snippet)
-                                }
-                                .accessibilityHint("Opens in Safari")
-                            } else {
-                                referenceRow(title: ref.title, snippet: ref.snippet)
-                            }
-                        }
-                    }
-                    .padding(.bottom, 10)
+                if showsFeedback, let onFeedback, metadataRevealStage >= 3 {
+                    CoachMessageFeedbackRow(score: message.feedbackScore, onSubmit: onFeedback)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 10)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
         }
@@ -524,10 +489,13 @@ struct CoachAssistantBubble: View {
                 .strokeBorder(responseAppearance.bubbleStroke, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(A11yL10n.coach)
         .accessibilityValue(message.content)
+        .onAppear { beginMetadataReveal() }
+        .onChange(of: message.id) { _, _ in beginMetadataReveal() }
         .contextMenu {
             Button {
                 UIPasteboard.general.string = message.content
@@ -538,6 +506,52 @@ struct CoachAssistantBubble: View {
     }
 
     private func referenceRow(title: String, snippet: String?) -> some View {
+        CoachReferenceRow(title: title, snippet: snippet)
+    }
+
+    private func beginMetadataReveal() {
+        metadataRevealStage = 1
+        sourcesExpanded = false
+        let wantsFeedback = showsFeedback && onFeedback != nil
+        let hasMetadata =
+            !visibleTags.isEmpty
+            || !message.thinkingSteps.isEmpty
+            || !message.references.isEmpty
+            || inlineFollowUp != nil
+            || wantsFeedback
+        guard hasMetadata else { return }
+
+        if accessibilityReduceMotion || (isShortReply && wantsFeedback) {
+            metadataRevealStage = 3
+            return
+        }
+
+        if isShortReply, wantsFeedback, visibleTags.isEmpty,
+            message.thinkingSteps.isEmpty, message.references.isEmpty,
+            inlineFollowUp == nil
+        {
+            metadataRevealStage = 3
+            return
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            withAnimation(CoachChatMotionSupport.animation(reduceMotion: false, MangoxMotion.snappy)) {
+                metadataRevealStage = 2
+            }
+            try? await Task.sleep(for: .milliseconds(140))
+            withAnimation(CoachChatMotionSupport.animation(reduceMotion: false, MangoxMotion.smooth)) {
+                metadataRevealStage = 3
+            }
+        }
+    }
+}
+
+private struct CoachReferenceRow: View {
+    let title: String
+    let snippet: String?
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 Image(systemName: "link")
@@ -547,7 +561,7 @@ struct CoachAssistantBubble: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(AppColor.mango.opacity(0.75))
             }
-            if let snippet = snippet, !snippet.isEmpty {
+            if let snippet, !snippet.isEmpty {
                 Text(snippet)
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.32))
@@ -559,12 +573,177 @@ struct CoachAssistantBubble: View {
     }
 }
 
+private struct CoachCollapsedSourcesSection: View {
+    let references: [ChatReference]
+    @Binding var isExpanded: Bool
+    let accent: Color
+
+    var body: some View {
+        Divider()
+            .background(Color.white.opacity(0.1))
+            .padding(.horizontal, 12)
+
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(MangoxMotion.snappy) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "globe")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(accent.opacity(0.85))
+                    Text("Sources (\(references.count))")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .tracking(0.5)
+                    Spacer(minLength: 0)
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.28))
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
+                .padding(.bottom, isExpanded ? 4 : 10)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isExpanded ? "Collapse sources" : "Expand sources")
+
+            if isExpanded {
+                ForEach(Array(references.enumerated()), id: \.offset) { _, ref in
+                    if let urlStr = ref.url, !urlStr.isEmpty,
+                       let url = URL(string: urlStr),
+                       let scheme = url.scheme?.lowercased(),
+                       scheme == "http" || scheme == "https"
+                    {
+                        Link(destination: url) {
+                            CoachReferenceRow(title: ref.title, snippet: ref.snippet)
+                        }
+                        .accessibilityHint("Opens in Safari")
+                    } else {
+                        CoachReferenceRow(title: ref.title, snippet: ref.snippet)
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+        }
+    }
+}
+
+private struct CoachInlineFollowUpSection: View {
+    let model: CoachInlineFollowUpModel
+    let accent: Color
+
+    private var trimmedQuestion: String {
+        model.question?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    var body: some View {
+        Divider()
+            .background(Color.white.opacity(0.08))
+            .padding(.horizontal, 12)
+
+        VStack(alignment: .leading, spacing: 8) {
+            if !trimmedQuestion.isEmpty {
+                Text(trimmedQuestion)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.78))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+            }
+
+            if !model.actions.isEmpty {
+                VStack(spacing: 6) {
+                    ForEach(model.actions) { action in
+                        inlineChipButton(action)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func inlineChipButton(_ action: SuggestedAction) -> some View {
+        let navigates = CoachSuggestedActionNavigation.isNavigation(action.type)
+        let palette = CoachReplyChipPalette.forAction(action)
+        let title = CoachChipPresentation.displayTitle(for: action)
+        let isSent = {
+            guard model.sentChipKey != nil else { return false }
+            return model.sentChipKey == CoachChipSentState.key(messageID: model.messageID, action: action)
+        }()
+        return CoachTallPromptButton(
+            title: isSent ? "Sent · \(title)" : title,
+            trailingSystemImage: navigates ? "arrow.right.circle.fill" : "arrow.up.circle.fill",
+            trailingTint: navigates ? Color.indigo.opacity(0.92) : palette.trailingOrbTint(isEnabled: model.isEnabled),
+            chipPalette: palette,
+            isEnabled: model.isEnabled,
+            isSent: isSent,
+            accessibilityLabelOverride: navigates
+                ? "\(title), opens elsewhere"
+                : "Suggested reply: \(title)",
+            action: { model.onSelect(action) }
+        )
+    }
+}
+
+// MARK: - Feedback
+
+struct CoachMessageFeedbackRow: View {
+    let score: Int?
+    let onSubmit: (Int) -> Void
+
+    private var thumbsUpSelected: Bool { score == 1 }
+    private var thumbsDownSelected: Bool { score == -1 }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("Helpful?")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.38))
+
+            Button {
+                onSubmit(1)
+            } label: {
+                Image(systemName: thumbsUpSelected ? "hand.thumbsup.fill" : "hand.thumbsup")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(thumbsUpSelected ? AppColor.mango : .white.opacity(0.42))
+                    .frame(width: 36, height: 32)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Helpful")
+
+            Button {
+                onSubmit(-1)
+            } label: {
+                Image(systemName: thumbsDownSelected ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(thumbsDownSelected ? AppColor.red.opacity(0.9) : .white.opacity(0.42))
+                    .frame(width: 36, height: 32)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Not helpful")
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 // MARK: - Error
 
 struct CoachErrorBubble: View {
     let text: String
+    var failedTier: CoachDeliveryPath?
     let onRetry: () -> Void
+    var onRetryCloud: () -> Void = {}
     let bubbleMaxWidth: CGFloat
+
+    private var failedTierLabel: String? {
+        switch failedTier {
+        case .onDeviceNarrow: "On-device coach"
+        case .privateCloudCompute: "Private Cloud"
+        case .mangoxCloudBackend: "Coach server"
+        case nil: nil
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -577,28 +756,56 @@ struct CoachErrorBubble: View {
                     .foregroundStyle(AppColor.red.opacity(0.95))
             }
 
+            if let failedTierLabel {
+                Text("Failed at: \(failedTierLabel)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.42))
+            }
+
             Text(text)
                 .font(.system(size: 14))
                 .foregroundStyle(.white.opacity(0.58))
                 .fixedSize(horizontal: false, vertical: true)
 
-            Button(action: onRetry) {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("Try again")
-                        .font(.subheadline.weight(.semibold))
+            VStack(spacing: 8) {
+                Button(action: onRetry) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Try again")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .frame(minHeight: 44)
+                    .mangoxSurface(
+                        .flatCustom(fill: AppColor.red.opacity(0.82), border: AppColor.red.opacity(0.28)),
+                        shape: .rounded(MangoxRadius.sharp.rawValue)
+                    )
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .frame(minHeight: 44)
-                .mangoxSurface(
-                    .flatCustom(fill: AppColor.red.opacity(0.82), border: AppColor.red.opacity(0.28)),
-                    shape: .rounded(MangoxRadius.sharp.rawValue)
-                )
+                .buttonStyle(.plain)
+
+                Button(action: onRetryCloud) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "cloud.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Retry on cloud server")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(.white.opacity(0.92))
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .frame(minHeight: 44)
+                    .mangoxSurface(
+                        .flatCustom(fill: Color.indigo.opacity(0.55), border: Color.indigo.opacity(0.28)),
+                        shape: .rounded(MangoxRadius.sharp.rawValue)
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -686,89 +893,6 @@ struct CoachStreamStatusRow: View {
     }
 }
 
-struct CoachStreamingBubble: View {
-    enum Style {
-        case cloud
-        case onDevice
-
-        var responseAppearance: CoachResponseAppearance {
-            switch self {
-            case .cloud: .cloud
-            case .onDevice: .onDevice
-            }
-        }
-    }
-
-    let text: String
-    var style: Style = .cloud
-
-    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
-
-    private var responseAppearance: CoachResponseAppearance {
-        style.responseAppearance
-    }
-
-    private var headerIcon: String {
-        responseAppearance.icon
-    }
-
-    private var headerLabel: String {
-        responseAppearance.label.uppercased()
-    }
-
-    private var headerTint: Color {
-        responseAppearance.accent
-    }
-
-    private var stripGradient: LinearGradient {
-        responseAppearance.stripGradient
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(stripGradient)
-                .frame(width: 3)
-                .padding(.vertical, 12)
-                .padding(.leading, 12)
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: headerIcon)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(headerTint)
-                        .contentTransition(.interpolate)
-                    Text(headerLabel)
-                        .font(.system(size: 9, weight: .heavy))
-                        .foregroundStyle(.white.opacity(0.38))
-                        .tracking(0.65)
-                        .contentTransition(.interpolate)
-                }
-                Text(CoachAssistantFormatting.plainTextForStreaming(text))
-                    .font(.body)
-                    .foregroundStyle(.white.opacity(0.9))
-                    .lineSpacing(5)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    // Streaming text changes every token; animating each delta produced
-                    // visible flicker on fast networks. Identity transition keeps the
-                    // bubble stable while text grows; the final-message swap still fades.
-                    .contentTransition(.identity)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .mangoxSurface(
-            .flatStyled(fill: AppColor.bg2, border: AnyShapeStyle(responseAppearance.bubbleStroke)),
-            shape: .rectangle
-        )
-        .accessibilityLabel(
-            style == .onDevice ? "On-device coach is writing a reply" : "Coach is writing a reply")
-    }
-}
-
 /// Compact typing indicator — three pulsing dots, optional globe when searching the web.
 private struct CoachTypingDotsIndicator: View {
     let accent: Color
@@ -784,106 +908,160 @@ private struct CoachTypingDotsIndicator: View {
     }
 }
 
-/// Single persistent bubble for the pending assistant turn. Shows typing dots until streamed
-/// body text arrives, then grows into a normal assistant card.
+/// Single full-width bubble for the pending assistant turn — same chrome as the final card.
 struct CoachPendingReplyBubble: View {
     let streamingText: String
+    var delivery: CoachStreamDelivery = .cloud
+    var partialTags: [String] = []
     var isSearchingWeb: Bool = false
-    var style: CoachStreamingBubble.Style = .cloud
+    var isThinking: Bool = false
+    var statusText: String? = nil
+    var routeStatus: String? = nil
+    var onHeightChange: (CGFloat) -> Void = { _ in }
 
-    private var responseAppearance: CoachResponseAppearance { style.responseAppearance }
+    private var responseAppearance: CoachResponseAppearance { delivery.appearance }
 
-    private var isCompactPending: Bool {
-        streamingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var headerCategory: String? {
+        CoachMessagePresentation.semanticCategory(category: nil, tags: partialTags)
     }
 
-    @ViewBuilder
-    private var inner: some View {
-        if !streamingText.isEmpty {
-            Text(CoachAssistantFormatting.plainTextForStreaming(streamingText))
-                .font(.body)
-                .foregroundStyle(.white.opacity(0.9))
-                .lineSpacing(5)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentTransition(.identity)
-        } else {
-            HStack(spacing: 8) {
-                if isSearchingWeb {
-                    Image(systemName: "globe")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(AppColor.mango.opacity(0.88))
-                        .symbolEffect(.pulse, isActive: true)
-                        .accessibilityHidden(true)
-                }
-                CoachTypingDotsIndicator(accent: responseAppearance.accent)
-            }
-            .frame(minHeight: 18)
-        }
+    private var headerIcon: String {
+        CoachResponseAppearance.headerIcon(category: headerCategory, appearance: responseAppearance)
+    }
+
+    private var headerLabel: String {
+        CoachResponseAppearance.headerLabel(category: headerCategory, appearance: responseAppearance)
+    }
+
+    private var hasVisibleBody: Bool {
+        !streamingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var statusLine: String? {
+        if let routeStatus, !routeStatus.isEmpty { return routeStatus }
+        if let statusText, !statusText.isEmpty { return statusText }
+        if isThinking { return "Thinking…" }
+        if isSearchingWeb, !hasVisibleBody { return "Searching the web…" }
+        return nil
+    }
+
+    private var streamAttributed: AttributedString {
+        CoachAssistantFormatting.attributedContentForStreaming(from: streamingText)
     }
 
     var body: some View {
-        Group {
-            if isCompactPending {
-                HStack(alignment: .center, spacing: 0) {
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(responseAppearance.stripGradient)
-                        .frame(width: 3, height: 20)
-                        .padding(.leading, 10)
+        HStack(alignment: .top, spacing: 0) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(responseAppearance.stripGradient)
+                .frame(width: 3)
+                .padding(.vertical, 12)
+                .padding(.leading, 12)
 
-                    inner
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    Image(systemName: headerIcon)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(responseAppearance.accent)
+                    Text(headerLabel.uppercased())
+                        .font(.system(size: 9, weight: .heavy))
+                        .foregroundStyle(.white.opacity(0.38))
+                        .tracking(0.65)
+                    Spacer(minLength: 0)
                 }
-                .frame(maxWidth: 120, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(responseAppearance.bubbleFill)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(responseAppearance.bubbleStroke, lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            } else {
-                HStack(alignment: .top, spacing: 0) {
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(responseAppearance.stripGradient)
-                        .frame(width: 3)
-                        .padding(.vertical, 12)
-                        .padding(.leading, 12)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 6)
 
-                    inner
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
+                if hasVisibleBody {
+                    Text(streamAttributed)
+                        .font(.body)
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineSpacing(5)
+                        .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentTransition(.identity)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                } else {
+                    HStack(spacing: 8) {
+                        if isSearchingWeb {
+                            Image(systemName: "globe")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(responseAppearance.accent.opacity(0.88))
+                                .symbolEffect(.pulse, isActive: true)
+                                .accessibilityHidden(true)
+                        }
+                        CoachTypingDotsIndicator(accent: responseAppearance.accent)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 4)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(responseAppearance.bubbleFill)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(responseAppearance.bubbleStroke, lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                if let statusLine {
+                    Text(statusLine)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                }
+
+                if !partialTags.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(partialTags, id: \.self) { tag in
+                                let palette = CoachTagPillPalette.forTag(tag)
+                                Text(CoachTagPillFormatting.displayLabel(for: tag))
+                                    .mangoxFont(.micro)
+                                    .foregroundStyle(palette.foreground)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 5)
+                                    .background(Capsule(style: .continuous).fill(palette.fill))
+                                    .overlay(
+                                        Capsule(style: .continuous)
+                                            .strokeBorder(palette.stroke, lineWidth: 1)
+                                    )
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                    }
+                    .padding(.bottom, 10)
+                }
             }
+            .padding(.bottom, 4)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(responseAppearance.bubbleFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(responseAppearance.bubbleStroke, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.height
+        } action: { _, height in
+            onHeightChange(height)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityDescription)
+        .accessibilityValue(streamingText.isEmpty ? (statusLine ?? "") : streamingText)
         .accessibilityAddTraits(.updatesFrequently)
     }
 
     private var accessibilityDescription: String {
-        if !streamingText.isEmpty {
-            return style == .onDevice
-                ? "On-device coach is writing a reply"
-                : "Coach is writing a reply"
+        switch delivery {
+        case .onDevice:
+            hasVisibleBody ? "On-device coach is writing a reply" : "On-device coach is preparing a reply"
+        case .pcc, .planIntake:
+            hasVisibleBody ? "Private Cloud coach is writing a reply" : "Private Cloud coach is preparing a reply"
+        case .webSearch:
+            isSearchingWeb ? "Coach is searching the web" : "Web coach is writing a reply"
+        case .cloud:
+            hasVisibleBody ? "Coach is writing a reply" : "Coach is preparing a reply"
         }
-        if isSearchingWeb { return "Coach is searching the web" }
-        return "Coach is typing"
     }
 }
 
@@ -1339,6 +1517,23 @@ struct CoachFollowUpRepliesPanel: View {
     private var hasQuestion: Bool { !trimmedQuestion.isEmpty }
     private var hasActions: Bool { !actions.isEmpty }
 
+    private var asksHeader: String {
+        switch sourceAppearance {
+        case .onDevice: "ON-DEVICE ASKS"
+        case .pcc, .webSearch: "PRIVATE CLOUD ASKS"
+        case .planIntake: "PLAN SETUP ASKS"
+        default: "COACH ASKS"
+        }
+    }
+
+    private var pickReplyHeader: String {
+        switch sourceAppearance {
+        case .onDevice: "PICK AN ON-DEVICE REPLY"
+        case .pcc, .webSearch, .planIntake: "PICK A REPLY"
+        default: "PICK A REPLY"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if hasQuestion {
@@ -1347,7 +1542,7 @@ struct CoachFollowUpRepliesPanel: View {
                         Image(systemName: "bubble.left.and.bubble.right.fill")
                             .font(MangoxFont.micro.value)
                             .foregroundStyle(sourceAppearance.accent)
-                        Text(sourceAppearance == .onDevice ? "ON-DEVICE ASKS" : "COACH ASKS")
+                        Text(asksHeader)
                             .mangoxFont(.micro)
                             .tracking(1.2)
                             .foregroundStyle(AppColor.fg3)
@@ -1375,7 +1570,7 @@ struct CoachFollowUpRepliesPanel: View {
                         Image(systemName: "hand.tap.fill")
                             .font(MangoxFont.micro.value)
                             .foregroundStyle(sourceAppearance.accent.opacity(0.85))
-                        Text(sourceAppearance == .onDevice ? "PICK AN ON-DEVICE REPLY" : "PICK A REPLY")
+                        Text(pickReplyHeader)
                             .mangoxFont(.micro)
                             .tracking(1.2)
                             .foregroundStyle(AppColor.fg3)

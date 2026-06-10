@@ -37,8 +37,66 @@ enum MangoxFoundationModelsSupport {
         return UserDefaults.standard.bool(forKey: tokenBudgetLogKey)
     }
 
-    /// Apple documents ~4096 tokens per `LanguageModelSession`.
-    static let documentedContextWindowTokens = 4096
+    /// On-device context window for token-budget logging (falls back when `contextSize` is unavailable).
+    static func contextWindowTokens(for model: SystemLanguageModel) -> Int {
+        if #available(iOS 26.4, macOS 26.4, visionOS 26.4, *) {
+            return model.contextSize
+        }
+        return 4096
+    }
+
+    /// Deterministic token sampling for coach and insight generation.
+    static var greedyGenerationOptions: GenerationOptions {
+        GenerationOptions(samplingMode: .greedy)
+    }
+
+    /// Moderate temperature for short creative copy (captions, headlines, session titles).
+    static var creativeGenerationOptions: GenerationOptions {
+        GenerationOptions(samplingMode: .greedy, temperature: 0.75)
+    }
+
+    /// Narrow coach guided generation; enforces tool calls on iOS 27+ when `requireTools` on first turn.
+    static func narrowGenerationOptions(requireTools: Bool, isFollowUp: Bool) -> GenerationOptions {
+        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) {
+            let mode: GenerationOptions.ToolCallingMode =
+                isFollowUp ? .allowed : (requireTools ? .required : .allowed)
+            return GenerationOptions(samplingMode: .greedy, toolCallingMode: mode)
+        }
+        return greedyGenerationOptions
+    }
+
+    // MARK: - Private Cloud Compute (scaffold — no entitlement required to compile)
+
+    /// True when Apple's PCC coach tier is available on this device (typically requires entitlement).
+    static var isPrivateCloudComputeCoachAvailable: Bool {
+        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return false }
+        switch PrivateCloudComputeLanguageModel().availability {
+        case .available: return true
+        default: return false
+        }
+    }
+
+    /// Whether PCC supports the active locale (iOS 27+).
+    static func privateCloudComputeSupportsCurrentLocale() -> Bool {
+        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return false }
+        return PrivateCloudComputeLanguageModel().supportsLocale(Locale.current)
+    }
+
+    /// Returns a PCC model when available; otherwise `nil` (caller should use Mangox cloud API).
+    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
+    static func privateCloudComputeCoachModel() -> PrivateCloudComputeLanguageModel? {
+        let model = PrivateCloudComputeLanguageModel()
+        guard case .available = model.availability else { return nil }
+        return model
+    }
+
+    /// Keeps the last 24 transcript entries for PCC sessions (roughly 12 turns).
+    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
+    static func coachHistoryTransform(_ entries: [Transcript.Entry]) -> [Transcript.Entry] {
+        let maxEntries = 24
+        guard entries.count > maxEntries else { return entries }
+        return Array(entries.suffix(maxEntries))
+    }
 
     /// Default on-device coach model with Apple’s default guardrails.
     static func coachSystemLanguageModel() -> SystemLanguageModel {
@@ -73,7 +131,7 @@ enum MangoxFoundationModelsSupport {
             let pTok = try await model.tokenCount(for: prompt)
             let tTok = tools.isEmpty ? 0 : (try await model.tokenCount(for: tools))
             logger.info(
-                "FM tokens [\(label, privacy: .public)] instructions=\(iTok) prompt=\(pTok) tools=\(tTok) totalEst=\(iTok + pTok + tTok) windowLimit=\(documentedContextWindowTokens)"
+                "FM tokens [\(label, privacy: .public)] instructions=\(iTok) prompt=\(pTok) tools=\(tTok) totalEst=\(iTok + pTok + tTok) windowLimit=\(contextWindowTokens(for: model))"
             )
         } catch {
             logger.debug("FM tokenCount failed: \(error.localizedDescription)")
@@ -89,6 +147,20 @@ enum MangoxFoundationModelsSupport {
 
     /// Maps Apple generation errors for logging / user messaging.
     static func logGenerationFailure(_ error: Error, label: String) {
+        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) {
+            if let pcc = error as? PrivateCloudComputeLanguageModel.Error {
+                logger.warning("FM PCC error [\(label, privacy: .public)]: \(pcc.localizedDescription, privacy: .public)")
+                return
+            }
+            if let modelErr = error as? LanguageModelError {
+                logger.warning("FM LanguageModelError [\(label)]: \(String(describing: modelErr), privacy: .public)")
+                return
+            }
+            if let sessionErr = error as? LanguageModelSession.Error {
+                logger.warning("FM session error [\(label)]: \(String(describing: sessionErr), privacy: .public)")
+                return
+            }
+        }
         if let toolErr = error as? LanguageModelSession.ToolCallError {
             logger.warning(
                 "FM ToolCallError [\(label, privacy: .public)] tool=\(toolErr.tool.name, privacy: .public) underlying=\(String(describing: toolErr.underlyingError), privacy: .public)"

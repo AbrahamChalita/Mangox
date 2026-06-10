@@ -74,8 +74,13 @@ final class Workout {
         Int(duration) >= minimumValidWorkoutSeconds
     }
 
-    init(startDate: Date = .now, planDayID: String? = nil, planID: String? = nil) {
-        self.id = UUID()
+    init(
+        id: UUID = UUID(),
+        startDate: Date = .now,
+        planDayID: String? = nil,
+        planID: String? = nil
+    ) {
+        self.id = id
         self.startDate = startDate
         self.updatedAt = startDate
         self.planDayID = planDayID

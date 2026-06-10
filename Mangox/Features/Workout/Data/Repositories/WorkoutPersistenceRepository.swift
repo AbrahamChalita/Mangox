@@ -5,10 +5,19 @@ import SwiftData
 final class WorkoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol {
     private let modelContext: ModelContext
     private let modelContainer: ModelContainer
+    private var onLocalChange: (() -> Void)?
 
     init(modelContext: ModelContext, modelContainer: ModelContainer) {
         self.modelContext = modelContext
         self.modelContainer = modelContainer
+    }
+
+    func setOnLocalChange(_ block: @escaping () -> Void) {
+        onLocalChange = block
+    }
+
+    private func notifyLocalChange() {
+        onLocalChange?()
     }
 
     convenience init(modelContainer: ModelContainer) {
@@ -32,6 +41,7 @@ final class WorkoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol {
 
         modelContext.insert(template)
         try modelContext.save()
+        notifyLocalChange()
         return template.id
     }
 
@@ -39,6 +49,7 @@ final class WorkoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol {
         let template = CustomWorkoutTemplate(name: name, intervals: intervals)
         modelContext.insert(template)
         try modelContext.save()
+        notifyLocalChange()
         return template.id
     }
 
@@ -60,6 +71,7 @@ final class WorkoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol {
         }
         try modelContext.save()
         MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
+        notifyLocalChange()
     }
 
     @discardableResult
@@ -122,6 +134,7 @@ final class WorkoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol {
 
         try modelContext.save()
         MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
+        notifyLocalChange()
         return workout
     }
 

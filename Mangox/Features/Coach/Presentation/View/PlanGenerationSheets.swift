@@ -599,6 +599,10 @@ struct CoachWorkoutSuccessBanner: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.52))
 
+            Text("Also in Coach → My Workouts and Indoor → Connection.")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.42))
+
             HStack(spacing: 10) {
                 Button {
                     coachViewModel.clearWorkoutSaveCelebration()

@@ -258,15 +258,22 @@ extension WorkoutSummaryOnDeviceInsight {
                 prompt: prompt,
                 tools: []
             )
-            let response = try await session.respond(
-                to: prompt,
+            let stream = session.streamResponse(
                 generating: WorkoutRideInsightGenerated.self,
-                options: GenerationOptions(sampling: .greedy)
-            )
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions
+            ) {
+                prompt
+            }
+            var lastPartial: WorkoutRideInsightGenerated.PartiallyGenerated?
+            for try await snapshot in stream {
+                lastPartial = snapshot.content
+            }
             OnDeviceCoachEngine.logTranscript(session, label: "workout_summary")
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "workout_summary")
 
-            let g = response.content
+            guard let partial = lastPartial,
+                let g = finalizedWorkoutRideInsight(from: partial)
+            else { return nil }
             let caveatTrim = g.caveat.trimmingCharacters(in: .whitespacesAndNewlines)
             let bullets = g.bullets.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter {
                 !$0.isEmpty
@@ -346,7 +353,7 @@ extension WorkoutSummaryOnDeviceInsight {
             let response = try await session.respond(
                 to: stats,
                 generating: WorkoutSmartTitleGenerated.self,
-                options: GenerationOptions(sampling: .greedy)
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions
             )
             let title = response.content.title.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty else { return }
@@ -408,7 +415,7 @@ extension WorkoutSummaryOnDeviceInsight {
             let response = try await session.respond(
                 to: stats,
                 generating: WorkoutStravaDescriptionGenerated.self,
-                options: GenerationOptions(sampling: .greedy)
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions
             )
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "strava_description")
             let body = response.content.body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -420,6 +427,23 @@ extension WorkoutSummaryOnDeviceInsight {
             MangoxFoundationModelsSupport.logGenerationFailure(error, label: "strava_description")
             return nil
         }
+    }
+
+    private static func finalizedWorkoutRideInsight(
+        from partial: WorkoutRideInsightGenerated.PartiallyGenerated
+    ) -> WorkoutRideInsightGenerated? {
+        let headline = partial.headline?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let bullets = (partial.bullets ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !headline.isEmpty, !bullets.isEmpty else { return nil }
+        return WorkoutRideInsightGenerated(
+            reasoning: partial.reasoning?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            headline: headline,
+            bullets: bullets,
+            caveat: partial.caveat?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            narrative: partial.narrative?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        )
     }
 
     private static func buildStatsPrompt(

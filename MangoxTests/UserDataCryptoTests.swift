@@ -3,6 +3,7 @@ import Foundation
 import Testing
 @testable import Mangox
 
+@MainActor
 struct UserDataCryptoTests {
     @Test func roundTripMatchesWireFormat() throws {
         guard UserDataCrypto.isConfigured else { return }

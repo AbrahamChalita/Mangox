@@ -1,6 +1,29 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - Library mode (persisted, like Calendar month / list)
+
+private enum CoachLibraryMode: String, CaseIterable, Identifiable {
+    case plans
+    case workouts
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .plans: return "Plans"
+        case .workouts: return "Workouts"
+        }
+    }
+
+    var hubSubtitle: String {
+        switch self {
+        case .plans: return "Training plans"
+        case .workouts: return "Saved workouts"
+        }
+    }
+}
+
 /// Coach tab landing: plans on the page + entry into full-screen chat.
 struct CoachHubView: View {
     @Binding var navigationPath: NavigationPath
@@ -8,11 +31,17 @@ struct CoachHubView: View {
     @Environment(CoachViewModel.self) private var coachViewModel
     @State private var chatOpenFeedbackTick = 0
 
+    @AppStorage("coachLibraryMode") private var libraryModeRaw = CoachLibraryMode.plans.rawValue
+    @Namespace private var libraryModeSelectionNamespace
+
     // MARK: - Design System
 
     private var mango: Color { AppColor.mango }
     private var textPrimary: Color { .white.opacity(AppOpacity.textPrimary) }
-    private var textTertiary: Color { .white.opacity(AppOpacity.textTertiary) }
+
+    private var libraryMode: CoachLibraryMode {
+        CoachLibraryMode(rawValue: libraryModeRaw) ?? .plans
+    }
 
     var body: some View {
         ZStack {
@@ -25,13 +54,26 @@ struct CoachHubView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 8)
 
+                libraryModeGlassSwitcher
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
+
                 ScrollView {
                     LazyVStack(spacing: 16) {
-                        plansSection
+                        Group {
+                            switch libraryMode {
+                            case .plans:
+                                plansSection
+                            case .workouts:
+                                workoutsSection
+                            }
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .trailing)))
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                     .padding(.bottom, 20)
+                    .animation(.snappy(duration: 0.22, extraBounce: 0), value: libraryMode)
                 }
                 .scrollIndicators(.hidden)
             }
@@ -73,16 +115,89 @@ struct CoachHubView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .task {
+            OnDeviceCoachEngine.prewarmNarrowCoachIfAvailable()
+        }
     }
 
     // MARK: - Top Bar
 
+    private var libraryModeGlassSwitcher: some View {
+        GlassEffectContainer(spacing: 8) {
+            HStack(spacing: 8) {
+                ForEach(CoachLibraryMode.allCases) { mode in
+                    libraryModeSegment(mode)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 34)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 34)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(A11yL10n.viewLayout)
+        .accessibilityValue(libraryMode.title)
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                setLibraryMode(.workouts)
+            case .decrement:
+                setLibraryMode(.plans)
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    private func libraryModeSegment(_ mode: CoachLibraryMode) -> some View {
+        let isSelected = libraryMode == mode
+
+        return Button {
+            setLibraryMode(mode)
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.white.opacity(0.001))
+
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(AppColor.mango.opacity(0.18))
+                        .matchedGeometryEffect(id: "coach-library-mode-selected", in: libraryModeSelectionNamespace)
+                }
+
+                Text(mode.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(
+                        isSelected
+                            ? .white.opacity(AppOpacity.textPrimary)
+                            : .white.opacity(AppOpacity.textSecondary)
+                    )
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 34)
+            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 11, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(mode.title)
+        .accessibilityHint(A11yL10n.switchWorkoutViewHint)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func setLibraryMode(_ mode: CoachLibraryMode) {
+        guard libraryModeRaw != mode.rawValue else { return }
+        withAnimation(.snappy(duration: 0.22, extraBounce: 0)) {
+            libraryModeRaw = mode.rawValue
+        }
+    }
+
     private var minimalTopBar: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Plans & chat")
+                Text(libraryMode.hubSubtitle)
                     .mangoxFont(.caption)
                     .foregroundStyle(mango)
+                    .animation(.snappy(duration: 0.22, extraBounce: 0), value: libraryMode)
 
                 Text("Coach")
                     .font(MangoxFont.title.value)
@@ -123,24 +238,25 @@ struct CoachHubView: View {
     // MARK: - Plans
 
     private var plansSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("MY PLANS")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(textTertiary)
-                    .tracking(1.0)
-                Spacer()
-            }
-            .padding(.horizontal, 4)
+        CoachPlansPanel(
+            navigationPath: $navigationPath,
+            dismissParentChat: nil,
+            showsIntroCopy: true,
+            showsSectionHeader: true,
+            onOpenChat: { showChat = true }
+        )
+    }
 
-            CoachPlansPanel(
-                navigationPath: $navigationPath,
-                dismissParentChat: nil,
-                showsIntroCopy: false,
-                showsSectionHeader: false,
-                onOpenChat: { showChat = true }
-            )
-        }
+    // MARK: - Workouts
+
+    private var workoutsSection: some View {
+        CoachWorkoutsPanel(
+            navigationPath: $navigationPath,
+            dismissParentChat: nil,
+            showsIntroCopy: true,
+            showsSectionHeader: true,
+            onOpenChat: { showChat = true }
+        )
     }
 }
 
@@ -148,6 +264,6 @@ struct CoachHubView: View {
     NavigationStack {
         CoachHubView(navigationPath: .constant(NavigationPath()), showChat: .constant(false))
     }
-    .modelContainer(for: [TrainingPlanProgress.self, AIGeneratedPlan.self], inMemory: true)
+    .modelContainer(for: [TrainingPlanProgress.self, AIGeneratedPlan.self, CustomWorkoutTemplate.self], inMemory: true)
     .environment(CoachViewModel(coach: AIService(), purchasesService: PurchasesManager.shared))
 }

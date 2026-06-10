@@ -1,6 +1,6 @@
 import Foundation
 
-/// Display-only snapshot of a purchasable plan option, decoupled from RevenueCat `Package`.
+/// Display-only snapshot of a purchasable plan option for the paywall UI.
 struct PaywallOption: Identifiable, Sendable {
     let id: String
     let productIdentifier: String
@@ -17,7 +17,6 @@ protocol PurchasesServiceProtocol: AnyObject {
     var isLoading: Bool { get }
     var purchaseError: String? { get set }
 
-    func configure(apiKey: String)
     func sync() async
     func loadOfferings() async
     func restorePurchases() async

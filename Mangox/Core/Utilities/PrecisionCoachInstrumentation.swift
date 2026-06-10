@@ -86,13 +86,54 @@ nonisolated enum PrecisionCoachInstrumentation {
         )
     }
 
-    static func workoutGenerated(title: String, warningCount: Int) {
+     static func workoutGenerated(title: String, warningCount: Int) {
         log.info("workout_generated title=\(title, privacy: .public) warnings=\(warningCount)")
         PrecisionCoachOutcomeStore.record(
             .init(
                 kind: .workoutGenerated,
                 numericValue: Double(warningCount),
                 note: title
+            )
+        )
+    }
+
+    static func coachReplyDelivered(path: String, category: String?, charCount: Int) {
+        log.info(
+            "coach_reply_delivered path=\(path, privacy: .public) category=\(category ?? "nil", privacy: .public) chars=\(charCount)"
+        )
+        PrecisionCoachOutcomeStore.record(
+            .init(
+                kind: .coachReplyDelivered,
+                source: path,
+                numericValue: Double(charCount),
+                note: category
+            )
+        )
+    }
+
+    static func coachRoutingFallback(from: String, to: String, reason: String) {
+        log.info(
+            "coach_routing_fallback \(from, privacy: .public)→\(to, privacy: .public) reason=\(reason, privacy: .public)"
+        )
+        PrecisionCoachOutcomeStore.record(
+            .init(
+                kind: .coachRoutingFallback,
+                source: from,
+                note: "\(to): \(reason)"
+            )
+        )
+    }
+
+    static func coachFeedbackReceived(score: Int, category: String?, deliveryPath: String) {
+        log.info(
+            "coach_feedback score=\(score) path=\(deliveryPath, privacy: .public) category=\(category ?? "nil", privacy: .public)"
+        )
+        PrecisionCoachOutcomeStore.record(
+            .init(
+                kind: .coachFeedbackReceived,
+                source: deliveryPath,
+                numericValue: Double(score),
+                note: category
             )
         )
     }

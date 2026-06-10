@@ -13,8 +13,6 @@
 		0044ACF12FABE8F000A73C76 /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = 0044ACF02FABE8F000A73C76 /* Storage */; };
 		0044ACF32FABE8F000A73C76 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 0044ACF22FABE8F000A73C76 /* Supabase */; };
 		005AA5F52F7B62320013DB45 /* FitDataProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = AABB00022F56648D004200FC /* FitDataProtocol */; };
-		005AA79A2F7B73A70013DB45 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 005AA7992F7B73A70013DB45 /* RevenueCat */; };
-		005AA79C2F7B73A70013DB45 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 005AA79B2F7B73A70013DB45 /* RevenueCatUI */; };
 		00FM00012F56648D004200FC /* FoundationModels.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00FM00022F56648D004200FC /* FoundationModels.framework */; };
 		0B1A00092F56648D004200FC /* MangoxLiveActivityExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0B1A00012F56648D004200FC /* MangoxLiveActivityExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -120,12 +118,10 @@
 				0044ACED2FABE8F000A73C76 /* Functions in Frameworks */,
 				00FM00012F56648D004200FC /* FoundationModels.framework in Frameworks */,
 				0044ACEF2FABE8F000A73C76 /* PostgREST in Frameworks */,
-				005AA79A2F7B73A70013DB45 /* RevenueCat in Frameworks */,
 				0044ACF12FABE8F000A73C76 /* Storage in Frameworks */,
 				0044ACF32FABE8F000A73C76 /* Supabase in Frameworks */,
 				005AA5F52F7B62320013DB45 /* FitDataProtocol in Frameworks */,
 				0044ACEB2FABE8F000A73C76 /* Auth in Frameworks */,
-				005AA79C2F7B73A70013DB45 /* RevenueCatUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -216,8 +212,6 @@
 			name = Mangox;
 			packageProductDependencies = (
 				AABB00022F56648D004200FC /* FitDataProtocol */,
-				005AA7992F7B73A70013DB45 /* RevenueCat */,
-				005AA79B2F7B73A70013DB45 /* RevenueCatUI */,
 				0044ACEA2FABE8F000A73C76 /* Auth */,
 				0044ACEC2FABE8F000A73C76 /* Functions */,
 				0044ACEE2FABE8F000A73C76 /* PostgREST */,
@@ -303,8 +297,8 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2630;
-				LastUpgradeCheck = 2640;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					000345152F56648C004200FC = {
 						CreatedOnToolsVersion = 26.3;
@@ -334,7 +328,6 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				AABB00012F56648D004200FC /* XCRemoteSwiftPackageReference "FitDataProtocol" */,
-				005AA7982F7B73A70013DB45 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 				0044ACE92FABE8F000A73C76 /* XCRemoteSwiftPackageReference "supabase-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -576,7 +569,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Mangox/Info.plist;
 				INFOPLIST_KEY_CFBundleURLTypes = "({CFBundleTypeRole=Editor;CFBundleURLName=$(PRODUCT_BUNDLE_IDENTIFIER).strava;CFBundleURLSchemes=(mangox);})";
-				INFOPLIST_KEY_RevenueCatAPIKey = "$(REVENUECAT_API_KEY)";
 				INFOPLIST_KEY_STRAVA_CLIENT_ID = "$(STRAVA_CLIENT_ID)";
 				INFOPLIST_KEY_STRAVA_CLIENT_SECRET = "$(STRAVA_CLIENT_SECRET)";
 				INFOPLIST_KEY_STRAVA_REDIRECT_URI = "$(STRAVA_REDIRECT_URI)";
@@ -602,7 +594,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = abchalita.Mangox;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
-				REVENUECAT_API_KEY = "$(inherited)";
 				SDKROOT = auto;
 				STRAVA_CLIENT_ID = "$(inherited)";
 				STRAVA_CLIENT_SECRET = "$(inherited)";
@@ -644,7 +635,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Mangox/Info.plist;
 				INFOPLIST_KEY_CFBundleURLTypes = "({CFBundleTypeRole=Editor;CFBundleURLName=$(PRODUCT_BUNDLE_IDENTIFIER).strava;CFBundleURLSchemes=(mangox);})";
-				INFOPLIST_KEY_RevenueCatAPIKey = "$(REVENUECAT_API_KEY)";
 				INFOPLIST_KEY_STRAVA_CLIENT_ID = "$(STRAVA_CLIENT_ID)";
 				INFOPLIST_KEY_STRAVA_CLIENT_SECRET = "$(STRAVA_CLIENT_SECRET)";
 				INFOPLIST_KEY_STRAVA_REDIRECT_URI = "$(STRAVA_REDIRECT_URI)";
@@ -669,7 +659,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = abchalita.Mangox;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
-				REVENUECAT_API_KEY = "$(inherited)";
 				SDKROOT = auto;
 				STRAVA_CLIENT_ID = "$(inherited)";
 				STRAVA_CLIENT_SECRET = "$(inherited)";
@@ -919,14 +908,6 @@
 				minimumVersion = 2.5.1;
 			};
 		};
-		005AA7982F7B73A70013DB45 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 5.67.0;
-			};
-		};
 		AABB00012F56648D004200FC /* XCRemoteSwiftPackageReference "FitDataProtocol" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/FitnessKit/FitDataProtocol";
@@ -962,16 +943,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0044ACE92FABE8F000A73C76 /* XCRemoteSwiftPackageReference "supabase-swift" */;
 			productName = Supabase;
-		};
-		005AA7992F7B73A70013DB45 /* RevenueCat */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 005AA7982F7B73A70013DB45 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
-			productName = RevenueCat;
-		};
-		005AA79B2F7B73A70013DB45 /* RevenueCatUI */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 005AA7982F7B73A70013DB45 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
-			productName = RevenueCatUI;
 		};
 		AABB00022F56648D004200FC /* FitDataProtocol */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -184,11 +184,11 @@ private struct MiniStatCard: View {
     }
 }
 
-private struct ArcShape: Shape {
+private struct ArcShape: Shape, Sendable {
     let startAngle: Double
     let sweepAngle: Double
 
-    func path(in rect: CGRect) -> Path {
+    nonisolated func path(in rect: CGRect) -> Path {
         var path = Path()
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let radius = min(rect.width, rect.height) / 2 - 10

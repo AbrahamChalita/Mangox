@@ -5,11 +5,15 @@ import os
 import os.log
 
 // MARK: - Prompt versioning (bump when instructions change materially)
+// Versions below were bumped for iOS 27 / AFM 3 retest (June 2026).
 
 enum CoachOnDevicePromptVersion {
-    static let routing = 1
-    static let narrow = 6
-    static let quickPrompts = 3
+    static let routing = 3
+    static let narrow = 8
+    static let quickPrompts = 4
+    static let pccPlan = 2
+    static let pccGeneral = 2
+    static let pccWebSearch = 2
 }
 
 /// - `MangoxCoachFMVerboseLog`: full `LanguageModelSession.transcript` string after calls.
@@ -30,8 +34,9 @@ private let foundationModelsSignpostLog = OSLog(
 
 @Generable
 enum CoachRouteKind: String, Equatable {
-    case cloudCoach
     case localNarrowReply
+    case pccCoach
+    case cloudCoach
 }
 
 @Generable
@@ -41,7 +46,7 @@ struct CoachRouteDecision: Equatable {
 
     @Guide(
         description:
-            "cloudCoach for plans, web, deep coaching, or uncertainty. localNarrowReply only for simple questions answerable from app stats."
+            "localNarrowReply for short stats from the fact sheet. pccCoach for plans, web search, periodization, multi-turn coaching, or deep training analysis. cloudCoach only when PCC is inappropriate."
     )
     var route: CoachRouteKind
 }
@@ -64,7 +69,7 @@ struct NarrowCoachReply: Equatable {
 
     @Guide(
         description:
-            "Coach reply in plain language, max about 1200 characters. Use ONLY power/TSS/HR/plan facts from the verified training snapshot. Must be a single paragraph."
+            "Coach reply in plain language, max about 1200 characters. Use ONLY power/TSS/HR/plan facts from the verified training snapshot. Light markdown only: **bold** for key metrics and short `-` bullet lines when listing 2-4 items. No `#` headings."
     )
     var body: String
 
@@ -76,6 +81,18 @@ struct NarrowCoachReply: Equatable {
             "1-3 short tappable follow-up chips the user might want next. Empty array if no obvious next step.",
         .maximumCount(3))
     var suggestedActions: [NarrowSuggestedAction]
+
+    @Guide(
+        description:
+            "0-4 lowercase topic tags with underscores, e.g. ftp, tss, recovery, power, plan.",
+        .maximumCount(4))
+    var tags: [String]
+
+    @Guide(
+        description:
+            "Semantic category: training_advice, plan_analysis, recovery, nutrition, equipment, or clarification."
+    )
+    var category: String
 }
 
 // MARK: - Guided generation: single workout
@@ -289,28 +306,95 @@ enum OnDeviceCoachEngine {
         return try await work()
     }
 
-    /// Keyword guardrails: never route “heavy” intents to the narrow on-device path.
-    static func heuristicCloudRoute(for message: String) -> Bool {
+    /// Live web / external lookup — prefer PCC web-search tier (Mangox cloud is fallback only).
+    nonisolated static func heuristicPrefersPCCWebSearch(for message: String) -> Bool {
+        MangoxCoachSearchHeuristics.prefersPCCWebSearch(for: message)
+    }
+
+    /// On-device Spotlight / files search via `SpotlightSearchTool`.
+    nonisolated static func heuristicPrefersLocalSpotlightSearch(for message: String) -> Bool {
+        MangoxCoachSearchHeuristics.prefersLocalSpotlightSearch(for: message)
+    }
+
+    /// Legacy name used in tests — no longer skips PCC; cloud is fallback only.
+    nonisolated static func heuristicRequiresMangoxCloudBackend(for message: String) -> Bool {
+        heuristicPrefersPCCWebSearch(for: message)
+    }
+
+    /// Deep coaching / plans — prefer PCC on iOS 27 before Mangox cloud.
+    nonisolated static func heuristicPrefersPCCCoach(for message: String) -> Bool {
         let lower = message.lowercased()
-        let cloudKeywords = [
-            "plan for", "training plan", "generate a plan", "build me a plan", "build a plan",
+        let pccKeywords = [
+            "plan for", "training plan", "base plan", "generate a plan", "build me a plan", "build a plan",
             "periodization", "macrocycle", "mesocycle", "race plan", "event plan",
-            "web search", "search the", "look up online", "article", "study",
             "compare ", "vs ", "versus",
             "write code", "swift code", "python",
         ]
-        if cloudKeywords.contains(where: { lower.contains($0) }) { return true }
+        if pccKeywords.contains(where: { lower.contains($0) }) { return true }
         if lower.count > 800 { return true }
         return false
     }
 
-    static func heuristicLocalPreferred(for message: String) -> Bool {
+    /// Legacy alias used in tests and narrow heuristics.
+    nonisolated static func heuristicCloudRoute(for message: String) -> Bool {
+        heuristicPrefersPCCWebSearch(for: message)
+            || heuristicPrefersPCCCoach(for: message)
+    }
+
+    nonisolated static func heuristicLocalPreferred(for message: String) -> Bool {
         let lower = message.lowercased()
         let localHints = [
             "ftp", "tss", "recovery", "today", "this week", "week load",
             "how tired", "yesterday", "normalized", "np ", "heart rate", "max hr",
         ]
         return localHints.contains(where: { lower.contains($0) })
+    }
+
+    /// Fast synchronous gate before `classifyRoute` or the narrow on-device path.
+    nonisolated static func passesOnDeviceNarrowHeuristics(for message: String) -> Bool {
+        if heuristicPrefersPCCWebSearch(for: message) { return false }
+        if heuristicPrefersPCCCoach(for: message) { return false }
+        let isShort = message.count <= 220
+        return isShort || heuristicLocalPreferred(for: message)
+    }
+
+    /// Prewarms the on-device coach model off the UI thread when Apple Intelligence is ready.
+    static func prewarmNarrowCoachIfAvailable() {
+        guard isOnDeviceWritingModelAvailable else { return }
+        let instructions = narrowInstructionsText
+        Task.detached(priority: .utility) {
+            let model = SystemLanguageModel(useCase: .general, guardrails: .default)
+            let session = LanguageModelSession(
+                model: model,
+                tools: [],
+                instructions: Instructions(instructions)
+            )
+            session.prewarm(promptPrefix: nil)
+        }
+    }
+
+    /// Prewarms the default PCC coach profile so the first deep-coaching turn is faster.
+    static func prewarmPCCCoachIfAvailable() {
+        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return }
+        guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return }
+        guard PrivateCloudComputeLanguageModel().supportsLocale(Locale.current) else { return }
+        Task.detached(priority: .utility) { @MainActor in
+            let session = makePCCCoachSession(mode: .generalCoach, tools: [])
+            session.prewarm(promptPrefix: nil)
+        }
+    }
+
+    /// First narrow turn with ride/plan context should require tool use on iOS 27+.
+    static func narrowTurnRequiresTools(
+        session: LanguageModelSession,
+        trainingSnapshot: String
+    ) -> Bool {
+        guard session.transcript.isEmpty else { return false }
+        let hasRideData =
+            trainingSnapshot.contains("Last completed ride")
+            || trainingSnapshot.contains("Last ride (")
+        let hasPlanData = trainingSnapshot.contains("Active plan:")
+        return hasRideData || hasPlanData
     }
 
     static func classifyRoute(
@@ -323,9 +407,11 @@ enum OnDeviceCoachEngine {
             You route Mangox cycling coach messages. Mangox is an indoor/training app with FTP, TSS, and plans stored on-device.
             Version \(CoachOnDevicePromptVersion.routing).
             Rules:
-            - Choose cloudCoach for: multi-week plans, race prep design, medical advice, anything needing web, long essays, or if unsure.
-            - Choose localNarrowReply only for short factual questions that can be answered from FTP/TSS/last ride/active plan summaries (the fact sheet).
-            - When in doubt, choose cloudCoach.
+            - Choose localNarrowReply for short factual questions answerable from the fact sheet (FTP, TSS, last ride).
+            - Choose pccCoach for multi-week plans, race prep, periodization, deep training analysis, or long coaching threads.
+            - Choose pccCoach for web search, external articles, plans, and deep coaching.
+            - Choose cloudCoach only when PCC is inappropriate (rare).
+            - When in doubt, choose pccCoach.
             """
 
         let model = MangoxFoundationModelsSupport.coachSystemLanguageModel()
@@ -352,7 +438,7 @@ enum OnDeviceCoachEngine {
             let decision = try await session.respond(
                 to: prompt,
                 generating: CoachRouteDecision.self,
-                options: GenerationOptions(sampling: .greedy)
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions
             )
             logTranscript(session, label: "route")
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "route")
@@ -365,16 +451,20 @@ enum OnDeviceCoachEngine {
 
     // MARK: - Narrow session factory
 
+    /// Shared narrow instructions — exposed for Dynamic Profiles on iOS 27.
+    static var narrowCoachInstructions: String { narrowInstructionsText }
+
     /// Shared instructions — used at session creation and for token-budget logging.
     private static var narrowInstructionsText: String {
         """
         You are Mangox's on-device cycling assistant. Be concise and practical.
         Version \(CoachOnDevicePromptVersion.narrow).
-        The Training snapshot block is verified Mangox data. You also have tools for deeper on-device facts (recent rides, extended rider fields, FTP test history).
+        The Training snapshot block is verified Mangox data. You also have tools for deeper on-device facts (recent rides, extended rider fields, FTP test history) and Spotlight search for notes, files, and saved items on device (iOS 27+).
         Call tools when needed; you may issue parallel tool calls. Never invent FTP, watts, TSS, distances, or dates not present in the snapshot or tool outputs.
         If data is missing, say what is missing and suggest Settings or syncing rides.
-        No markdown headings. Write as a single continuous paragraph without any newlines or bullets. Answer directly using only the provided facts.
-        Fill `reasoning` first with a short internal plan, then `body`, then optional `followUp`.
+        Light markdown only in `body`: **bold** key numbers (FTP, TSS, watts), and `-` bullet lines when listing 2-4 short items. No `#` headings. Prefer one short paragraph when a list is not needed.
+        Set `category` to the best semantic label and `tags` to 1-3 short topic tags (ftp, tss, recovery, power, plan).
+        Fill `reasoning` first with a short internal plan, then `body`, then optional `followUp`, `tags`, and `category`.
         """
     }
 
@@ -382,12 +472,79 @@ enum OnDeviceCoachEngine {
     /// Caller should store this in AIService and reuse across turns; reset on createNewSession/switchToSession.
     /// Tools are bound at session creation — data is snapshotted at that moment.
     static func makeNarrowSession(tools: [any Tool]) -> LanguageModelSession {
+        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) {
+            return CoachDynamicProfiles.makeSession(mode: .statsNarrow, tools: tools)
+        }
         let model = MangoxFoundationModelsSupport.coachSystemLanguageModel()
         return LanguageModelSession(
             model: model,
             tools: tools,
             instructions: Instructions(narrowInstructionsText)
         )
+    }
+
+    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
+    static func makePCCCoachSession(
+        mode: CoachAgentMode,
+        tools: [any Tool],
+        history: [Transcript.Entry] = []
+    ) -> LanguageModelSession {
+        CoachDynamicProfiles.makeSession(mode: mode, tools: tools, history: history)
+    }
+
+    /// Streams a PCC coach reply (32K context, reasoning). Requires iOS 27 + PCC availability.
+    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
+    static func streamPCCCoachReply(
+        userMessage: String,
+        trainingSnapshot: String,
+        planIntake: Bool,
+        session: LanguageModelSession,
+        onPartial: (NarrowCoachReply.PartiallyGenerated) async -> Void
+    ) async throws -> NarrowCoachReply? {
+        guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return nil }
+        guard PrivateCloudComputeLanguageModel().supportsLocale(Locale.current) else { return nil }
+
+        let composedPrompt = """
+            Training snapshot (verified Mangox data):
+            \(trainingSnapshot)
+
+            User message:
+            \(userMessage)
+            """
+
+        let isFollowUp = !session.transcript.isEmpty
+        let requireTools = narrowTurnRequiresTools(
+            session: session,
+            trainingSnapshot: trainingSnapshot
+        )
+        let stream = session.streamResponse(
+            generating: NarrowCoachReply.self,
+            includeSchemaInPrompt: false,
+            options: MangoxFoundationModelsSupport.narrowGenerationOptions(
+                requireTools: requireTools,
+                isFollowUp: isFollowUp
+            )
+        ) {
+            composedPrompt
+        }
+
+        var lastPartial: NarrowCoachReply.PartiallyGenerated?
+        do {
+            for try await snapshot in stream {
+                lastPartial = snapshot.content
+                if let lastPartial {
+                    await onPartial(lastPartial)
+                }
+            }
+        } catch {
+            MangoxFoundationModelsSupport.logGenerationFailure(error, label: "coach_pcc_stream")
+            throw error
+        }
+
+        logTranscript(session, label: "pcc_stream")
+        MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "pcc_stream")
+        guard let last = lastPartial else { return nil }
+        return finalizedNarrowReply(from: last)
     }
 
     /// Streams partial `NarrowCoachReply` for UI. Baseline snapshot is inlined per-turn; tools were
@@ -418,10 +575,18 @@ enum OnDeviceCoachEngine {
             tools: []  // tools are session-level; logged once at makeNarrowSession creation
         )
 
+        let isFollowUp = !session.transcript.isEmpty
+        let requireTools = narrowTurnRequiresTools(
+            session: session,
+            trainingSnapshot: trainingSnapshot
+        )
         let stream = session.streamResponse(
             generating: NarrowCoachReply.self,
             includeSchemaInPrompt: false,
-            options: GenerationOptions(sampling: .greedy)
+            options: MangoxFoundationModelsSupport.narrowGenerationOptions(
+                requireTools: requireTools,
+                isFollowUp: isFollowUp
+            )
         ) {
             composedPrompt
         }
@@ -458,12 +623,22 @@ enum OnDeviceCoachEngine {
             else { return nil }
             return NarrowSuggestedAction(label: label)
         }
-        return NarrowCoachReply(
+        let tags = (partial.tags ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        let reply = NarrowCoachReply(
             reasoning: partial.reasoning?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
             body: body,
             followUp: partial.followUp?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
-            suggestedActions: Array(actions.prefix(3))
+            suggestedActions: Array(actions.prefix(3)),
+            tags: Array(tags.prefix(4)),
+            category: partial.category?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         )
+        if let reason = FoundationModelsCoachEvaluation.validateNarrowReply(reply) {
+            logger.debug("narrow reply validation failed: \(reason, privacy: .public)")
+            return nil
+        }
+        return reply
     }
 
     static func generateQuickPrompts(factSheet: String) async throws -> QuickPromptPack {
@@ -505,7 +680,7 @@ enum OnDeviceCoachEngine {
             let pack = try await session.respond(
                 to: prompt,
                 generating: QuickPromptPack.self,
-                options: GenerationOptions(sampling: .greedy)
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions
             )
             logTranscript(session, label: "quick_prompts")
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "quick_prompts")
@@ -539,7 +714,7 @@ enum OnDeviceCoachEngine {
             let response = try await session.respond(
                 to: factSheet,
                 generating: CoachStarterContentTags.self,
-                options: GenerationOptions(sampling: .greedy)
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions
             )
             logTranscript(session, label: "content_tagging")
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "content_tagging")
@@ -633,7 +808,7 @@ enum OnDeviceCoachEngine {
             let response = try await session.respond(
                 to: facts.joined(separator: "\n"),
                 generating: RideBriefingGenerated.self,
-                options: GenerationOptions(sampling: .greedy)
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions
             )
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "ride_briefing")
             let text = response.content.briefing.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -684,7 +859,7 @@ enum OnDeviceCoachEngine {
             let response = try await session.respond(
                 to: facts.joined(separator: "\n"),
                 generating: InstagramCaptionGenerated.self,
-                options: GenerationOptions(sampling: .greedy)
+                options: MangoxFoundationModelsSupport.creativeGenerationOptions
             )
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "ig_caption")
             let caption = response.content.caption.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -743,7 +918,7 @@ enum OnDeviceCoachEngine {
             let response = try await session.respond(
                 to: facts.joined(separator: "\n"),
                 generating: StoryCardTitleGenerated.self,
-                options: GenerationOptions(sampling: .greedy)
+                options: MangoxFoundationModelsSupport.creativeGenerationOptions
             )
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "ig_card_title")
             let title = Self.clampInstagramStoryHeadline(
@@ -782,7 +957,7 @@ enum OnDeviceCoachEngine {
             let response = try await session.respond(
                 to: prompt,
                 generating: ChatSessionTitleGenerated.self,
-                options: GenerationOptions(sampling: .greedy)
+                options: MangoxFoundationModelsSupport.creativeGenerationOptions
             )
             let title = response.content.title.trimmingCharacters(in: .whitespacesAndNewlines)
             return title.isEmpty ? nil : title
@@ -813,7 +988,7 @@ enum OnDeviceCoachEngine {
         let response = try await session.respond(
             to: "Rider metrics:\n\(factSheet)",
             generating: HomeTrainingInsightGenerated.self,
-            options: GenerationOptions(sampling: .greedy)
+            options: MangoxFoundationModelsSupport.greedyGenerationOptions
         )
         let raw = response.content.statusLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         let label = sanitizeHomeStatusLabel(raw)
@@ -1032,6 +1207,8 @@ extension AIService {
             topicTags: []
         )
         guard OnDeviceCoachEngine.isSystemModelAvailable else { return fallback }
+
+        OnDeviceCoachEngine.prewarmNarrowCoachIfAvailable()
 
         let factSheet = coachFactSheetText(modelContext: modelContext)
 
@@ -1417,7 +1594,7 @@ extension AIService {
         let response = try await session.respond(
             to: prompt,
             generating: OnDeviceGeneratedWorkout.self,
-            options: GenerationOptions(sampling: .greedy)
+            options: MangoxFoundationModelsSupport.greedyGenerationOptions
         )
         let generated = response.content
         let intervals = generated.intervals.enumerated().map { index, item in

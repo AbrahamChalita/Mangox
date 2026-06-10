@@ -1,6 +1,7 @@
 import XCTest
 @testable import Mangox
 
+@MainActor
 final class CoachPlanIntakeProgressTests: XCTestCase {
     func testSnapshotForEventDateQuestion() {
         let message = ChatMessage(

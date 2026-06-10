@@ -186,6 +186,59 @@ struct CustomWorkoutTemplateSyncDomain: SupabaseSyncDomain {
         UserDefaults.standard.set(newCursor, forKey: Self.cursorKey)
     }
 
+    @MainActor
+    func pull(userId: UUID, client: SupabaseClient, context: ModelContext) async throws {
+        let remoteRows: [PulledTemplateRow] = try await client
+            .from("custom_workout_templates")
+            .select()
+            .eq("user_id", value: userId.uuidString)
+            .order("updated_at", ascending: false)
+            .limit(200)
+            .execute()
+            .value
+
+        guard !remoteRows.isEmpty else { return }
+
+        var didChange = false
+        for remote in remoteRows {
+            let capturedID = remote.id
+            var descriptor = FetchDescriptor<CustomWorkoutTemplate>(
+                predicate: #Predicate { $0.id == capturedID }
+            )
+            descriptor.fetchLimit = 1
+            let existing = try context.fetch(descriptor).first
+
+            if let existing {
+                guard remote.updated_at > existing.createdAt else { continue }
+                existing.name = remote.name
+                existing.intervals = remote.intervals
+                existing.createdAt = remote.created_at
+                didChange = true
+            } else {
+                let template = CustomWorkoutTemplate(
+                    id: remote.id,
+                    name: remote.name,
+                    intervals: remote.intervals,
+                    createdAt: remote.created_at
+                )
+                context.insert(template)
+                didChange = true
+            }
+        }
+
+        if didChange {
+            try context.save()
+        }
+    }
+
+    private struct PulledTemplateRow: Decodable, Sendable {
+        let id: UUID
+        let name: String
+        let intervals: [IntervalSegment]
+        let created_at: Date
+        let updated_at: Date
+    }
+
     private struct Row: Codable, Sendable {
         let id: String
         let user_id: String

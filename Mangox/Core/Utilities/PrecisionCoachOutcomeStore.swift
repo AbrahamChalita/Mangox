@@ -12,6 +12,9 @@ nonisolated enum PrecisionCoachOutcomeStore {
         case ftpApplied
         case planForwardSimulated
         case workoutGenerated
+        case coachReplyDelivered
+        case coachRoutingFallback
+        case coachFeedbackReceived
     }
 
     struct Event: Codable, Sendable, Identifiable, Equatable {

@@ -12,6 +12,7 @@ enum CoachPlanIntakeProgress {
 
     static func snapshot(for message: ChatMessage) -> Snapshot? {
         guard message.role == .assistant, message.category != "error" else { return nil }
+        guard CoachMessagePresentation.shouldShowPlanIntakeChrome(for: message) else { return nil }
 
         if message.followUpBlocks.count > 1 {
             return Snapshot(
@@ -29,17 +30,6 @@ enum CoachPlanIntakeProgress {
         guard !question.isEmpty else { return nil }
 
         let lower = question.lowercased()
-        let contentLower = message.content.lowercased()
-        let planContext =
-            lower.contains("plan")
-            || lower.contains("event")
-            || lower.contains("race")
-            || lower.contains("goal")
-            || contentLower.contains("training plan")
-            || contentLower.contains("plan intake")
-            || !message.followUpBlocks.isEmpty
-
-        guard planContext else { return nil }
 
         if lower.contains("route") || lower.contains("distance") || lower.contains("elevation") {
             return Snapshot(step: 5, total: 5, fieldLabel: "Route option")

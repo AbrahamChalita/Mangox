@@ -43,8 +43,183 @@ struct WorkoutSyncDomain: SupabaseSyncDomain {
 
     @MainActor
     func pull(userId: UUID, client: SupabaseClient, context: ModelContext) async throws {
-        // Pull is a no-op in the first release. Multi-device sync (fetch missing
-        // workouts from Postgres into SwiftData) is the natural follow-up.
+        let remoteRows: [PulledWorkoutRow] = try await client
+            .from("workouts")
+            .select()
+            .eq("user_id", value: userId.uuidString)
+            .order("updated_at", ascending: false)
+            .limit(500)
+            .execute()
+            .value
+
+        guard !remoteRows.isEmpty else { return }
+
+        var didChange = false
+        for remote in remoteRows {
+            guard remote.status == "completed" else { continue }
+            guard let clientID = remote.client_id else { continue }
+
+            let capturedID = clientID
+            var descriptor = FetchDescriptor<Workout>(
+                predicate: #Predicate { $0.id == capturedID }
+            )
+            descriptor.fetchLimit = 1
+            let existing = try context.fetch(descriptor).first
+
+            if let existing {
+                guard remote.updated_at > existing.updatedAt else { continue }
+                applyRemoteSummary(remote, to: existing)
+                didChange = true
+                if shouldPullChildren(remote: remote, local: existing) {
+                    try await pullChildren(
+                        remote: remote,
+                        local: existing,
+                        userId: userId,
+                        client: client,
+                        context: context
+                    )
+                }
+            } else {
+                let workout = makeLocalWorkout(from: remote, clientID: clientID)
+                context.insert(workout)
+                didChange = true
+                if remote.lap_count > 0 || remote.sample_count > 0 {
+                    try await pullChildren(
+                        remote: remote,
+                        local: workout,
+                        userId: userId,
+                        client: client,
+                        context: context
+                    )
+                }
+            }
+        }
+
+        if didChange {
+            try context.save()
+            MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
+        }
+    }
+
+    // MARK: - Pull helpers
+
+    @MainActor
+    private func shouldPullChildren(remote: PulledWorkoutRow, local: Workout) -> Bool {
+        if remote.sample_count > 0, local.sampleCount < remote.sample_count { return true }
+        if remote.lap_count > 0, local.laps.count < remote.lap_count { return true }
+        return false
+    }
+
+    @MainActor
+    private func makeLocalWorkout(from remote: PulledWorkoutRow, clientID: UUID) -> Workout {
+        let workout = Workout(
+            id: clientID,
+            startDate: remote.start_date,
+            planDayID: remote.plan_day_id,
+            planID: remote.plan_id
+        )
+        applyRemoteSummary(remote, to: workout)
+        return workout
+    }
+
+    @MainActor
+    private func applyRemoteSummary(_ remote: PulledWorkoutRow, to workout: Workout) {
+        workout.startDate = remote.start_date
+        workout.updatedAt = remote.updated_at
+        workout.endDate = remote.end_date
+        workout.duration = TimeInterval(remote.duration_seconds)
+        workout.distance = remote.distance_meters
+        workout.elevationGain = remote.elevation_gain_meters
+        workout.avgPower = remote.avg_power ?? 0
+        workout.maxPower = Int(remote.max_power ?? 0)
+        workout.normalizedPower = remote.normalized_power ?? 0
+        workout.avgCadence = remote.avg_cadence_rpm ?? 0
+        workout.avgSpeed = remote.avg_speed_kmh ?? 0
+        workout.avgHR = remote.avg_heart_rate ?? 0
+        workout.maxHR = Int(remote.max_heart_rate ?? 0)
+        workout.tss = remote.tss ?? 0
+        workout.intensityFactor = remote.intensity_factor ?? 0
+        workout.rpe = remote.rpe ?? 0
+        workout.notes = remote.notes ?? ""
+        workout.smartTitle = remote.smart_title
+        workout.statusRaw = remote.status
+        workout.originRaw = remote.origin
+        workout.importFormatRaw = remote.import_format
+        workout.savedRouteName = remote.saved_route_name
+        workout.savedRouteKindRaw = remote.saved_route_kind
+        workout.plannedRouteDistanceMeters = remote.planned_route_distance_m ?? 0
+        workout.planID = remote.plan_id
+        workout.planDayID = remote.plan_day_id
+        workout.sampleCount = remote.sample_count
+    }
+
+    @MainActor
+    private func pullChildren(
+        remote: PulledWorkoutRow,
+        local: Workout,
+        userId: UUID,
+        client: SupabaseClient,
+        context: ModelContext
+    ) async throws {
+        let serverWorkoutID = remote.id
+
+        if remote.lap_count > 0, local.laps.isEmpty {
+            let lapRows: [PulledLapRow] = try await client
+                .from("workout_laps")
+                .select()
+                .eq("workout_id", value: serverWorkoutID.uuidString)
+                .order("lap_number", ascending: true)
+                .execute()
+                .value
+
+            for lapRow in lapRows {
+                let lap = LapSplit(lapNumber: lapRow.lap_number, startTime: lapRow.start_time)
+                lap.endTime = lapRow.end_time
+                lap.duration = TimeInterval(lapRow.duration_seconds)
+                lap.distance = lapRow.distance_meters ?? 0
+                lap.avgPower = lapRow.avg_power ?? 0
+                lap.maxPower = Int(lapRow.max_power ?? 0)
+                lap.avgCadence = lapRow.avg_cadence_rpm ?? 0
+                lap.avgSpeed = lapRow.avg_speed_kmh ?? 0
+                lap.avgHR = lapRow.avg_heart_rate ?? 0
+                lap.workout = local
+                context.insert(lap)
+            }
+        }
+
+        if remote.sample_count > 0, local.samples.count < remote.sample_count {
+            var offset = 0
+            while offset < remote.sample_count {
+                let end = min(offset + Self.sampleBatchSize - 1, remote.sample_count - 1)
+                let sampleRows: [PulledSampleRow] = try await client
+                    .from("workout_samples")
+                    .select()
+                    .eq("workout_id", value: serverWorkoutID.uuidString)
+                    .order("elapsed_seconds", ascending: true)
+                    .range(from: offset, to: end)
+                    .execute()
+                    .value
+
+                guard !sampleRows.isEmpty else { break }
+
+                for sampleRow in sampleRows {
+                    let sample = WorkoutSample(
+                        timestamp: sampleRow.recorded_at ?? remote.start_date,
+                        elapsedSeconds: sampleRow.elapsed_seconds,
+                        power: Int(sampleRow.power ?? 0),
+                        cadence: sampleRow.cadence_rpm ?? 0,
+                        speed: sampleRow.speed_kmh ?? 0,
+                        heartRate: Int(sampleRow.heart_rate ?? 0)
+                    )
+                    sample.workout = local
+                    context.insert(sample)
+                }
+
+                offset += sampleRows.count
+                if sampleRows.count < Self.sampleBatchSize { break }
+            }
+            local.sampleCount = max(local.sampleCount, local.samples.count)
+        }
     }
 
     // MARK: - Children
@@ -162,6 +337,61 @@ private struct WorkoutRow: Codable, Sendable {
 
 private struct UploadedWorkoutRow: Decodable, Sendable {
     let id: UUID
+}
+
+private struct PulledWorkoutRow: Decodable, Sendable {
+    let id: UUID
+    let client_id: UUID?
+    let start_date: Date
+    let updated_at: Date
+    let end_date: Date?
+    let duration_seconds: Int
+    let distance_meters: Double
+    let elevation_gain_meters: Double
+    let avg_power: Double?
+    let max_power: Double?
+    let normalized_power: Double?
+    let avg_cadence_rpm: Double?
+    let avg_speed_kmh: Double?
+    let avg_heart_rate: Double?
+    let max_heart_rate: Double?
+    let tss: Double?
+    let intensity_factor: Double?
+    let rpe: Int?
+    let notes: String?
+    let smart_title: String?
+    let status: String
+    let origin: String
+    let import_format: String?
+    let saved_route_name: String?
+    let saved_route_kind: String?
+    let planned_route_distance_m: Double?
+    let plan_id: String?
+    let plan_day_id: String?
+    let sample_count: Int
+    let lap_count: Int
+}
+
+private struct PulledLapRow: Decodable, Sendable {
+    let lap_number: Int
+    let start_time: Date
+    let end_time: Date?
+    let duration_seconds: Int
+    let distance_meters: Double?
+    let avg_power: Double?
+    let max_power: Double?
+    let avg_cadence_rpm: Double?
+    let avg_speed_kmh: Double?
+    let avg_heart_rate: Double?
+}
+
+private struct PulledSampleRow: Decodable, Sendable {
+    let elapsed_seconds: Int
+    let recorded_at: Date?
+    let power: Double?
+    let cadence_rpm: Double?
+    let speed_kmh: Double?
+    let heart_rate: Double?
 }
 
 private struct LapRow: Codable, Sendable {

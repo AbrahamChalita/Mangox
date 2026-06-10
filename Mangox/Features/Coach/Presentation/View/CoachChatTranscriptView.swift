@@ -17,8 +17,11 @@ struct CoachChatTranscriptView: View {
     let onPaywall: () -> Void
     let onSuggestedAction: (UUID, SuggestedAction) -> Void
     let onRetry: () -> Void
+    let onRetryCloud: () -> Void
+    let onFeedback: (UUID, Int) -> Void
 
     @State private var viewportHeight: CGFloat = 0
+    @State private var pendingBubbleHeight: CGFloat = 0
     @State private var scrollPosition = ScrollPosition()
     @State private var stickToBottom = true
     @State private var pinTask: Task<Void, Never>?
@@ -37,12 +40,18 @@ struct CoachChatTranscriptView: View {
         coachViewModel.messages.last { $0.role == .assistant }?.id
     }
 
+    private var latestAssistantReplyPanelSignature: Int {
+        guard let last = coachViewModel.messages.last(where: { $0.role == .assistant }) else { return 0 }
+        let followUp = last.followUpQuestion?.isEmpty == false ? 1 : 0
+        return last.suggestedActions.count + last.followUpBlocks.count + followUp
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
                 if showEmptyState {
                     emptyState
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity)
                         .transition(
                             .asymmetric(
                                 insertion: .opacity,
@@ -67,6 +76,8 @@ struct CoachChatTranscriptView: View {
                             current: message.timestamp
                         ),
                         onRetry: onRetry,
+                        onRetryCloud: onRetryCloud,
+                        onFeedback: { onFeedback(message.id, $0) },
                         onSuggestedAction: { onSuggestedAction(message.id, $0) },
                         onFollowUpBatchComplete: onSend
                     )
@@ -86,7 +97,9 @@ struct CoachChatTranscriptView: View {
                     .id("planGen")
                 }
 
-                CoachStreamingSection()
+                CoachStreamingSection { pendingBubbleHeight = $0 }
+
+                Spacer(minLength: 0)
 
                 Color.clear
                     .frame(height: bottomSpacerHeight)
@@ -160,7 +173,27 @@ struct CoachChatTranscriptView: View {
         }
         .onChange(of: coachViewModel.streamDraftText) { _, newValue in
             guard stickToBottom, !newValue.isEmpty else { return }
-            schedulePinToBottom(animated: false, debounceMs: 180)
+            schedulePinToBottom(animated: false, debounceMs: 120)
+        }
+        .onChange(of: pendingBubbleHeight) { _, _ in
+            guard stickToBottom else { return }
+            schedulePinToBottom(animated: false, debounceMs: 80)
+        }
+        .onChange(of: coachViewModel.streamDelivery) { _, _ in
+            guard stickToBottom, coachViewModel.isLoading else { return }
+            schedulePinToBottom(animated: false)
+        }
+        .onChange(of: coachViewModel.streamPartialTags) { _, _ in
+            guard stickToBottom, coachViewModel.isLoading else { return }
+            schedulePinToBottom(animated: false, debounceMs: 100)
+        }
+        .onChange(of: coachViewModel.streamRouteStatus) { _, _ in
+            guard stickToBottom, coachViewModel.isLoading else { return }
+            schedulePinToBottom(animated: false)
+        }
+        .onChange(of: latestAssistantReplyPanelSignature) { _, _ in
+            guard stickToBottom else { return }
+            schedulePinToBottom(animated: true, debounceMs: 120)
         }
         .onChange(of: coachViewModel.generatingPlan) { _, generating in
             if generating { schedulePinToBottom(animated: true) }
@@ -211,23 +244,29 @@ struct CoachChatTranscriptView: View {
                 )
 
             VStack(spacing: 0) {
-                CoachEmptyStartersPanel(
-                    bubbleMaxWidth: bubbleMaxWidth,
-                    greetingTitle: greetingText,
-                    headline: "What should we work on?",
-                    subhead:
-                        "Ask about training, recovery, or build a plan. Starters only appear when Mangox has data to support them.",
-                    topicTags: content.topicTags,
-                    prompts: content.prompts,
-                    startersEnabled: !coachViewModel.isLoading,
-                    onPlanBuilder: onPlanBuilder,
-                    onPrompt: { onSend($0.text) }
-                )
-                .frame(maxWidth: bubbleMaxWidth)
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    CoachEmptyStartersPanel(
+                        bubbleMaxWidth: bubbleMaxWidth,
+                        greetingTitle: greetingText,
+                        headline: "What should we work on?",
+                        subhead:
+                            "Ask about training, recovery, or build a plan. Starters only appear when Mangox has data to support them.",
+                        topicTags: content.topicTags,
+                        prompts: content.prompts,
+                        startersEnabled: !coachViewModel.isLoading,
+                        onPlanBuilder: onPlanBuilder,
+                        onPrompt: { onSend($0.text) }
+                    )
+                    .frame(maxWidth: bubbleMaxWidth)
+                    Spacer(minLength: 0)
+                }
 
                 if coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) {
                     dailyLimitCard
                         .padding(.top, 22)
+                        .frame(maxWidth: bubbleMaxWidth)
+                        .frame(maxWidth: .infinity)
                 }
             }
             .padding(.horizontal, 2)
@@ -311,4 +350,58 @@ struct CoachChatTranscriptView: View {
         }
     }
 
+}
+
+// MARK: - Context window banner
+
+struct CoachContextWindowBanner: View {
+    let currentCount: Int
+    let windowSize: Int
+    let onStartFresh: () -> Void
+    var onDismiss: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "text.bubble")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppColor.yellow.opacity(0.9))
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Context \(currentCount)/\(windowSize)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+                Text("Older turns are summarized. Start a new chat for sharper follow-ups.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.42))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button(action: onStartFresh) {
+                    Text("New chat")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(AppColor.mango)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+
+            Spacer(minLength: 0)
+
+            if let onDismiss {
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.35))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
+            }
+        }
+        .padding(12)
+        .mangoxSurface(
+            .flatCustom(fill: Color.white.opacity(0.04), border: AppColor.yellow.opacity(0.2)),
+            shape: .rounded(MangoxRadius.sharp.rawValue)
+        )
+    }
 }

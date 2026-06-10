@@ -1,3 +1,4 @@
+import CoreSpotlight
 import Foundation
 import FoundationModels
 
@@ -282,5 +283,72 @@ struct MangoxOnDevicePlanForwardSimTool: Tool {
         }
 
         return lines.joined(separator: "\n")
+    }
+}
+
+// MARK: - On-device Spotlight search (local notes / files)
+
+@Generable
+struct MangoxSpotlightSearchArguments: Equatable {
+    @Guide(description: "Natural-language query for on-device notes, documents, and saved items.")
+    var query: String
+}
+
+/// Local Spotlight retrieval for coach tools. Prefer Apple's `SpotlightSearchTool` when the FM cross-import is available.
+struct MangoxSpotlightSearchTool: Tool {
+    var name: String { "mangox_spotlight_search" }
+
+    var description: String {
+        "Search Spotlight-indexed content on this device (notes, files, messages, app content). Use for find-my-notes and local file lookup — not live web search."
+    }
+
+    @concurrent func call(arguments: MangoxSpotlightSearchArguments) async throws -> String {
+        let queryText = arguments.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !queryText.isEmpty else { return "Empty search query." }
+
+        return await withCheckedContinuation { continuation in
+            let context = CSSearchQueryContext()
+            let query = CSSearchQuery(queryString: queryText, queryContext: context)
+            var lines: [String] = []
+            let lock = NSLock()
+            var resumed = false
+
+            query.foundItemsHandler = { found in
+                lock.lock()
+                defer { lock.unlock() }
+                for item in found where lines.count < 8 {
+                    let title = item.attributeSet.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+                        ?? "(untitled)"
+                    let body =
+                        item.attributeSet.contentDescription
+                        ?? item.attributeSet.textContent
+                        ?? ""
+                    let snippet = String(body.trimmingCharacters(in: .whitespacesAndNewlines).prefix(220))
+                    lines.append(snippet.isEmpty ? "- \(title)" : "- \(title): \(snippet)")
+                }
+            }
+
+            query.completionHandler = { error in
+                lock.lock()
+                defer { lock.unlock() }
+                guard !resumed else { return }
+                resumed = true
+                if let error {
+                    continuation.resume(
+                        returning: "Spotlight search failed: \(error.localizedDescription)"
+                    )
+                    return
+                }
+                if lines.isEmpty {
+                    continuation.resume(returning: "No Spotlight results for \"\(queryText)\".")
+                    return
+                }
+                continuation.resume(
+                    returning: "Spotlight results for \"\(queryText)\":\n" + lines.joined(separator: "\n")
+                )
+            }
+
+            query.start()
+        }
     }
 }

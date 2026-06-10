@@ -20,11 +20,17 @@ protocol AIServiceProtocol: AnyObject {
     var streamStatusText: String? { get }
     var streamIsThinking: Bool { get }
     var streamIsSearchingWeb: Bool { get }
+    var streamDelivery: CoachStreamDelivery { get }
+    var streamPartialTags: [String] { get }
+    var streamRouteStatus: String? { get }
     var currentSessionID: UUID? { get }
     var todayMessageCount: Int { get }
+    var lastFailedDeliveryPath: CoachDeliveryPath? { get }
+    var suggestsFreshConversation: Bool { get }
 
     func coachFactSheetText() -> String
     func hasReachedFreeLimit(isPro: Bool) -> Bool
+    func canSendCoachMessage(_ text: String, isPro: Bool, forcePlanIntake: Bool) -> Bool
     func loadCoachEmptyStartersContent() async -> CoachEmptyStartersContent
     func contextualQuickPrompts() -> [QuickPrompt]
 
@@ -35,7 +41,7 @@ protocol AIServiceProtocol: AnyObject {
     ) async
 
     @discardableResult
-    func prepareOutgoingMessage(_ text: String, isPro: Bool) -> Bool
+    func prepareOutgoingMessage(_ text: String, isPro: Bool, forcePlanIntake: Bool) -> Bool
 
     func cancelActiveChatTurn()
 
@@ -66,6 +72,7 @@ protocol AIServiceProtocol: AnyObject {
     func dismissError()
     func submitFeedback(for messageID: UUID, score: Int)
     func regenerateLastMessage(isPro: Bool) async
+    func regenerateLastMessagePreferringCloud(isPro: Bool) async
 
     var contextWindowSize: Int { get }
     var currentContextCount: Int { get }

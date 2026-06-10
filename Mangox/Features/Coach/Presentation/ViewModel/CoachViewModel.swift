@@ -22,10 +22,15 @@ final class CoachViewModel {
     var streamStatusText: String? { coach.streamStatusText }
     var streamIsThinking: Bool { coach.streamIsThinking }
     var streamIsSearchingWeb: Bool { coach.streamIsSearchingWeb }
+    var streamDelivery: CoachStreamDelivery { coach.streamDelivery }
+    var streamPartialTags: [String] { coach.streamPartialTags }
+    var streamRouteStatus: String? { coach.streamRouteStatus }
     var todayMessageCount: Int { coach.todayMessageCount }
     var contextWindowSize: Int { coach.contextWindowSize }
     var currentContextCount: Int { coach.currentContextCount }
     var currentSessionID: UUID? { coach.currentSessionID }
+    var lastFailedDeliveryPath: CoachDeliveryPath? { coach.lastFailedDeliveryPath }
+    var suggestsFreshConversation: Bool { coach.suggestsFreshConversation }
     var hasReachedLimit: Bool = false
     var starterContent: CoachEmptyStartersContent?
 
@@ -45,6 +50,14 @@ final class CoachViewModel {
 
     func hasReachedFreeLimit(isPro: Bool) -> Bool {
         coach.hasReachedFreeLimit(isPro: isPro)
+    }
+
+    func canSendCoachMessage(
+        _ text: String,
+        isPro: Bool,
+        forcePlanIntake: Bool = false
+    ) -> Bool {
+        coach.canSendCoachMessage(text, isPro: isPro, forcePlanIntake: forcePlanIntake)
     }
 
     func remainingFreeMessages(isPro: Bool) -> Int {
@@ -101,8 +114,12 @@ final class CoachViewModel {
     }
 
     @discardableResult
-    func prepareOutgoingMessage(_ text: String, isPro: Bool) -> Bool {
-        coach.prepareOutgoingMessage(text, isPro: isPro)
+    func prepareOutgoingMessage(
+        _ text: String,
+        isPro: Bool,
+        forcePlanIntake: Bool = false
+    ) -> Bool {
+        coach.prepareOutgoingMessage(text, isPro: isPro, forcePlanIntake: forcePlanIntake)
     }
 
     func cancelActiveChatTurn() {
@@ -136,6 +153,10 @@ final class CoachViewModel {
 
     func submitFeedback(for messageID: UUID, score: Int) {
         coach.submitFeedback(for: messageID, score: score)
+    }
+
+    func regenerateLastMessagePreferringCloud(isPro: Bool) async {
+        await coach.regenerateLastMessagePreferringCloud(isPro: isPro)
     }
 
     func clearPlanConfirmationDraft() {

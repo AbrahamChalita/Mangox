@@ -27,6 +27,8 @@ struct ImportedWorkoutPayload {
 /// This seam keeps direct `ModelContext` writes out of Presentation/ViewModel code.
 @MainActor
 protocol WorkoutPersistenceRepositoryProtocol: AnyObject {
+    /// Called after local workout/template mutations that should be pushed to Supabase.
+    func setOnLocalChange(_ block: @escaping () -> Void)
     /// Persists a derived custom workout template from a completed workout.
     /// - Returns: The saved template id when successful; otherwise `nil`.
     func saveWorkoutAsCustomTemplate(from workout: Workout) throws -> UUID?

@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 
 enum CoachAuxiliarySheet: String, Identifiable {
-    case paywall, plans
+    case paywall, plans, workouts
     var id: String { rawValue }
 }
 
@@ -30,6 +30,7 @@ struct CoachConversationView: View {
     @State private var chatColumnWidth: CGFloat = 400
     @State private var composerFocusScrollNonce = 0
     @State private var sentChipKey: String?
+    @State private var contextBannerDismissed = false
 
     private static let planBuilderSeed =
         "I want to build a structured training plan for an event. Ask me about my goal, target date, weekly training hours, and experience, then outline next steps."
@@ -56,6 +57,7 @@ struct CoachConversationView: View {
             VStack(spacing: 0) {
                 topChrome
                 metricsStrip
+                contextBanner
                 CoachChatTranscriptView(
                     bubbleMaxWidth: Self.bubbleMaxWidth(containerWidth: chatColumnWidth),
                     greetingText: greetingText,
@@ -72,6 +74,16 @@ struct CoachConversationView: View {
                             await coachViewModel.retryLastUserMessage(
                                 isPro: coachViewModel.isPro)
                         }
+                    },
+                    onRetryCloud: {
+                        HapticManager.shared.coachMessageSent()
+                        Task { @MainActor in
+                            await coachViewModel.regenerateLastMessagePreferringCloud(
+                                isPro: coachViewModel.isPro)
+                        }
+                    },
+                    onFeedback: { messageID, score in
+                        coachViewModel.submitFeedback(for: messageID, score: score)
                     }
                 )
             }
@@ -102,9 +114,14 @@ struct CoachConversationView: View {
             case .plans:
                 CoachPlansSheet(
                     navigationPath: $navigationPath, dismissParentChat: $chatSheetPresented)
+            case .workouts:
+                CoachWorkoutsSheet(
+                    navigationPath: $navigationPath, dismissParentChat: $chatSheetPresented)
             }
         }
         .task {
+            OnDeviceCoachEngine.prewarmNarrowCoachIfAvailable()
+            OnDeviceCoachEngine.prewarmPCCCoachIfAvailable()
             await coachViewModel.loadPersistedMessagesIfNeeded()
         }
         .task(id: "\(coachViewModel.currentSessionID?.uuidString ?? "none")") {
@@ -119,6 +136,9 @@ struct CoachConversationView: View {
             if error != nil, !coachViewModel.isLoading {
                 sentChipKey = nil
             }
+        }
+        .onChange(of: coachViewModel.currentSessionID) { _, _ in
+            contextBannerDismissed = false
         }
     }
 
@@ -155,23 +175,6 @@ struct CoachConversationView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(AppColor.fg2)
                     .accessibilityLabel(A11yL10n.conversations)
-
-                    Button {
-                        send(Self.planBuilderSeed, forcePlanIntake: true)
-                    } label: {
-                        Image(systemName: "calendar.badge.plus")
-                            .font(.system(size: 17, weight: .medium))
-                            .frame(width: 40, height: 40)
-                            .mangoxSurface(
-                                .flatCustom(fill: AppColor.bg2, border: AppColor.mango.opacity(0.35)),
-                                shape: .rounded(MangoxRadius.sharp.rawValue)
-                            )
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(AppColor.mango)
-                    .accessibilityLabel(A11yL10n.planBuilder)
-                    .disabled(coachViewModel.isLoading)
 
                     Button {
                         coachViewModel.createNewSession()
@@ -255,9 +258,9 @@ struct CoachConversationView: View {
                     } else {
                         let left = coachViewModel.remainingFreeMessages(isPro: coachViewModel.isPro)
                         metricCapsule(
-                            icon: "bubble.left.fill",
-                            label: "Today",
-                            value: "\(left) left",
+                            icon: "cloud.fill",
+                            label: "Cloud",
+                            value: left > 0 ? "\(left) left" : "limit",
                             color: left > 0 ? AppColor.fg2 : AppColor.red
                         )
                     }
@@ -293,6 +296,33 @@ struct CoachConversationView: View {
         .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
     }
 
+    // MARK: Context banner (sticky below metrics)
+
+    @ViewBuilder
+    private var contextBanner: some View {
+        if coachViewModel.suggestsFreshConversation,
+            !coachViewModel.isLoading,
+            !contextBannerDismissed
+        {
+            CoachContextWindowBanner(
+                currentCount: coachViewModel.currentContextCount,
+                windowSize: coachViewModel.contextWindowSize,
+                onStartFresh: {
+                    coachViewModel.createNewSession()
+                    contextBannerDismissed = false
+                },
+                onDismiss: { contextBannerDismissed = true }
+            )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .transition(
+                accessibilityReduceMotion
+                    ? .opacity
+                    : .move(edge: .top).combined(with: .opacity)
+            )
+        }
+    }
+
     // MARK: Input
 
     private var showComposerLimitBanner: Bool {
@@ -318,6 +348,7 @@ struct CoachConversationView: View {
             chatSheetPresented: $chatSheetPresented,
             auxiliarySheet: $auxiliarySheet,
             showComposerLimitBanner: showComposerLimitBanner,
+            onPlanBuilder: { send(Self.planBuilderSeed, forcePlanIntake: true) },
             sendAction: { send($0) },
             onFocusChanged: { focused in
                 if focused && !coachViewModel.messages.isEmpty {
@@ -334,11 +365,20 @@ struct CoachConversationView: View {
     private func send(_ text: String, forcePlanIntake: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        guard !coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) else {
+        let planIntake = forcePlanIntake || AIService.shouldForcePlanIntake(for: trimmed)
+        guard coachViewModel.canSendCoachMessage(
+            trimmed,
+            isPro: coachViewModel.isPro,
+            forcePlanIntake: planIntake
+        ) else {
             auxiliarySheet = .paywall
             return
         }
-        guard coachViewModel.prepareOutgoingMessage(trimmed, isPro: coachViewModel.isPro) else {
+        guard coachViewModel.prepareOutgoingMessage(
+            trimmed,
+            isPro: coachViewModel.isPro,
+            forcePlanIntake: planIntake
+        ) else {
             return
         }
         HapticManager.shared.coachMessageSent()
@@ -355,16 +395,32 @@ struct CoachConversationView: View {
     private func handleSuggestedAction(from messageID: UUID, _ action: SuggestedAction) {
         guard !coachViewModel.isLoading else { return }
         let kind = action.type.lowercased()
-        guard !coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) else {
+        guard coachViewModel.canSendCoachMessage(
+            action.label,
+            isPro: coachViewModel.isPro,
+            forcePlanIntake: AIService.shouldForcePlanIntake(for: action.label)
+        ) else {
             auxiliarySheet = .paywall
             return
         }
         HapticManager.shared.coachQuickReplyTapped()
         switch kind {
+        case "retry":
+            Task { @MainActor in
+                await coachViewModel.retryLastUserMessage(isPro: coachViewModel.isPro)
+            }
+            return
+        case "escalate_cloud":
+            Task { @MainActor in
+                await coachViewModel.regenerateLastMessagePreferringCloud(isPro: coachViewModel.isPro)
+            }
+            return
         case "navigate_to_plan":
             auxiliarySheet = .plans
         case "navigate_to_my_plans", "open_my_plans":
             auxiliarySheet = .plans
+        case "navigate_to_my_workouts", "open_my_workouts":
+            auxiliarySheet = .workouts
         case "start_workout":
             guard let celebration = coachViewModel.workoutSaveCelebration else { return }
             navigationPath.append(AppRoute.customWorkoutRide(templateID: celebration.templateID))
@@ -380,13 +436,19 @@ struct CoachConversationView: View {
 
 struct CoachStreamingSection: View {
     @Environment(CoachViewModel.self) private var coachViewModel
+    var onPendingHeightChange: (CGFloat) -> Void = { _ in }
 
     var body: some View {
         if coachViewModel.isLoading {
             CoachPendingReplyBubble(
                 streamingText: coachViewModel.streamDraftText,
+                delivery: coachViewModel.streamDelivery,
+                partialTags: coachViewModel.streamPartialTags,
                 isSearchingWeb: coachViewModel.streamIsSearchingWeb,
-                style: .cloud
+                isThinking: coachViewModel.streamIsThinking,
+                statusText: coachViewModel.streamStatusText,
+                routeStatus: coachViewModel.streamRouteStatus,
+                onHeightChange: onPendingHeightChange
             )
             .id("pending-bubble")
             .transition(
@@ -404,6 +466,7 @@ struct CoachInputBarWrapper: View {
     @Binding var chatSheetPresented: Bool
     @Binding var auxiliarySheet: CoachAuxiliarySheet?
     let showComposerLimitBanner: Bool
+    let onPlanBuilder: () -> Void
     let sendAction: (String) -> Void
     let onFocusChanged: (Bool) -> Void
 
@@ -420,6 +483,7 @@ struct CoachInputBarWrapper: View {
             inputText: $inputText,
             inputFocused: _inputFocused,
             showComposerLimitBanner: showComposerLimitBanner,
+            onPlanBuilder: onPlanBuilder,
             sendAction: { text in
                 let wasFocused = inputFocused
                 sendAction(text)
@@ -452,6 +516,7 @@ struct InputBarView: View {
     @Binding var inputText: String
     @FocusState var inputFocused: Bool
     let showComposerLimitBanner: Bool
+    let onPlanBuilder: () -> Void
     let sendAction: (String) -> Void
 
     var body: some View {
@@ -490,17 +555,26 @@ struct InputBarView: View {
                 Button {
                     auxiliarySheet = .paywall
                 } label: {
-                    HStack {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 12))
-                        Text("Daily limit — tap to upgrade")
-                            .font(.system(size: 12, weight: .semibold))
-                        Spacer()
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "cloud.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("Cloud coach limit reached")
+                                .font(.system(size: 12, weight: .semibold))
+                            Spacer(minLength: 0)
+                            Text("Upgrade")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(AppColor.mango.opacity(0.95))
+                        }
+                        Text("On-device stats questions still work — tap to unlock cloud & plans.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.42))
+                            .multilineTextAlignment(.leading)
                     }
-                    .foregroundStyle(AppColor.mango)
+                    .foregroundStyle(AppColor.mango.opacity(0.92))
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(AppColor.mango.opacity(0.1))
+                    .padding(.vertical, 10)
+                    .background(AppColor.mango.opacity(0.08))
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint(A11yL10n.opensSubscriptionHint)
@@ -526,6 +600,22 @@ struct InputBarView: View {
             }
 
             HStack(alignment: .bottom, spacing: 10) {
+                Button(action: onPlanBuilder) {
+                    Image(systemName: "calendar.badge.plus")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(AppColor.mango.opacity(0.9))
+                        .frame(width: 40, height: 44)
+                        .background(AppColor.bg2)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(AppColor.mango.opacity(0.28), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(A11yL10n.planBuilder)
+                .disabled(coachViewModel.isLoading)
+
                 TextField(
                     "Message",
                     text: $inputText,
@@ -543,9 +633,13 @@ struct InputBarView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 11)
                 .background(inputFocused ? AppColor.bg2 : AppColor.bg1)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(
-                    Rectangle()
-                        .stroke(inputFocused ? AppColor.mango.opacity(0.35) : AppColor.hair2, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(
+                            inputFocused ? AppColor.mango.opacity(0.35) : AppColor.hair2,
+                            lineWidth: 1
+                        )
                 )
                 .focused($inputFocused)
                 .submitLabel(.send)
@@ -567,8 +661,8 @@ struct InputBarView: View {
 
     private var sendButtonHint: String {
         let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) {
-            return "Daily message limit reached. Upgrade to Pro to continue."
+        if !coachViewModel.canSendCoachMessage(trimmed, isPro: coachViewModel.isPro) {
+            return "Cloud coach limit reached. Upgrade for cloud replies, or ask a short on-device stats question."
         }
         if coachViewModel.isLoading {
             return "Coach is replying. Wait for the response to finish."
@@ -584,7 +678,7 @@ struct InputBarView: View {
         let canSend =
             !trimmed.isEmpty
             && !coachViewModel.isLoading
-            && !coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro)
+            && coachViewModel.canSendCoachMessage(trimmed, isPro: coachViewModel.isPro)
 
         return Button {
             sendAction(inputText)
@@ -594,9 +688,10 @@ struct InputBarView: View {
                 .foregroundStyle(canSend ? AppColor.bg0 : AppColor.fg3)
                 .frame(width: 44, height: 44)
                 .background(canSend ? AppColor.mango : AppColor.bg2)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
-                    Rectangle()
-                        .stroke(canSend ? AppColor.mango.opacity(0.45) : AppColor.hair2, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(canSend ? AppColor.mango.opacity(0.45) : AppColor.hair2, lineWidth: 1)
                 )
         }
         .buttonStyle(MangoxPressStyle())
