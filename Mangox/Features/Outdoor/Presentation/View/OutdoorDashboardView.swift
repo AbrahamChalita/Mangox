@@ -931,18 +931,41 @@ struct OutdoorDashboardView: View {
             }
 
             VStack(spacing: 12) {
-                Button {
-                    viewModel.requestLocationPermission()
-                } label: {
-                    Text("Enable Location")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(AppColor.bg)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(AppColor.mango)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                if ls.authorizationStatus == .denied || ls.authorizationStatus == .restricted {
+                    Text(
+                        "Location access was denied. Enable it in Settings to use outdoor features."
+                    )
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
+
+                    Button {
+                        UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
+                    } label: {
+                        Text("Open Settings")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(AppColor.bg)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 52)
+                            .background(AppColor.mango)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(MangoxPressStyle())
+                } else {
+                    Button {
+                        viewModel.requestLocationPermission()
+                    } label: {
+                        Text("Enable Location")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(AppColor.bg)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 52)
+                            .background(AppColor.mango)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(MangoxPressStyle())
                 }
-                .buttonStyle(MangoxPressStyle())
 
                 Button("Back") {
                     navigationPath.removeLast()

@@ -70,7 +70,8 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
             hrZoneId: hrZoneId,
             powerZoneId: powerZoneId,
             useImperial: prefs.isImperial,
-            isPaused: locationManager.isAutoPaused
+            isAutoPaused: locationManager.isAutoPaused,
+            isManuallyPaused: false  // TODO: wire manual pause
         )
 
         let modeLabel: String
@@ -124,7 +125,8 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
             hrZoneId: hrZoneId,
             powerZoneId: powerZoneId,
             useImperial: prefs.isImperial,
-            isPaused: workoutManager.state == .paused || workoutManager.state == .autoPaused
+            isAutoPaused: workoutManager.state == .autoPaused,
+            isManuallyPaused: workoutManager.state == .paused
         )
 
         await publishState(state, modeLabel: "Indoor")

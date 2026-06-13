@@ -8,7 +8,7 @@ struct FTPHistoryView: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.03, green: 0.04, blue: 0.06)
+            AppColor.bgModal
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -58,10 +58,10 @@ struct FTPHistoryView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("FTP History")
-                    .font(.system(size: 18, weight: .bold))
+                    .mangoxFont(.title)
                     .foregroundStyle(.white)
                 Text("\(results.count) test\(results.count == 1 ? "" : "s")")
-                    .font(.system(size: 12))
+                    .mangoxFont(.caption)
                     .foregroundStyle(.white.opacity(0.4))
             }
 
@@ -69,7 +69,7 @@ struct FTPHistoryView: View {
 
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
+                    .mangoxFont(.callout)
                     .foregroundStyle(.white.opacity(0.7))
                     .frame(width: 30, height: 30)
                     .background(Color.white.opacity(0.06))
@@ -99,23 +99,23 @@ struct FTPHistoryView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(AppColor.mango)
             Text("CURRENT FTP")
-                .font(.system(size: 9, weight: .bold))
+                .mangoxFont(.label)
                 .foregroundStyle(.white.opacity(0.35))
                 .tracking(1.2)
             Spacer()
             Text("\(PowerZone.ftp)")
-                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                .mangoxFont(.value)
                 .foregroundStyle(.white)
             Text("W")
-                .font(.system(size: 11, weight: .medium))
+                .mangoxFont(.caption)
                 .foregroundStyle(.white.opacity(0.3))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(Color.white.opacity(0.03))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous)
                 .strokeBorder(AppColor.mango.opacity(0.2), lineWidth: 1)
         )
     }
@@ -130,12 +130,12 @@ struct FTPHistoryView: View {
             // Date + applied badge
             HStack {
                 Text(result.date.formatted(.dateTime.month(.abbreviated).day().year()))
-                    .font(.system(size: 12, weight: .semibold))
+                    .mangoxFont(.callout)
                     .foregroundStyle(.white.opacity(0.6))
 
                 if result.applied {
                     Text("APPLIED")
-                        .font(.system(size: 8, weight: .bold))
+                        .mangoxFont(.label)
                         .foregroundStyle(AppColor.success)
                         .tracking(0.8)
                         .padding(.horizontal, 6)
@@ -147,17 +147,17 @@ struct FTPHistoryView: View {
                 Spacer()
 
                 Text(result.date.formatted(.dateTime.hour().minute()))
-                    .font(.system(size: 11, design: .monospaced))
+                    .mangoxFont(.caption)
                     .foregroundStyle(.white.opacity(0.25))
             }
 
             // Main FTP value
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text("\(result.estimatedFTP)")
-                    .font(.system(size: 28, weight: .bold, design: .monospaced))
+                    .mangoxFont(.largeValue)
                     .foregroundStyle(zone.color)
                 Text("W")
-                    .font(.system(size: 13, weight: .medium))
+                    .mangoxFont(.body)
                     .foregroundStyle(.white.opacity(0.3))
 
                 Spacer()
@@ -168,7 +168,7 @@ struct FTPHistoryView: View {
                         showApplyConfirmation = true
                     } label: {
                         Text("Apply")
-                            .font(.system(size: 11, weight: .bold))
+                            .mangoxFont(.caption)
                             .foregroundStyle(AppColor.mango)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
@@ -187,9 +187,9 @@ struct FTPHistoryView: View {
         }
         .padding(14)
         .background(Color.white.opacity(0.03))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
         )
     }
@@ -197,15 +197,15 @@ struct FTPHistoryView: View {
     private func metricItem(label: String, value: String, unit: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 8, weight: .bold))
+                .mangoxFont(.label)
                 .foregroundStyle(.white.opacity(0.25))
                 .tracking(0.8)
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(value)
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .mangoxFont(.compactValue)
                     .foregroundStyle(.white.opacity(0.7))
                 Text(unit)
-                    .font(.system(size: 9))
+                    .mangoxFont(.caption)
                     .foregroundStyle(.white.opacity(0.2))
             }
         }
@@ -220,10 +220,10 @@ struct FTPHistoryView: View {
                 .font(.system(size: 32))
                 .foregroundStyle(.white.opacity(0.15))
             Text("No FTP Tests Yet")
-                .font(.system(size: 16, weight: .semibold))
+                .mangoxFont(.title)
                 .foregroundStyle(.white.opacity(0.5))
             Text("Complete an FTP test to see your results here.")
-                .font(.system(size: 13))
+                .mangoxFont(.body)
                 .foregroundStyle(.white.opacity(0.3))
                 .multilineTextAlignment(.center)
             Spacer()

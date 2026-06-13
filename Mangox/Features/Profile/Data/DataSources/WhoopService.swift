@@ -402,6 +402,11 @@ final class WhoopService: WhoopServiceProtocol {
             markLinkedAccountSaved(at: remoteUpdatedAt)
             lastError = nil
             whoopLogger.info("WHOOP session restored from cloud backup")
+            let now = Int(Date().timeIntervalSince1970)
+            if restored.expiresAt - now <= 90 {
+                whoopLogger.info("WHOOP cloud-restored token is expired/near-expiry — refreshing in background")
+                Task { [weak self] in try? await self?.validAccessToken() }
+            }
         } catch {
             whoopLogger.error("WHOOP cloud restore failed: \(error.localizedDescription)")
         }

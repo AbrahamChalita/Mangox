@@ -1,5 +1,8 @@
 import Foundation
+import os.log
 import Supabase
+
+private let linkedOAuthLogger = Logger(subsystem: "com.abchalita.Mangox", category: "LinkedOAuthBridge")
 
 /// Coordinates encrypted WHOOP/Strava session backup and restore for signed-in users.
 @MainActor
@@ -65,9 +68,7 @@ final class LinkedOAuthSessionBridge {
                 client: client
             )
         } catch {
-            #if DEBUG
-            print("[LinkedOAuth] push \(provider.rawValue) failed: \(error)")
-            #endif
+            linkedOAuthLogger.error("LinkedOAuth push \(provider.rawValue, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -92,9 +93,7 @@ final class LinkedOAuthSessionBridge {
                 )
             }
         } catch {
-            #if DEBUG
-            print("[LinkedOAuth] restore \(provider.rawValue) failed: \(error)")
-            #endif
+            linkedOAuthLogger.error("LinkedOAuth restore \(provider.rawValue, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

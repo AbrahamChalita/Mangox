@@ -31,5 +31,5 @@ struct MetricCardView: View {
         MetricCardView(label: "CADENCE", value: "88", unit: "rpm", valueColor: Color(red: 107/255, green: 127/255, blue: 212/255))
     }
     .padding()
-    .background(Color(red: 0.03, green: 0.04, blue: 0.06))
+    .background(AppColor.bgModal)
 }

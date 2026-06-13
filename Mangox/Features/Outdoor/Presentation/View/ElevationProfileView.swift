@@ -238,7 +238,7 @@ struct ElevationProfileView: View {
 
 #Preview {
     ZStack {
-        Color(red: 0.03, green: 0.04, blue: 0.06).ignoresSafeArea()
+        AppColor.bgModal.ignoresSafeArea()
         ElevationProfileView(routeService: RouteManager(), currentDistance: 12_000, height: 80)
             .padding(20)
     }

@@ -185,6 +185,7 @@ struct TrainingPlanView: View {
                     .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
                     .frame(width: 32, height: 32)
             }
+            .accessibilityLabel("Back")
             .mangoxSurface(
                 .flatCustom(fill: AppColor.bg1, border: AppColor.hair2),
                 shape: .rounded(MangoxRadius.sharp.rawValue)
@@ -226,6 +227,7 @@ struct TrainingPlanView: View {
                         .font(.system(size: 18))
                         .foregroundStyle(.white.opacity(AppOpacity.textTertiary))
                 }
+                .accessibilityLabel("More options")
             }
         }
         .padding(.horizontal, 20)

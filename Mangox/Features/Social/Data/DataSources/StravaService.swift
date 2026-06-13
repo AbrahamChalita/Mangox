@@ -494,6 +494,11 @@ final class StravaService: StravaServiceProtocol {
             markLinkedAccountSaved(at: remoteUpdatedAt)
             lastError = nil
             stravaLogger.info("Strava session restored from cloud backup")
+            let now = Int(Date().timeIntervalSince1970)
+            if restored.expiresAt - now <= 90 {
+                stravaLogger.info("Strava cloud-restored token is expired/near-expiry — refreshing in background")
+                Task { [weak self] in try? await self?.validAccessToken() }
+            }
         } catch {
             stravaLogger.error("Strava cloud restore failed: \(error.localizedDescription)")
         }

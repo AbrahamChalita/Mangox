@@ -88,12 +88,13 @@ struct GoalProgressPill: View {
     let currentValue: String
     let targetValue: String
     let elapsedSeconds: Int
+    var isPaused: Bool = false
 
     private var isComplete: Bool { progress >= 1.0 }
 
     /// Estimated time to completion
     private var etaText: String? {
-        guard !isComplete, elapsedSeconds > 0, progress > 0 else { return nil }
+        guard !isComplete, elapsedSeconds > 0, progress > 0, !isPaused else { return nil }
         switch goal.kind {
         case .duration:
             let targetSeconds = goal.target * 60

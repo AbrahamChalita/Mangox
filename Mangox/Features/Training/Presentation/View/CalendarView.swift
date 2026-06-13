@@ -308,7 +308,7 @@ struct CalendarView: View {
     private var calendarQueryScopeFootnote: some View {
         VStack(spacing: 6) {
             Text("You’re at that entry cap—some rides in this window may not appear.")
-                .font(.system(size: 10, weight: .semibold))
+                .mangoxFont(.caption)
                 .foregroundStyle(AppColor.mango.opacity(0.85))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
@@ -324,19 +324,21 @@ struct CalendarView: View {
             HStack {
                 Button { changeMonth(by: -1) } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 14, weight: .semibold))
+                        .mangoxFont(.callout)
                         .foregroundStyle(.white.opacity(0.65))
                 }
+                .accessibilityLabel("Previous month")
                 Spacer()
                 Text(currentMonth, format: .dateTime.month(.wide).year())
-                    .font(.system(size: 18, weight: .bold))
+                    .mangoxFont(.title)
                     .foregroundStyle(.white)
                 Spacer()
                 Button { changeMonth(by: 1) } label: {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
+                        .mangoxFont(.callout)
                         .foregroundStyle(.white.opacity(0.5))
                 }
+                .accessibilityLabel("Next month")
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 12)
@@ -345,7 +347,7 @@ struct CalendarView: View {
             HStack(spacing: 0) {
                 ForEach(Array(["S", "M", "T", "W", "T", "F", "S"].enumerated()), id: \.offset) { _, day in
                     Text(day)
-                        .font(.system(size: 11, weight: .bold))
+                        .mangoxFont(.label)
                         .foregroundStyle(.white.opacity(0.25))
                         .frame(maxWidth: .infinity)
                 }
@@ -371,7 +373,7 @@ struct CalendarView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(spacing: 10) {
                                 Text(day, format: .dateTime.weekday(.wide).month(.wide).day())
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .mangoxFont(.callout)
                                     .foregroundStyle(.white.opacity(0.6))
                                     .lineLimit(1)
 
@@ -382,7 +384,7 @@ struct CalendarView: View {
                                         navigationPath.append(AppRoute.daySummaryStudio(date: day))
                                     } label: {
                                         Image(systemName: "square.and.arrow.up")
-                                            .font(.system(size: 13, weight: .semibold))
+                                            .mangoxFont(.callout)
                                             .foregroundStyle(AppColor.bg)
                                             .frame(width: 34, height: 30)
                                             .background(AppColor.mango, in: Capsule())
@@ -396,9 +398,9 @@ struct CalendarView: View {
                                 } label: {
                                     HStack(spacing: 5) {
                                         Image(systemName: "figure.mixed.cardio")
-                                            .font(.system(size: 12, weight: .semibold))
+                                            .mangoxFont(.callout)
                                         Text("\(selectedDayLoggedActivities.count)")
-                                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                            .mangoxFont(.callout)
                                             .contentTransition(.numericText())
                                     }
                                     .foregroundStyle(
@@ -482,7 +484,7 @@ struct CalendarView: View {
         let dayActivityCount = loggedActivities(for: day).count
         return HStack(spacing: 8) {
             Text(day, format: .dateTime.weekday(.wide).month(.wide).day())
-                .font(.system(size: 13, weight: .bold))
+                .mangoxFont(.callout)
                 .foregroundStyle(.white.opacity(0.45))
             Spacer()
             if dayActivityCount > 0 {
@@ -491,9 +493,9 @@ struct CalendarView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "figure.mixed.cardio")
-                            .font(.system(size: 10, weight: .semibold))
+                            .mangoxFont(.micro)
                         Text("\(dayActivityCount)")
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .mangoxFont(.caption)
                     }
                     .foregroundStyle(AppColor.blue)
                     .padding(.horizontal, 8)
@@ -506,7 +508,7 @@ struct CalendarView: View {
             }
             if dayTSS > 0 {
                 Text(String(format: "%.0f TSS", dayTSS))
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .mangoxFont(.caption)
                     .foregroundStyle(.white.opacity(0.25))
             }
         }
@@ -522,10 +524,10 @@ struct CalendarView: View {
                 .font(.system(size: 40))
                 .foregroundStyle(.white.opacity(0.18))
             Text(emptyStateTitle)
-                .font(.headline)
+                .mangoxFont(.title)
                 .foregroundStyle(.white.opacity(0.45))
             Text(emptyStateMessage)
-                .font(.subheadline)
+                .mangoxFont(.body)
                 .foregroundStyle(.white.opacity(0.28))
         }
         .frame(maxWidth: .infinity)
@@ -568,17 +570,17 @@ struct CalendarView: View {
             setScreenMode(mode)
         } label: {
             ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous)
                     .fill(Color.white.opacity(0.001))
 
                 if isSelected {
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous)
                         .fill(AppColor.mango.opacity(0.18))
                         .matchedGeometryEffect(id: "layout-mode-selected", in: layoutModeSelectionNamespace)
                 }
 
                 Text(mode.title)
-                    .font(.subheadline.weight(.semibold))
+                    .mangoxFont(.callout)
                     .foregroundStyle(
                         isSelected
                             ? .white.opacity(AppOpacity.textPrimary)
@@ -587,8 +589,8 @@ struct CalendarView: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 34)
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 11, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: MangoxRadius.card.rawValue, style: .continuous))
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: MangoxRadius.card.rawValue, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(mode.title)
@@ -660,12 +662,12 @@ struct CalendarView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: filter.systemImage)
-                    .font(.system(size: 11, weight: .semibold))
+                    .mangoxFont(.caption)
                 Text(filter.title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .mangoxFont(.callout)
                 if isSelected {
                     Text("\(count)")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .mangoxFont(.caption)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
                         .background(.white.opacity(0.18), in: Capsule())
@@ -709,7 +711,7 @@ struct CalendarView: View {
             showWorkoutImporter = true
         } label: {
             Image(systemName: isImportingWorkout ? "hourglass" : "square.and.arrow.down")
-                .font(.system(size: 12, weight: .semibold))
+                .mangoxFont(.callout)
                 .foregroundStyle(.white.opacity(AppOpacity.textSecondary))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
@@ -726,11 +728,11 @@ struct CalendarView: View {
         let isToday = calendar.isDateInToday(date)
         return HStack(alignment: .center, spacing: 12) {
             Image(systemName: "calendar.badge.minus")
-                .font(.system(size: 14, weight: .semibold))
+                .mangoxFont(.callout)
                 .foregroundStyle(.white.opacity(0.28))
 
             Text(isToday ? "No workouts today" : "No workouts on this day")
-                .font(.system(size: 14, weight: .semibold))
+                .mangoxFont(.callout)
                 .foregroundStyle(.white.opacity(0.42))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -738,9 +740,9 @@ struct CalendarView: View {
         .padding(.vertical, 18)
         .frame(maxWidth: .infinity)
         .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue)
                 .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
         )
         .padding(.horizontal, 16)
@@ -764,7 +766,7 @@ struct CalendarView: View {
         } label: {
             VStack(spacing: 3) {
                 Text("\(calendar.component(.day, from: date))")
-                    .font(.system(size: 14, weight: isToday ? .bold : .medium))
+                    .mangoxFont(isToday ? .title : .callout)
                     .foregroundStyle(isToday ? AppColor.mango : .white.opacity(hasAnyActivity ? 0.8 : 0.3))
 
                 if hasAnyActivity {
@@ -788,7 +790,7 @@ struct CalendarView: View {
             .frame(height: 40)
             .frame(maxWidth: .infinity)
             .background(isSelected ? Color.white.opacity(0.10) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.overlay.rawValue))
         }
         .buttonStyle(.plain)
         .contextMenu {

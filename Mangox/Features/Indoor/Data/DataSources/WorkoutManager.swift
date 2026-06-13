@@ -581,7 +581,9 @@ final class WorkoutManager {
             autoPauseSuppressedUntilElapsed =
                 elapsedSeconds + Self.autoPauseGraceSecondsAfterUserResume
         } else {
-            autoPauseSuppressedUntilElapsed = nil
+            // Short grace on BLE-driven auto-resume prevents rapid pause/resume cycling
+            // when a strap briefly drops to 0W then spikes back above threshold.
+            autoPauseSuppressedUntilElapsed = elapsedSeconds + 3
         }
         startTimer()
     }

@@ -14,6 +14,7 @@ enum AppColor {
     static let bg2 = Color(hex: "#0F0F0F")
     static let bg3 = Color(hex: "#141414")
     static let bg4 = Color(hex: "#1A1A1A")
+    static let bgModal = Color(red: 0.03, green: 0.04, blue: 0.06)
 
     // Foreground
     static let fg0 = Color.white

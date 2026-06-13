@@ -531,7 +531,7 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
     private var lastDelegateLocationAt: Date?
 
     private let gpsStaleThresholdSeconds: TimeInterval = 10
-    private let gpsStaleCheckIntervalSeconds: TimeInterval = 2
+    private let gpsStaleCheckIntervalSeconds: TimeInterval = 1
     /// Motion fallback helps resume in tunnels / urban canyons without inventing distance.
     private var motionMovementEMA: Double = 0
     private var motionResumeDebounceCount: Int = 0

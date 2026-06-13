@@ -22,8 +22,12 @@ nonisolated struct MangoxRideAttributes: ActivityAttributes {
         var powerZoneId: Int
         /// Distance and speed labels use imperial units when true.
         var useImperial: Bool
+        /// True when the ride is auto-paused by motion/GPS heuristics.
+        var isAutoPaused: Bool
+        /// True when the user manually paused the ride.
+        var isManuallyPaused: Bool
         /// Whether the ride is paused (either manual or auto-paused).
-        var isPaused: Bool
+        var isPaused: Bool { isAutoPaused || isManuallyPaused }
     }
 
     var rideModeLabel: String

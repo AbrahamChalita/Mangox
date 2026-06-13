@@ -17,7 +17,7 @@ struct FTPTestView: View {
     var body: some View {
         FTPRefreshScope {
             ZStack {
-                Color(red: 0.03, green: 0.04, blue: 0.06)
+                AppColor.bgModal
                     .ignoresSafeArea()
 
                 VStack(spacing: 0) {

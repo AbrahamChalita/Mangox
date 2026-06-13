@@ -1443,19 +1443,26 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
     private static let coachErrorRetryActions: [SuggestedAction] = [
         SuggestedAction(label: "Try again", type: "retry"),
-        SuggestedAction(label: "Retry on cloud server", type: "escalate_cloud"),
+        SuggestedAction(label: "Retry on cloud", type: "escalate_cloud"),
     ]
 
     private static func cloudCoachErrorMessage(for error: Error, webSearch: Bool) -> String {
-        if let urlError = error as? URLError, urlError.code == .notConnectedToInternet {
-            if webSearch {
-                return
-                    "Web search needs an internet connection. Try again when you're back online, or ask a stats question I can answer on-device."
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                if webSearch {
+                    return "Web search needs an internet connection. Try again when you're back online, or ask a stats question I can answer on-device."
+                }
+                return "You're offline. Connect to reach the coach server, or ask a short stats question I can answer on-device."
+            case .timedOut, .cannotConnectToHost, .cannotFindHost:
+                return "The coaching server isn't responding right now. You can tap \"Ask on-device\" for a stats question, or try again in a moment."
+            case .badServerResponse:
+                return "The coaching server returned an unexpected response. Try again in a moment."
+            default:
+                break
             }
-            return
-                "You're offline. Connect to reach the coach server, or ask a short stats question I can answer on-device."
         }
-        return "I couldn't connect to the coaching server. Check your connection and try again."
+        return "I couldn't reach the coaching server. Tap \"Ask on-device\" for a quick stats answer, or check your connection and try again."
     }
 
     /// Persist-first commit: write to disk, then append to the in-memory array. Keeps

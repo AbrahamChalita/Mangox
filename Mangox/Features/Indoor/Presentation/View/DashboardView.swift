@@ -842,6 +842,8 @@ struct DashboardView: View {
                         compactPrimaryMetricsGrid(dense: dense)
                         compactLiveNoticeBlock(dense: dense)
                     }
+                    .opacity(workoutManager.state == .paused || workoutManager.state == .autoPaused ? 0.5 : 1.0)
+                    .animation(.easeInOut(duration: 0.2), value: workoutManager.state)
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
             } else {
@@ -850,6 +852,8 @@ struct DashboardView: View {
                 }
                 compactPowerStageCard()
                 compactPrimaryMetricsGrid(dense: dense)
+                    .opacity(workoutManager.state == .paused || workoutManager.state == .autoPaused ? 0.5 : 1.0)
+                    .animation(.easeInOut(duration: 0.2), value: workoutManager.state)
                 if showExtendedRideSecondaryUI {
                     compactRideEffortHintRow()
                 }
@@ -1362,7 +1366,7 @@ struct DashboardView: View {
                 compactPrimaryMetricTile(
                     icon: "figure.outdoor.cycle",
                     label: "CADENCE",
-                    value: workoutManager.formattedCadence,
+                    value: workoutManager.state == .idle ? "—" : workoutManager.formattedCadence,
                     unit: "rpm",
                     tint: AppColor.blue,
                     dense: dense
@@ -1370,7 +1374,7 @@ struct DashboardView: View {
                 compactPrimaryMetricTile(
                     icon: "speedometer",
                     label: "SPEED",
-                    value: workoutManager.formattedSpeed,
+                    value: workoutManager.state == .idle ? "—" : workoutManager.formattedSpeed,
                     unit: speedUnitLabel,
                     tint: AppColor.fg0,
                     dense: dense
@@ -1420,7 +1424,7 @@ struct DashboardView: View {
                 compactPrimaryMetricTile(
                     icon: "figure.outdoor.cycle",
                     label: "CADENCE",
-                    value: workoutManager.formattedCadence,
+                    value: workoutManager.state == .idle ? "—" : workoutManager.formattedCadence,
                     unit: "rpm",
                     tint: AppColor.blue,
                     dense: dense
@@ -1428,7 +1432,7 @@ struct DashboardView: View {
                 compactPrimaryMetricTile(
                     icon: "speedometer",
                     label: "SPEED",
-                    value: workoutManager.formattedSpeed,
+                    value: workoutManager.state == .idle ? "—" : workoutManager.formattedSpeed,
                     unit: speedUnitLabel,
                     tint: AppColor.fg0,
                     dense: dense
@@ -2101,7 +2105,8 @@ struct DashboardView: View {
                         progress: progress,
                         currentValue: goalCurrentValue(for: goal),
                         targetValue: goalTargetValue(for: goal),
-                        elapsedSeconds: workoutManager.elapsedSeconds
+                        elapsedSeconds: workoutManager.elapsedSeconds,
+                        isPaused: workoutManager.state == .paused || workoutManager.state == .autoPaused
                     )
                 }
             }

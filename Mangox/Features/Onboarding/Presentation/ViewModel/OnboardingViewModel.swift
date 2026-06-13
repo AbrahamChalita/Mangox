@@ -158,6 +158,7 @@ final class OnboardingViewModel {
             await MainActor.run {
                 locationGranted = locationService.isAuthorized
                 actionInProgress = false
+                advance()
             }
         }
     }
