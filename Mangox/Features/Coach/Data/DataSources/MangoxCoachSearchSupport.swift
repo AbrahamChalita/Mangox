@@ -46,6 +46,7 @@ enum MangoxCoachSearchHeuristics {
 enum MangoxPrivateCloudComputeModelFactory {
 
     /// Set to `true` once `PrivateCloudComputeLanguageModel.Extension.webSearch` ships in the public SDK.
+    /// Verified absent from the iOS 27.0 SDK swiftinterface in Xcode beta (June 2026) — re-check each beta.
     nonisolated static let sdkExposesWebSearchExtension = false
 
     /// When false, web-search turns must use Mangox Cloud (PCC cannot ground live results yet).

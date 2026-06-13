@@ -124,6 +124,12 @@ nonisolated enum PrecisionCoachInstrumentation {
         )
     }
 
+    static func coachDynamicProfileEvent(phase: String, mode: String, detail: String?) {
+        log.debug(
+            "coach_dynamic_profile phase=\(phase, privacy: .public) mode=\(mode, privacy: .public) detail=\(detail ?? "nil", privacy: .public)"
+        )
+    }
+
     static func coachFeedbackReceived(score: Int, category: String?, deliveryPath: String) {
         log.info(
             "coach_feedback score=\(score) path=\(deliveryPath, privacy: .public) category=\(category ?? "nil", privacy: .public)"

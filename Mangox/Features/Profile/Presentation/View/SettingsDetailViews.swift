@@ -9,10 +9,18 @@ struct AICoachSettingsView: View {
 
     @State private var baseURLDraft: String
     @State private var connectionPersistTask: Task<Void, Never>?
+    @State private var selectedProvider: MangoxCoachThirdPartyProvider
+    @State private var anthropicKeyDraft = ""
+    @State private var googleKeyDraft = ""
+    @State private var planCloudFallbackEnabled: Bool
 
     init() {
         let d = UserDefaults.standard
         _baseURLDraft = State(initialValue: d.string(forKey: ChatProviderDefaultsKey.baseURL) ?? "")
+        _selectedProvider = State(initialValue: MangoxCoachLanguageModelProviderSupport.selectedProvider)
+        _planCloudFallbackEnabled = State(
+            initialValue: MangoxCoachLanguageModelProviderSupport.planCloudFallbackEnabled
+        )
     }
 
     var body: some View {
@@ -61,8 +69,75 @@ struct AICoachSettingsView: View {
                 }
             }
 
+            MangoxSectionLabel(title: "Private Cloud Compute")
+            settingsSubCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Enroll in App Store Connect's free PCC tier (Small Business Program, <2M first-time downloads) so plan and coaching turns bill through Apple instead of Mangox Cloud.")
+                        .settingsFootnote()
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(MangoxPCCSupport.settingsAvailabilityLine)
+                        .settingsFootnoteMuted()
+                    if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *),
+                        let quota = MangoxPCCSupport.quotaSnapshot()
+                    {
+                        Text(quota.settingsSummary)
+                            .settingsFootnoteMuted()
+                            .foregroundStyle(quota.isLimitReached ? Color.red : Color.primary.opacity(0.6))
+                    }
+                }
+            }
+
+            MangoxSectionLabel(title: "Fallback model")
+            settingsSubCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("Provider", selection: $selectedProvider) {
+                        ForEach(MangoxCoachThirdPartyProvider.allCases, id: \.self) { provider in
+                            Text(provider.displayName).tag(provider)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .onChange(of: selectedProvider) { _, value in
+                        MangoxCoachLanguageModelProviderSupport.selectedProvider = value
+                    }
+
+                    Text(selectedProvider.settingsFootnote)
+                        .settingsFootnote()
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if selectedProvider == .anthropic {
+                        SecureField("Anthropic API key", text: $anthropicKeyDraft)
+                            .textContentType(.password)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .onChange(of: anthropicKeyDraft) { _, value in
+                                MangoxCoachLanguageModelProviderSupport.saveAPIKey(value, for: .anthropic)
+                            }
+                    } else if selectedProvider == .google {
+                        SecureField("Google AI API key", text: $googleKeyDraft)
+                            .textContentType(.password)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .onChange(of: googleKeyDraft) { _, value in
+                                MangoxCoachLanguageModelProviderSupport.saveAPIKey(value, for: .google)
+                            }
+                    }
+                }
+            }
+
+            MangoxSectionLabel(title: "Plan generation")
+            settingsSubCard {
+                Toggle("Allow Mangox Cloud fallback", isOn: $planCloudFallbackEnabled)
+                    .tint(AppColor.mango)
+                    .onChange(of: planCloudFallbackEnabled) { _, value in
+                        MangoxCoachLanguageModelProviderSupport.planCloudFallbackEnabled = value
+                    }
+                Text("When on, failed on-device or Private Cloud plan generation falls back to Mangox Cloud (`/api/generate-plan`). On by default.")
+                    .settingsFootnoteMuted()
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             // Connection fields
-            MangoxSectionLabel(title: "Connection")
+            MangoxSectionLabel(title: "Mangox Cloud")
             settingsSubCard {
                 VStack(alignment: .leading, spacing: 0) {
                     settingsField(
@@ -100,7 +175,11 @@ struct AICoachSettingsView: View {
                 }
             }
         }
-        .onAppear { syncDraftsFromAppStorage() }
+        .onAppear {
+            syncDraftsFromAppStorage()
+            anthropicKeyDraft = MangoxCoachLanguageModelProviderSupport.apiKey(for: .anthropic) ?? ""
+            googleKeyDraft = MangoxCoachLanguageModelProviderSupport.apiKey(for: .google) ?? ""
+        }
         .onDisappear { flushConnectionDraftsToAppStorage() }
     }
 

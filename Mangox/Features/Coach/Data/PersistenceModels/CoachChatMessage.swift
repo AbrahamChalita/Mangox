@@ -17,6 +17,8 @@ final class CoachChatMessage {
     var category: String?
     var tagsJSON: Data?
     var referencesJSON: Data?
+    /// JPEG bytes when the rider attached a photo to this user message.
+    var imageJPEGData: Data?
     /// Nil for rows saved before this field existed (treated as false).
     var usedWebSearch: Bool?
     var feedbackScore: Int?
@@ -34,6 +36,7 @@ final class CoachChatMessage {
         category: String?,
         tagsJSON: Data?,
         referencesJSON: Data?,
+        imageJPEGData: Data? = nil,
         usedWebSearch: Bool? = nil,
         feedbackScore: Int? = nil
     ) {
@@ -48,6 +51,7 @@ final class CoachChatMessage {
         self.category = category
         self.tagsJSON = tagsJSON
         self.referencesJSON = referencesJSON
+        self.imageJPEGData = imageJPEGData
         self.usedWebSearch = usedWebSearch
         self.feedbackScore = feedbackScore
     }
@@ -90,7 +94,8 @@ final class CoachChatMessage {
             references: references,
             usedWebSearch: showWebBadge,
             feedbackScore: feedbackScore,
-            confidence: 1.0
+            confidence: 1.0,
+            imageJPEG: imageJPEGData
         )
     }
 
@@ -112,6 +117,7 @@ final class CoachChatMessage {
             category: message.category,
             tagsJSON: tagsData,
             referencesJSON: refsData,
+            imageJPEGData: message.imageJPEG,
             usedWebSearch: message.usedWebSearch
         )
     }

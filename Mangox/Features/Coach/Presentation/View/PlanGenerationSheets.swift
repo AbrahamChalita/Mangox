@@ -114,7 +114,7 @@ struct CoachPlanConfirmBanner: View {
                         .background(AppColor.mango)
                         .foregroundStyle(.black.opacity(0.78))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .animation(MangoxMotion.micro, value: coachViewModel.planProgress)
+                        .animation(MangoxMotion.micro, value: coachViewModel.planProgress?.fraction)
                     }
                     .buttonStyle(MangoxPressStyle())
                     .disabled(coachViewModel.generatingPlan)

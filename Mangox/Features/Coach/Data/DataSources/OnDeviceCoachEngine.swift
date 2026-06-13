@@ -492,26 +492,16 @@ enum OnDeviceCoachEngine {
         CoachDynamicProfiles.makeSession(mode: mode, tools: tools, history: history)
     }
 
-    /// Streams a PCC coach reply (32K context, reasoning). Requires iOS 27 + PCC availability.
+    /// Streams a guided coach reply on any `LanguageModelSession` (PCC, third-party, etc.).
     @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
-    static func streamPCCCoachReply(
+    static func streamGuidedCoachReply(
         userMessage: String,
         trainingSnapshot: String,
-        planIntake: Bool,
         session: LanguageModelSession,
+        image: CoachUserImageAttachment? = nil,
+        logLabel: String,
         onPartial: (NarrowCoachReply.PartiallyGenerated) async -> Void
     ) async throws -> NarrowCoachReply? {
-        guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return nil }
-        guard PrivateCloudComputeLanguageModel().supportsLocale(Locale.current) else { return nil }
-
-        let composedPrompt = """
-            Training snapshot (verified Mangox data):
-            \(trainingSnapshot)
-
-            User message:
-            \(userMessage)
-            """
-
         let isFollowUp = !session.transcript.isEmpty
         let requireTools = narrowTurnRequiresTools(
             session: session,
@@ -525,7 +515,11 @@ enum OnDeviceCoachEngine {
                 isFollowUp: isFollowUp
             )
         ) {
-            composedPrompt
+            CoachFoundationModelsPromptSupport.coachTurnPrompt(
+                trainingSnapshot: trainingSnapshot,
+                userMessage: userMessage,
+                image: image
+            )
         }
 
         var lastPartial: NarrowCoachReply.PartiallyGenerated?
@@ -537,14 +531,36 @@ enum OnDeviceCoachEngine {
                 }
             }
         } catch {
-            MangoxFoundationModelsSupport.logGenerationFailure(error, label: "coach_pcc_stream")
+            MangoxFoundationModelsSupport.logGenerationFailure(error, label: logLabel)
             throw error
         }
 
-        logTranscript(session, label: "pcc_stream")
-        MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "pcc_stream")
+        logTranscript(session, label: logLabel)
+        MangoxFoundationModelsSupport.logTranscriptEntries(session, label: logLabel)
         guard let last = lastPartial else { return nil }
         return finalizedNarrowReply(from: last)
+    }
+
+    /// Streams a PCC coach reply (32K context, reasoning). Requires iOS 27 + PCC availability.
+    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
+    static func streamPCCCoachReply(
+        userMessage: String,
+        trainingSnapshot: String,
+        planIntake: Bool,
+        session: LanguageModelSession,
+        image: CoachUserImageAttachment? = nil,
+        onPartial: (NarrowCoachReply.PartiallyGenerated) async -> Void
+    ) async throws -> NarrowCoachReply? {
+        guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return nil }
+        guard PrivateCloudComputeLanguageModel().supportsLocale(Locale.current) else { return nil }
+        return try await streamGuidedCoachReply(
+            userMessage: userMessage,
+            trainingSnapshot: trainingSnapshot,
+            session: session,
+            image: image,
+            logLabel: "coach_pcc_stream",
+            onPartial: onPartial
+        )
     }
 
     /// Streams partial `NarrowCoachReply` for UI. Baseline snapshot is inlined per-turn; tools were
@@ -554,6 +570,7 @@ enum OnDeviceCoachEngine {
         userMessage: String,
         trainingSnapshot: String,
         session: LanguageModelSession,
+        image: CoachUserImageAttachment? = nil,
         onPartial: (NarrowCoachReply.PartiallyGenerated) async -> Void
     ) async throws -> NarrowCoachReply? {
         try MangoxFoundationModelsSupport.throwIfLocaleUnsupported()
@@ -580,15 +597,33 @@ enum OnDeviceCoachEngine {
             session: session,
             trainingSnapshot: trainingSnapshot
         )
-        let stream = session.streamResponse(
-            generating: NarrowCoachReply.self,
-            includeSchemaInPrompt: false,
-            options: MangoxFoundationModelsSupport.narrowGenerationOptions(
-                requireTools: requireTools,
-                isFollowUp: isFollowUp
-            )
-        ) {
-            composedPrompt
+        let stream: LanguageModelSession.ResponseStream<NarrowCoachReply>
+        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *), image != nil {
+            stream = session.streamResponse(
+                generating: NarrowCoachReply.self,
+                includeSchemaInPrompt: false,
+                options: MangoxFoundationModelsSupport.narrowGenerationOptions(
+                    requireTools: requireTools,
+                    isFollowUp: isFollowUp
+                )
+            ) {
+                CoachFoundationModelsPromptSupport.coachTurnPrompt(
+                    trainingSnapshot: trainingSnapshot,
+                    userMessage: userMessage,
+                    image: image
+                )
+            }
+        } else {
+            stream = session.streamResponse(
+                generating: NarrowCoachReply.self,
+                includeSchemaInPrompt: false,
+                options: MangoxFoundationModelsSupport.narrowGenerationOptions(
+                    requireTools: requireTools,
+                    isFollowUp: isFollowUp
+                )
+            ) {
+                composedPrompt
+            }
         }
 
         var lastPartial: NarrowCoachReply.PartiallyGenerated?
@@ -1037,9 +1072,24 @@ extension AIService {
         contextualQuickPrompts(modelContext: persistenceContext)
     }
 
+    func cachedStarterPromptAvailability(modelContext: ModelContext) -> CoachStarterPromptAvailability {
+        if let cachedStarterAvailability { return cachedStarterAvailability }
+        let ctx = cachedUserContext(modelContext: modelContext)
+        let availability = CoachStarterPromptAvailability(
+            hasRecentRide: ctx.lastRide != nil,
+            hasAnyRideData: ctx.recentWorkoutsCount > 0 || ctx.lastRide != nil,
+            hasFTPHistory: !(ctx.ftpHistory?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true),
+            hasActivePlan: !(ctx.activePlanName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true),
+            hasWhoopRecovery: ctx.whoopLinked && ctx.whoopRecoveryPercent != nil
+        )
+        cachedStarterAvailability = availability
+        return availability
+    }
+
     /// Compact context for on-device prompts (token-aware; keep under ~1.5k chars).
     func coachFactSheetText(modelContext: ModelContext) -> String {
-        let ctx = buildUserContext(modelContext: modelContext)
+        if let cachedFactSheetFull { return cachedFactSheetFull }
+        let ctx = cachedUserContext(modelContext: modelContext)
         let recovery = recoveryStatus(modelContext: modelContext)
         var lines: [String] = []
         lines.append(
@@ -1114,15 +1164,20 @@ extension AIService {
             lines.append("Recent ride history:\n\(digest)")
         }
         let joined = lines.joined(separator: "\n")
-        if joined.count > 2800 {
-            return String(joined.prefix(2800)) + "\n…"
-        }
-        return joined
+        let text =
+            if joined.count > 2800 {
+                String(joined.prefix(2800)) + "\n…"
+            } else {
+                joined
+            }
+        cachedFactSheetFull = text
+        return text
     }
 
     /// Minimal rider context when the full fact sheet is too large for the on-device context window (TN3193).
     func coachFactSheetTextCompact(modelContext: ModelContext) -> String {
-        let ctx = buildUserContext(modelContext: modelContext)
+        if let cachedFactSheetCompact { return cachedFactSheetCompact }
+        let ctx = cachedUserContext(modelContext: modelContext)
         let recovery = recoveryStatus(modelContext: modelContext)
         var lines: [String] = []
         lines.append(
@@ -1169,14 +1224,21 @@ extension AIService {
                 lines.append("Recent rides: \(firstLine)")
             }
         }
-        return lines.joined(separator: "\n")
+        let text = lines.joined(separator: "\n")
+        cachedFactSheetCompact = text
+        return text
     }
 
-    /// Chooses full vs compact snapshot using `SystemLanguageModel.tokenCount` (budget ~1900 tokens for snapshot text alone).
-    func coachTrainingSnapshotForOnDeviceNarrow(modelContext: ModelContext) async -> String {
+    /// Chooses full vs compact snapshot using token budget (on-device ~1900, PCC ~8000).
+    func coachTrainingSnapshotForCoachTurn(
+        modelContext: ModelContext,
+        usePrivateCloudCompute: Bool
+    ) async -> String {
         let full = coachFactSheetText(modelContext: modelContext)
         let compact = coachFactSheetTextCompact(modelContext: modelContext)
-        let snapshotTokenBudget = 1900
+        let snapshotTokenBudget = MangoxPCCSupport.snapshotTokenBudget(
+            usePrivateCloudCompute: usePrivateCloudCompute
+        )
         if #available(iOS 26.4, macOS 26.4, visionOS 26.4, *) {
             let model = SystemLanguageModel.default
             do {
@@ -1191,17 +1253,28 @@ extension AIService {
                     fullChosen: false, tokenEstimate: compactTok)
                 return compact
             } catch {
-                return full.count > 2400 ? compact : full
+                let charBudget = usePrivateCloudCompute ? 10_000 : 2400
+                return full.count > charBudget ? compact : full
             }
         }
-        return full.count > 2400 ? compact : full
+        let charBudget = usePrivateCloudCompute ? 10_000 : 2400
+        return full.count > charBudget ? compact : full
     }
 
-    /// Quick starters + content-tagging topic chips for the empty coach state (sequential on MainActor).
+    /// Chooses full vs compact snapshot using `SystemLanguageModel.tokenCount` (budget ~1900 tokens for snapshot text alone).
+    func coachTrainingSnapshotForOnDeviceNarrow(modelContext: ModelContext) async -> String {
+        await coachTrainingSnapshotForCoachTurn(
+            modelContext: modelContext,
+            usePrivateCloudCompute: false
+        )
+    }
+
+    /// Quick starters + content-tagging topic chips for the empty coach state.
     func loadCoachEmptyStartersContent(modelContext: ModelContext) async
         -> CoachEmptyStartersContent
     {
-        let availability = starterPromptAvailability(modelContext: modelContext)
+        await Task.yield()
+        let availability = cachedStarterPromptAvailability(modelContext: modelContext)
         let fallback = CoachEmptyStartersContent(
             prompts: contextualQuickPrompts(modelContext: modelContext),
             topicTags: []
@@ -1211,17 +1284,25 @@ extension AIService {
         OnDeviceCoachEngine.prewarmNarrowCoachIfAvailable()
 
         let factSheet = coachFactSheetText(modelContext: modelContext)
+        let contentTaggingAvailable = OnDeviceCoachEngine.isContentTaggingModelAvailable
 
-        var topicTags: [String] = []
-        if OnDeviceCoachEngine.isContentTaggingModelAvailable {
-            topicTags =
-                (try? await OnDeviceCoachEngine.generateStarterTopicTags(factSheet: factSheet))
-                ?? []
-        }
+        // Run concurrent detached tasks to keep slow AI operations off the MainActor.
+        async let topicTagsTask = Task.detached(priority: .userInitiated) {
+            if contentTaggingAvailable {
+                return (try? await OnDeviceCoachEngine.generateStarterTopicTags(factSheet: factSheet)) ?? []
+            }
+            return [String]()
+        }.value
+
+        async let promptsTask = Task.detached(priority: .userInitiated) {
+            try? await OnDeviceCoachEngine.generateQuickPrompts(factSheet: factSheet)
+        }.value
+
+        let topicTags = await topicTagsTask
+        let promptsPack = await promptsTask
 
         let prompts: [QuickPrompt]
-        do {
-            let pack = try await OnDeviceCoachEngine.generateQuickPrompts(factSheet: factSheet)
+        if let pack = promptsPack {
             let sanitizedItems = OnDeviceCoachEngine.sanitizeQuickPromptItems(pack.items).map {
                 QuickPrompt(text: $0.text, icon: $0.icon)
             }
@@ -1235,7 +1316,7 @@ extension AIService {
             } else {
                 prompts = contextualQuickPrompts(modelContext: modelContext)
             }
-        } catch {
+        } else {
             prompts = contextualQuickPrompts(modelContext: modelContext)
         }
 
@@ -1252,18 +1333,21 @@ extension AIService {
             predicate: #Predicate<Workout> { $0.statusRaw == "completed" },
             sortBy: [SortDescriptor(\.startDate, order: .reverse)]
         )
-        let rides =
-            ((try? modelContext.fetch(descriptor)) ?? [])
-            .filter(\.isValid)
-            .prefix(limit)
+        let rides = ((try? modelContext.fetch(descriptor)) ?? []).filter(\.isValid)
+        return coachWorkoutHistoryDigestForOnDeviceTools(rides: rides, limit: limit)
+    }
 
+    func coachWorkoutHistoryDigestForOnDeviceTools(
+        rides: [Workout],
+        limit: Int = 20
+    ) -> String {
         let df = DateFormatter()
         df.dateStyle = .medium
         df.timeStyle = .none
+        let slice = rides.prefix(limit)
+        if slice.isEmpty { return "No completed rides on file." }
 
-        if rides.isEmpty { return "No completed rides on file." }
-
-        return rides.map { ride in
+        return slice.map { ride in
             var line =
                 "\(df.string(from: ride.startDate)): TSS \(Int(ride.tss)), \(Int(ride.duration / 60))min"
             if ride.avgPower > 0 {
@@ -1280,7 +1364,10 @@ extension AIService {
     }
 
     func coachRiderExtendedProfileToolPayload(modelContext: ModelContext) -> String {
-        let ctx = buildUserContext(modelContext: modelContext)
+        coachRiderExtendedProfileToolPayload(userContext: cachedUserContext(modelContext: modelContext))
+    }
+
+    func coachRiderExtendedProfileToolPayload(userContext ctx: UserContext) -> String {
         var lines: [String] = []
         if let w = ctx.riderWeightKg, w > 0 {
             lines.append(String(format: "Weight: %.1f kg", w))
@@ -1313,7 +1400,10 @@ extension AIService {
     }
 
     func coachWhoopRecoveryToolPayload(modelContext: ModelContext) -> String {
-        let ctx = buildUserContext(modelContext: modelContext)
+        coachWhoopRecoveryToolPayload(userContext: cachedUserContext(modelContext: modelContext))
+    }
+
+    func coachWhoopRecoveryToolPayload(userContext ctx: UserContext) -> String {
         guard ctx.whoopLinked else {
             return "WHOOP not linked. Do not ask the athlete to connect WHOOP; use ride history, FTP, and how they feel instead."
         }
@@ -1335,7 +1425,10 @@ extension AIService {
     }
 
     func coachActivePlanContextToolPayload(modelContext: ModelContext) -> String {
-        let ctx = buildUserContext(modelContext: modelContext)
+        coachActivePlanContextToolPayload(userContext: cachedUserContext(modelContext: modelContext))
+    }
+
+    func coachActivePlanContextToolPayload(userContext ctx: UserContext) -> String {
         var lines: [String] = []
         if let plan = ctx.activePlanName, !plan.isEmpty {
             lines.append("Active plan: \(plan)")
@@ -1368,7 +1461,10 @@ extension AIService {
             sortBy: [SortDescriptor(\.startDate, order: .reverse)]
         )
         let rides = ((try? modelContext.fetch(descriptor)) ?? []).filter(\.isValid)
+        return coachDecouplingTrendToolPayload(rides: rides, rideLimit: rideLimit)
+    }
 
+    func coachDecouplingTrendToolPayload(rides: [Workout], rideLimit: Int = 12) -> String {
         let samples: [AerobicDecouplingTrend.RideSample] = rides
             .prefix(rideLimit)
             .reversed()
@@ -1420,8 +1516,15 @@ extension AIService {
             sortBy: [SortDescriptor(\.startDate, order: .reverse)]
         )
         let workouts = ((try? modelContext.fetch(descriptor)) ?? []).filter(\.isValid)
+        return coachPowerCurveSummaryToolPayload(rides: workouts, rangeDays: rangeDays)
+    }
+
+    func coachPowerCurveSummaryToolPayload(
+        rides: [Workout],
+        rangeDays: Int = PowerCurveSummary.defaultRangeDays
+    ) -> String {
         let candidates = WorkoutMetricsSnapshot.powerCurveCandidates(
-            from: workouts,
+            from: rides,
             rangeDays: rangeDays
         )
         let points = PowerCurveAnalytics.compute(from: candidates.map(\.sortedPowers))
@@ -1434,9 +1537,19 @@ extension AIService {
             sortBy: [SortDescriptor(\.startDate, order: .reverse)]
         )
         let workouts = ((try? modelContext.fetch(descriptor)) ?? []).filter(\.isValid)
-        let candidates = WorkoutMetricsSnapshot.powerCurveCandidates(
-            from: workouts,
+        return coachCriticalPowerToolPayload(
+            rides: workouts,
             rangeDays: PowerCurveSummary.defaultRangeDays
+        )
+    }
+
+    func coachCriticalPowerToolPayload(
+        rides: [Workout],
+        rangeDays: Int = PowerCurveSummary.defaultRangeDays
+    ) -> String {
+        let candidates = WorkoutMetricsSnapshot.powerCurveCandidates(
+            from: rides,
+            rangeDays: rangeDays
         )
         let points = PowerCurveAnalytics.compute(from: candidates.map(\.sortedPowers))
         guard let fit = CriticalPowerModel.fit(from: points) else {
@@ -1473,13 +1586,48 @@ extension AIService {
     }
 
     func starterPromptAvailability(modelContext: ModelContext) -> CoachStarterPromptAvailability {
-        let ctx = buildUserContext(modelContext: modelContext)
-        return CoachStarterPromptAvailability(
-            hasRecentRide: ctx.lastRide != nil,
-            hasAnyRideData: ctx.recentWorkoutsCount > 0 || ctx.lastRide != nil,
-            hasFTPHistory: !(ctx.ftpHistory?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true),
-            hasActivePlan: !(ctx.activePlanName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true),
-            hasWhoopRecovery: ctx.whoopLinked && ctx.whoopRecoveryPercent != nil
+        cachedStarterPromptAvailability(modelContext: modelContext)
+    }
+
+    /// Builds all on-device tool digests in one pass (single workout fetch + cached rider context).
+    func buildOnDeviceToolDigestBundle(modelContext: ModelContext) -> CoachOnDeviceToolDigestBundle {
+        let ctx = cachedUserContext(modelContext: modelContext)
+
+        let workoutDescriptor = FetchDescriptor<Workout>(
+            predicate: #Predicate<Workout> { $0.statusRaw == "completed" },
+            sortBy: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        let completedRides = ((try? modelContext.fetch(workoutDescriptor)) ?? []).filter(\.isValid)
+
+        let recentWorkouts = coachWorkoutHistoryDigestForOnDeviceTools(
+            rides: completedRides,
+            limit: 20
+        )
+        let riderExtended = coachRiderExtendedProfileToolPayload(userContext: ctx)
+        let ftpHistory = coachFTPTestHistoryToolPayload()
+        let whoopRecovery = coachWhoopRecoveryToolPayload(userContext: ctx)
+        let activePlan = coachActivePlanContextToolPayload(userContext: ctx)
+        let decouplingTrend = coachDecouplingTrendToolPayload(rides: completedRides, rideLimit: 12)
+        let powerCurveSummary = coachPowerCurveSummaryToolPayload(
+            rides: completedRides,
+            rangeDays: PowerCurveSummary.defaultRangeDays
+        )
+        let criticalPower = coachCriticalPowerToolPayload(
+            rides: completedRides,
+            rangeDays: PowerCurveSummary.defaultRangeDays
+        )
+        let planForwardDailyTSS = coachPlanForwardDailyTSSForTools(modelContext: modelContext)
+
+        return CoachOnDeviceToolDigestBundle(
+            recentWorkouts: recentWorkouts,
+            riderExtended: riderExtended,
+            ftpHistory: ftpHistory,
+            whoopRecovery: whoopRecovery,
+            activePlan: activePlan,
+            decouplingTrend: decouplingTrend,
+            powerCurveSummary: powerCurveSummary,
+            criticalPower: criticalPower,
+            planForwardDailyTSS: planForwardDailyTSS
         )
     }
 

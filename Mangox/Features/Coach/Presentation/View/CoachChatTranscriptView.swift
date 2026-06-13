@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// Self-contained coach transcript: message list, empty starters, streaming row, and scroll pinning.
-/// Uses a single `VStack` subtree (no empty ↔ lazy branch swap) plus one debounced pin coordinator.
+/// Self-contained coach transcript: message list, empty starters, and streaming row.
+/// Streaming stick-to-bottom is delegated to `defaultScrollAnchor(.bottom, for: .sizeChanges)` so
+/// per-token updates never invalidate this view; explicit pins only fire on discrete events
+/// (send, appear, composer focus, plan banners).
 struct CoachChatTranscriptView: View {
     @Environment(CoachViewModel.self) private var coachViewModel
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
@@ -20,10 +22,7 @@ struct CoachChatTranscriptView: View {
     let onRetryCloud: () -> Void
     let onFeedback: (UUID, Int) -> Void
 
-    @State private var viewportHeight: CGFloat = 0
-    @State private var pendingBubbleHeight: CGFloat = 0
     @State private var scrollPosition = ScrollPosition()
-    @State private var stickToBottom = true
     @State private var pinTask: Task<Void, Never>?
 
     private static let bottomAnchorID = "coach-transcript-bottom"
@@ -40,15 +39,9 @@ struct CoachChatTranscriptView: View {
         coachViewModel.messages.last { $0.role == .assistant }?.id
     }
 
-    private var latestAssistantReplyPanelSignature: Int {
-        guard let last = coachViewModel.messages.last(where: { $0.role == .assistant }) else { return 0 }
-        let followUp = last.followUpQuestion?.isEmpty == false ? 1 : 0
-        return last.suggestedActions.count + last.followUpBlocks.count + followUp
-    }
-
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 2) {
+            LazyVStack(alignment: .leading, spacing: 2) {
                 if showEmptyState {
                     emptyState
                         .frame(maxWidth: .infinity)
@@ -60,19 +53,20 @@ struct CoachChatTranscriptView: View {
                         )
                 }
 
-                ForEach(coachViewModel.messages) { message in
-                    let index = coachViewModel.messages.firstIndex(where: { $0.id == message.id }) ?? 0
-                    CoachMessageRow(
+                let messages = coachViewModel.messages
+                let latestAssistantID = latestAssistantMessageID
+                ForEach(messages) { message in
+                    CoachMessageRowEquatableContainer(
                         message: message,
                         isLatestAssistant: message.role == .assistant
-                            && message.id == latestAssistantMessageID,
+                            && message.id == latestAssistantID,
                         bubbleMaxWidth: bubbleMaxWidth,
-                        suggestionsInteractive: !coachViewModel.isLoading,
+                        suggestionsInteractive: message.id == latestAssistantID
+                            ? !coachViewModel.isLoading
+                            : true,
                         sentChipKey: sentChipKey,
                         showTimestamp: CoachMessageTimestampFormatting.shouldShow(
-                            previousTimestamp: index > 0
-                                ? coachViewModel.messages[index - 1].timestamp
-                                : nil,
+                            previousTimestamp: previousTimestamp(for: message, in: messages),
                             current: message.timestamp
                         ),
                         onRetry: onRetry,
@@ -81,25 +75,12 @@ struct CoachChatTranscriptView: View {
                         onSuggestedAction: { onSuggestedAction(message.id, $0) },
                         onFollowUpBatchComplete: onSend
                     )
-                    .transition(
-                        .asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                            removal: .opacity
-                        )
-                    )
+                    .equatable()
                 }
 
-                if coachViewModel.generatingPlan && !coachViewModel.isLoading {
-                    CoachStreamStatusRow(
-                        text: coachViewModel.planProgress?.message ?? "Building your plan…",
-                        style: .cloud
-                    )
-                    .id("planGen")
-                }
+                CoachPlanGenerationStatusSection()
 
-                CoachStreamingSection { pendingBubbleHeight = $0 }
-
-                Spacer(minLength: 0)
+                CoachStreamingSection(bubbleMaxWidth: bubbleMaxWidth)
 
                 Color.clear
                     .frame(height: bottomSpacerHeight)
@@ -113,93 +94,23 @@ struct CoachChatTranscriptView: View {
             .padding(.top, showEmptyState ? 0 : 12)
             .padding(.bottom, 16)
             .scrollTargetLayout()
-            .frame(
-                maxWidth: .infinity,
-                minHeight: max(viewportHeight, 1),
-                alignment: .top
-            )
         }
-        .background {
-            GeometryReader { proxy in
-                Color.clear
-                    .onAppear { viewportHeight = proxy.size.height }
-                    .onChange(of: proxy.size.height) { _, newValue in
-                        viewportHeight = newValue
-                    }
-            }
-        }
-        .defaultScrollAnchor(.bottom)
+        // The system keeps the transcript pinned while streamed content grows, and stops
+        // following as soon as the user scrolls away — no manual offset bookkeeping.
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .scrollBounceBehavior(.always, axes: .vertical)
         .scrollDismissesKeyboard(.interactively)
         .scrollIndicators(.hidden)
         .scrollPosition($scrollPosition)
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height
-            let contentBottom = geometry.contentSize.height
-            return contentBottom - visibleBottom <= 80
-        } action: { _, isNearBottom in
-            if isNearBottom {
-                stickToBottom = true
-            }
-        }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 8)
-                .onChanged { value in
-                    guard abs(value.translation.height) > abs(value.translation.width) else { return }
-                    stickToBottom = false
-                }
-        )
         .onAppear {
             if !coachViewModel.messages.isEmpty || coachViewModel.isLoading {
                 schedulePinToBottom(animated: false)
             }
         }
-        .onChange(of: viewportHeight) { _, height in
-            guard height > 0, stickToBottom else { return }
-            schedulePinToBottom(animated: false)
-        }
         .onChange(of: coachViewModel.messages.count) { oldCount, newCount in
             guard newCount > oldCount else { return }
-            stickToBottom = true
-            schedulePinToBottom(animated: true)
-        }
-        .onChange(of: coachViewModel.isLoading) { _, loading in
-            if loading {
-                stickToBottom = true
-                schedulePinToBottom(animated: false)
-            } else {
-                schedulePinToBottom(animated: true)
-            }
-        }
-        .onChange(of: coachViewModel.streamDraftText) { _, newValue in
-            guard stickToBottom, !newValue.isEmpty else { return }
-            schedulePinToBottom(animated: false, debounceMs: 120)
-        }
-        .onChange(of: pendingBubbleHeight) { _, _ in
-            guard stickToBottom else { return }
-            schedulePinToBottom(animated: false, debounceMs: 80)
-        }
-        .onChange(of: coachViewModel.streamDelivery) { _, _ in
-            guard stickToBottom, coachViewModel.isLoading else { return }
             schedulePinToBottom(animated: false)
-        }
-        .onChange(of: coachViewModel.streamPartialTags) { _, _ in
-            guard stickToBottom, coachViewModel.isLoading else { return }
-            schedulePinToBottom(animated: false, debounceMs: 100)
-        }
-        .onChange(of: coachViewModel.streamRouteStatus) { _, _ in
-            guard stickToBottom, coachViewModel.isLoading else { return }
-            schedulePinToBottom(animated: false)
-        }
-        .onChange(of: latestAssistantReplyPanelSignature) { _, _ in
-            guard stickToBottom else { return }
-            schedulePinToBottom(animated: true, debounceMs: 120)
-        }
-        .onChange(of: coachViewModel.generatingPlan) { _, generating in
-            if generating { schedulePinToBottom(animated: true) }
-        }
-        .onChange(of: coachViewModel.planConfirmationDraft?.id) { _, _ in
-            schedulePinToBottom(animated: true)
         }
         .onChange(of: coachViewModel.planSaveCelebration?.planID) { _, _ in
             schedulePinToBottom(animated: true)
@@ -212,21 +123,19 @@ struct CoachChatTranscriptView: View {
         }
         .onChange(of: composerFocusScrollNonce) { _, _ in
             guard !coachViewModel.messages.isEmpty else { return }
-            stickToBottom = true
             schedulePinToBottom(animated: true)
         }
         .animation(
             CoachChatMotionSupport.animation(reduceMotion: accessibilityReduceMotion, MangoxMotion.smooth),
             value: showEmptyState
         )
-        .animation(
-            CoachChatMotionSupport.animation(reduceMotion: accessibilityReduceMotion, MangoxMotion.snappy),
-            value: coachViewModel.messages.count
-        )
-        .animation(
-            CoachChatMotionSupport.animation(reduceMotion: accessibilityReduceMotion, MangoxMotion.snappy),
-            value: coachViewModel.isLoading
-        )
+    }
+
+    private func previousTimestamp(for message: ChatMessage, in messages: [ChatMessage]) -> Date? {
+        guard let index = messages.firstIndex(where: { $0.id == message.id }), index > 0 else {
+            return nil
+        }
+        return messages[index - 1].timestamp
     }
 
     // MARK: - Empty state
@@ -315,26 +224,22 @@ struct CoachChatTranscriptView: View {
         }
         .padding(18)
         .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(AppColor.mango.opacity(0.2), lineWidth: 1)
         )
     }
 
     // MARK: - Scroll pinning
 
-    /// Debounced scroll-to-bottom so layout finishes before we anchor (fixes first-message stuck-at-top).
-    private func schedulePinToBottom(animated: Bool = false, debounceMs: UInt64 = 0) {
-        guard stickToBottom else { return }
+    /// One-shot scroll-to-bottom for discrete events (send, appear, plan banners). Yields once so
+    /// layout finishes before anchoring (fixes first-message stuck-at-top).
+    private func schedulePinToBottom(animated: Bool = false) {
         pinTask?.cancel()
         pinTask = Task { @MainActor in
-            if debounceMs > 0 {
-                try? await Task.sleep(nanoseconds: debounceMs * 1_000_000)
-            }
-            guard !Task.isCancelled, stickToBottom else { return }
             await Task.yield()
-            guard !Task.isCancelled, stickToBottom else { return }
+            guard !Task.isCancelled else { return }
 
             let pin = {
                 scrollPosition.scrollTo(id: Self.bottomAnchorID, anchor: .bottom)
@@ -350,6 +255,61 @@ struct CoachChatTranscriptView: View {
         }
     }
 
+}
+
+/// Isolated from the message list so `planProgress` ticks do not re-layout committed bubbles.
+private struct CoachPlanGenerationStatusSection: View {
+    @Environment(CoachViewModel.self) private var coachViewModel
+
+    var body: some View {
+        if coachViewModel.generatingPlan && !coachViewModel.isLoading {
+            CoachStreamStatusRow(
+                text: coachViewModel.planProgress?.message ?? "Building your plan…",
+                style: .cloud
+            )
+            .id("planGen")
+        }
+    }
+}
+
+/// Skips body recomputation when unrelated transcript state changes (e.g. plan progress).
+private struct CoachMessageRowEquatableContainer: View, Equatable {
+    let message: ChatMessage
+    let isLatestAssistant: Bool
+    let bubbleMaxWidth: CGFloat
+    let suggestionsInteractive: Bool
+    let sentChipKey: String?
+    let showTimestamp: Bool
+    let onRetry: () -> Void
+    let onRetryCloud: () -> Void
+    let onFeedback: (Int) -> Void
+    let onSuggestedAction: (SuggestedAction) -> Void
+    let onFollowUpBatchComplete: (String) -> Void
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.message == rhs.message
+            && lhs.isLatestAssistant == rhs.isLatestAssistant
+            && lhs.bubbleMaxWidth == rhs.bubbleMaxWidth
+            && lhs.suggestionsInteractive == rhs.suggestionsInteractive
+            && lhs.sentChipKey == rhs.sentChipKey
+            && lhs.showTimestamp == rhs.showTimestamp
+    }
+
+    var body: some View {
+        CoachMessageRow(
+            message: message,
+            isLatestAssistant: isLatestAssistant,
+            bubbleMaxWidth: bubbleMaxWidth,
+            suggestionsInteractive: suggestionsInteractive,
+            sentChipKey: sentChipKey,
+            showTimestamp: showTimestamp,
+            onRetry: onRetry,
+            onRetryCloud: onRetryCloud,
+            onFeedback: onFeedback,
+            onSuggestedAction: onSuggestedAction,
+            onFollowUpBatchComplete: onFollowUpBatchComplete
+        )
+    }
 }
 
 // MARK: - Context window banner

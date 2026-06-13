@@ -78,6 +78,7 @@ enum OnDevicePlanGenerator {
         inputs: PlanInputs,
         factSheet: String,
         ftp: Int,
+        tools: [any Tool] = [],
         onProgress: @escaping @Sendable (PlanGenerationProgress) -> Void
     ) async throws -> TrainingPlan {
         try MangoxFoundationModelsSupport.throwIfLocaleUnsupported()
@@ -85,6 +86,10 @@ enum OnDevicePlanGenerator {
         let weekCount = plannedWeekCount(inputs: inputs)
         let usePCC = MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable
             && MangoxFoundationModelsSupport.privateCloudComputeSupportsCurrentLocale()
+
+        if usePCC {
+            try MangoxPCCSupport.throwIfPlanGenerationQuotaBlocked(estimatedPCCCalls: weekCount + 1)
+        }
 
         onProgress(
             PlanGenerationProgress(
@@ -95,18 +100,115 @@ enum OnDevicePlanGenerator {
             )
         )
 
-        let session: LanguageModelSession
-        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *), usePCC {
-            session = CoachDynamicProfiles.makeSession(mode: .planDeep, tools: [])
-        } else {
-            let model = MangoxFoundationModelsSupport.coachSystemLanguageModel()
-            session = LanguageModelSession(
-                model: model,
-                tools: [],
-                instructions: Instructions(planInstructions(usePCC: false))
+        do {
+            let session = makePlanSession(usePCC: usePCC, tools: tools)
+            return try await runGeneration(
+                session: session,
+                inputs: inputs,
+                factSheet: factSheet,
+                ftp: ftp,
+                weekCount: weekCount,
+                onProgress: onProgress
+            )
+        } catch {
+            guard usePCC, MangoxPCCSupport.shouldFallbackToOnDeviceAfterPCCFailure(error) else { throw error }
+            logger.info("PCC plan generation failed — retrying on-device: \(error.localizedDescription, privacy: .public)")
+            onProgress(
+                PlanGenerationProgress(
+                    phase: "skeleton",
+                    message: "Private Cloud unavailable — continuing on-device…",
+                    current: nil,
+                    total: nil
+                )
+            )
+            await Task.yield()
+            let session = makeOnDevicePlanSession(tools: tools)
+            return try await runGeneration(
+                session: session,
+                inputs: inputs,
+                factSheet: factSheet,
+                ftp: ftp,
+                weekCount: weekCount,
+                onProgress: onProgress
             )
         }
+    }
 
+    @MainActor
+    static func regenerateWeek(
+        inputs: PlanInputs,
+        plan: TrainingPlan,
+        weekNumber: Int,
+        factSheet: String,
+        ftp: Int,
+        tools: [any Tool] = []
+    ) async throws -> [PlanDay] {
+        try MangoxFoundationModelsSupport.throwIfLocaleUnsupported()
+        guard let skelWeek = plan.weeks.first(where: { $0.weekNumber == weekNumber }) else {
+            throw OnDevicePlanGeneratorError.weekNotFound
+        }
+
+        let usePCC = MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable
+        if usePCC {
+            try MangoxPCCSupport.throwIfPlanGenerationQuotaBlocked(estimatedPCCCalls: 1)
+        }
+
+        do {
+            let session = makePlanSession(usePCC: usePCC, tools: tools)
+            return try await runWeekRegeneration(
+                session: session,
+                inputs: inputs,
+                plan: plan,
+                weekNumber: weekNumber,
+                skelWeek: skelWeek,
+                ftp: ftp
+            )
+        } catch {
+            guard usePCC, MangoxPCCSupport.shouldFallbackToOnDeviceAfterPCCFailure(error) else { throw error }
+            logger.info("PCC week regeneration failed — retrying on-device: \(error.localizedDescription, privacy: .public)")
+            await Task.yield()
+            let session = makeOnDevicePlanSession(tools: tools)
+            return try await runWeekRegeneration(
+                session: session,
+                inputs: inputs,
+                plan: plan,
+                weekNumber: weekNumber,
+                skelWeek: skelWeek,
+                ftp: ftp
+            )
+        }
+    }
+
+    // MARK: - Session factories
+
+    @MainActor
+    private static func makePlanSession(usePCC: Bool, tools: [any Tool]) -> LanguageModelSession {
+        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *), usePCC {
+            return CoachDynamicProfiles.makeSession(mode: .planDeep, tools: tools)
+        }
+        return makeOnDevicePlanSession(tools: tools)
+    }
+
+    @MainActor
+    private static func makeOnDevicePlanSession(tools: [any Tool]) -> LanguageModelSession {
+        LanguageModelSession(
+            model: MangoxFoundationModelsSupport.coachSystemLanguageModel(),
+            tools: tools,
+            instructions: Instructions(planInstructions(usePCC: false))
+        )
+    }
+
+    // MARK: - Generation core
+
+    @MainActor
+    private static func runGeneration(
+        session: LanguageModelSession,
+        inputs: PlanInputs,
+        factSheet: String,
+        ftp: Int,
+        weekCount: Int,
+        onProgress: @escaping @Sendable (PlanGenerationProgress) -> Void
+    ) async throws -> TrainingPlan {
         let skeletonPrompt = skeletonPromptText(
             inputs: inputs,
             factSheet: factSheet,
@@ -174,30 +276,14 @@ enum OnDevicePlanGenerator {
     }
 
     @MainActor
-    static func regenerateWeek(
+    private static func runWeekRegeneration(
+        session: LanguageModelSession,
         inputs: PlanInputs,
         plan: TrainingPlan,
         weekNumber: Int,
-        factSheet: String,
+        skelWeek: PlanWeek,
         ftp: Int
     ) async throws -> [PlanDay] {
-        try MangoxFoundationModelsSupport.throwIfLocaleUnsupported()
-        guard let skelWeek = plan.weeks.first(where: { $0.weekNumber == weekNumber }) else {
-            throw OnDevicePlanGeneratorError.weekNotFound
-        }
-
-        let usePCC = MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable
-        let session: LanguageModelSession
-        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *), usePCC {
-            session = CoachDynamicProfiles.makeSession(mode: .planDeep, tools: [])
-        } else {
-            session = LanguageModelSession(
-                model: MangoxFoundationModelsSupport.coachSystemLanguageModel(),
-                tools: [],
-                instructions: Instructions(planInstructions(usePCC: false))
-            )
-        }
-
         let skeleton = OnDevicePlanSkeleton(
             reasoning: "regenerate week",
             planName: plan.name,
@@ -448,12 +534,17 @@ enum OnDevicePlanGeneratorError: Error, LocalizedError {
     case emptySkeleton
     case weekNotFound
     case unavailable
+    case cloudFallbackDisabled
+    case quotaLimitReached(String)
 
     var errorDescription: String? {
         switch self {
         case .emptySkeleton: return "Plan skeleton was empty."
         case .weekNotFound: return "Week not found in plan."
         case .unavailable: return "On-device plan generation is not available."
+        case .cloudFallbackDisabled:
+            return "Plan generation couldn't complete on-device. Enable **Allow Mangox Cloud fallback** in Settings → AI Coach, or try again after closing other coach sessions."
+        case .quotaLimitReached(let message): return message
         }
     }
 }

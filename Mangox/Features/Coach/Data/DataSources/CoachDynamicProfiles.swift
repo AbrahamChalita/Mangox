@@ -116,6 +116,7 @@ private struct MangoxCoachAgentProfile: LanguageModelSession.DynamicProfile {
         .model(MangoxFoundationModelsSupport.coachSystemLanguageModel())
         .samplingMode(.greedy)
         .toolCallingMode(.allowed)
+        .mangoxCoachInstrumentation(mode: .statsNarrow)
     }
 
     private var planDeepProfile: some LanguageModelSession.DynamicProfile {
@@ -128,6 +129,7 @@ private struct MangoxCoachAgentProfile: LanguageModelSession.DynamicProfile {
         .reasoningLevel(.deep)
         .toolCallingMode(.allowed)
         .historyTransform(MangoxFoundationModelsSupport.coachHistoryTransform)
+        .mangoxCoachInstrumentation(mode: .planDeep)
     }
 
     private var generalCoachProfile: some LanguageModelSession.DynamicProfile {
@@ -140,6 +142,7 @@ private struct MangoxCoachAgentProfile: LanguageModelSession.DynamicProfile {
         .reasoningLevel(.moderate)
         .toolCallingMode(.allowed)
         .historyTransform(MangoxFoundationModelsSupport.coachHistoryTransform)
+        .mangoxCoachInstrumentation(mode: .generalCoach)
     }
 
     private var pccWebSearchProfile: some LanguageModelSession.DynamicProfile {
@@ -152,5 +155,6 @@ private struct MangoxCoachAgentProfile: LanguageModelSession.DynamicProfile {
         .reasoningLevel(.deep)
         .toolCallingMode(.allowed)
         .historyTransform(MangoxFoundationModelsSupport.coachHistoryTransform)
+        .mangoxCoachInstrumentation(mode: .pccWebSearch)
     }
 }

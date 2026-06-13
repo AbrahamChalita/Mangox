@@ -1,8 +1,28 @@
-# How Mangox connected to AI models (archived)
+# How Mangox connects to AI models
 
-This document describes the **removed** AI integration as it existed in this repository. It is kept for historical reference only.
+> **Current (2026):** Coach AI runs **on-device + Private Cloud Compute first**, with **Mangox Cloud** (`mangox-backend/`, sibling repo) as fallback for web search and heavy plan generation. See `Docs/FOUNDATION_MODELS_MIGRATION.md` for the migration plan.
 
-## Architecture overview
+## Current architecture (brief)
+
+| Layer | Role |
+|-------|------|
+| **iOS `AIService`** | Routes coach turns: on-device narrow → PCC → third-party LM → Mangox Cloud |
+| **`mangox-backend`** | Hono API on Cloudflare Workers — `/api/chat/stream`, `/api/generate-plan/stream`, etc. |
+| **`Mangox/backend/`** | Dev-only Zod/schema helpers (not the live API) |
+
+**Client base URL:** Settings → Mangox Cloud, or UserDefaults `AIChatProviderBaseURL` / `MangoxAPIBaseURL` in Info.plist. Production default is set in `MangoxBackendDefaults.productionBaseURL`.
+
+**Transport:** HTTP POST + SSE. No WebSockets. Stream fallbacks to blocking POST only when the stream never delivered model output.
+
+**Capabilities probe:** `GET {baseURL}/api/coach/capabilities` — reports web search, LLM chain, and context decryption availability.
+
+---
+
+## Archived: removed Railway-era integration
+
+The sections below describe the **removed** AI integration as it existed in this repository. Kept for historical reference only.
+
+## Architecture overview (archived)
 
 The **iOS app never called OpenAI, Groq, or Anthropic directly.** All model calls went through a **Cloudflare Worker** (`backend/worker.ts`) deployed separately (e.g. Railway default URL `https://mangox-backend-production.up.railway.app`). API keys lived only in server environment variables.
 

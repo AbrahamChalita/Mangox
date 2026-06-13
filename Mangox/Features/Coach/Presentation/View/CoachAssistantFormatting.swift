@@ -10,6 +10,29 @@ enum CoachAssistantFormatting {
         return attributedContentForStreaming(from: raw, highlightMetrics: highlight)
     }
 
+    /// Memoized variant for committed bubbles: markdown parsing + metric regex run once per
+    /// message instead of on every transcript invalidation.
+    static func cachedAttributedContent(from raw: String, category: String? = nil) -> AttributedString {
+        let key = "\(category ?? "")\u{1F}\(raw)" as NSString
+        if let hit = attributedContentCache.object(forKey: key) {
+            return hit.value
+        }
+        let value = attributedContent(from: raw, category: category)
+        attributedContentCache.setObject(AttributedStringBox(value), forKey: key)
+        return value
+    }
+
+    private final class AttributedStringBox {
+        let value: AttributedString
+        init(_ value: AttributedString) { self.value = value }
+    }
+
+    private static let attributedContentCache: NSCache<NSString, AttributedStringBox> = {
+        let cache = NSCache<NSString, AttributedStringBox>()
+        cache.countLimit = 256
+        return cache
+    }()
+
     /// Streaming / in-progress text — same markdown path as the final bubble, without metric tinting.
     static func attributedContentForStreaming(from raw: String, highlightMetrics: Bool = false) -> AttributedString {
         let normalized = normalizeLeadingAsteriskBullets(sanitizePartialMarkdown(raw))
@@ -75,42 +98,36 @@ enum CoachAssistantFormatting {
         let pattern =
             #"\b(?:FTP\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:W|TSS|tss|bpm|BPM))\b|\b\d+(?:\.\d+)?\s*%\b"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return attr }
-        let boldRanges = markdownBoldRanges(in: source)
+        
+        let plainString = String(attr.characters)
+        let nsString = plainString as NSString
         var result = attr
-        let ns = source as NSString
-        for match in regex.matches(in: source, range: NSRange(location: 0, length: ns.length)) {
-            guard let swiftRange = Range(match.range, in: source) else { continue }
-            if overlapsMarkdownBold(swiftRange, boldRanges: boldRanges) { continue }
-            guard let start = AttributedString.Index(swiftRange.lowerBound, within: result),
-                  let end = AttributedString.Index(swiftRange.upperBound, within: result)
-            else { continue }
+        
+        for match in regex.matches(in: plainString, range: NSRange(location: 0, length: nsString.length)) {
+            guard let swiftRange = Range(match.range, in: plainString) else { continue }
+            
+            // Map character offsets from plainString to result indices safely
+            let startOffset = plainString.distance(from: plainString.startIndex, to: swiftRange.lowerBound)
+            let endOffset = plainString.distance(from: plainString.startIndex, to: swiftRange.upperBound)
+            
+            let startIdx = result.characters.index(result.startIndex, offsetBy: startOffset)
+            let endIdx = result.characters.index(result.startIndex, offsetBy: endOffset)
+            
+            // Avoid override or double emphasis if metric is already bold in markdown
+            let sub = result[startIdx..<endIdx]
+            let isAlreadyBold = sub.runs.contains { run in
+                if let intent = run.inlinePresentationIntent {
+                    return intent.contains(.stronglyEmphasized)
+                }
+                return false
+            }
+            if isAlreadyBold { continue }
+            
             var container = AttributeContainer()
             container.foregroundColor = Color.orange.opacity(0.95)
             container.inlinePresentationIntent = .stronglyEmphasized
-            result[start..<end].mergeAttributes(container)
+            result[startIdx..<endIdx].mergeAttributes(container)
         }
         return result
-    }
-
-    private static func markdownBoldRanges(in source: String) -> [Range<String.Index>] {
-        var ranges: [Range<String.Index>] = []
-        var searchStart = source.startIndex
-        while searchStart < source.endIndex {
-            guard let open = source.range(of: "**", range: searchStart..<source.endIndex) else { break }
-            let afterOpen = open.upperBound
-            guard let close = source.range(of: "**", range: afterOpen..<source.endIndex) else { break }
-            ranges.append(open.lowerBound..<close.upperBound)
-            searchStart = close.upperBound
-        }
-        return ranges
-    }
-
-    private static func overlapsMarkdownBold(
-        _ range: Range<String.Index>,
-        boldRanges: [Range<String.Index>]
-    ) -> Bool {
-        boldRanges.contains { bold in
-            range.lowerBound < bold.upperBound && range.upperBound > bold.lowerBound
-        }
     }
 }

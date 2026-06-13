@@ -153,10 +153,11 @@ enum FoundationModelsCoachEvaluation {
     }
 }
 
-/// Coach message delivery tier (on-device → PCC → Mangox cloud).
+/// Coach message delivery tier (on-device → PCC → third-party LanguageModel → Mangox cloud).
 enum CoachDeliveryPath: String, Equatable, Sendable {
     case onDeviceNarrow
     case privateCloudCompute
+    case thirdPartyLanguageModel
     case mangoxCloudBackend
 
     /// Maps a persisted assistant `category` back to a delivery path for telemetry.
@@ -166,6 +167,8 @@ enum CoachDeliveryPath: String, Equatable, Sendable {
             return .onDeviceNarrow
         case "pcc_coach", "plan_intake", "plan_analysis", "pcc_web_search":
             return .privateCloudCompute
+        case "third_party_coach":
+            return .thirdPartyLanguageModel
         default:
             return .mangoxCloudBackend
         }

@@ -514,7 +514,8 @@ enum SimulatorDemoDataSeeder {
                     references: [],
                     usedWebSearch: false,
                     feedbackScore: nil,
-                    confidence: 1
+                    confidence: 1,
+                    imageJPEG: nil
                 ),
                 session: primary
             ),
@@ -537,7 +538,8 @@ enum SimulatorDemoDataSeeder {
                     references: [],
                     usedWebSearch: false,
                     feedbackScore: nil,
-                    confidence: 0.96
+                    confidence: 0.96,
+                    imageJPEG: nil
                 ),
                 session: primary
             )
@@ -565,7 +567,8 @@ enum SimulatorDemoDataSeeder {
                     references: [],
                     usedWebSearch: false,
                     feedbackScore: nil,
-                    confidence: 1
+                    confidence: 1,
+                    imageJPEG: nil
                 ),
                 session: recovery
             ),
@@ -587,7 +590,8 @@ enum SimulatorDemoDataSeeder {
                     references: [],
                     usedWebSearch: false,
                     feedbackScore: nil,
-                    confidence: 0.92
+                    confidence: 0.92,
+                    imageJPEG: nil
                 ),
                 session: recovery
             )

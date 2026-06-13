@@ -30,18 +30,20 @@ protocol AIServiceProtocol: AnyObject {
 
     func coachFactSheetText() -> String
     func hasReachedFreeLimit(isPro: Bool) -> Bool
-    func canSendCoachMessage(_ text: String, isPro: Bool, forcePlanIntake: Bool) -> Bool
+    func canSendCoachMessage(_ text: String, isPro: Bool, forcePlanIntake: Bool, hasImage: Bool) -> Bool
+    func instantCoachEmptyStartersContent() -> CoachEmptyStartersContent
     func loadCoachEmptyStartersContent() async -> CoachEmptyStartersContent
     func contextualQuickPrompts() -> [QuickPrompt]
 
     func sendMessage(
         _ text: String,
         isPro: Bool,
-        forcePlanIntake: Bool
+        forcePlanIntake: Bool,
+        image: CoachUserImageAttachment?
     ) async
 
     @discardableResult
-    func prepareOutgoingMessage(_ text: String, isPro: Bool, forcePlanIntake: Bool) -> Bool
+    func prepareOutgoingMessage(_ text: String, isPro: Bool, forcePlanIntake: Bool, hasImage: Bool) -> Bool
 
     func cancelActiveChatTurn()
 
@@ -67,6 +69,7 @@ protocol AIServiceProtocol: AnyObject {
     func createNewSession()
     func switchToSession(_ sessionID: UUID)
     func deleteSession(_ sessionID: UUID)
+    func deleteSessions(_ sessionIDs: Set<UUID>)
     func fetchSessions() -> [ChatSession]
     func clearMessages()
     func dismissError()

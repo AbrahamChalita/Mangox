@@ -18,8 +18,10 @@ struct ChatMessage: Identifiable, Equatable, Sendable {
     let usedWebSearch: Bool
     var feedbackScore: Int?
     var confidence: Double
+    /// JPEG bytes for an attached photo (head unit, fit photo, race profile). Nil for text-only turns.
+    let imageJPEG: Data?
 
-    static func user(_ text: String) -> ChatMessage {
+    static func user(_ text: String, imageJPEG: Data? = nil) -> ChatMessage {
         ChatMessage(
             id: UUID(),
             role: .user,
@@ -34,7 +36,8 @@ struct ChatMessage: Identifiable, Equatable, Sendable {
             references: [],
             usedWebSearch: false,
             feedbackScore: nil,
-            confidence: 1.0
+            confidence: 1.0,
+            imageJPEG: imageJPEG
         )
     }
 }

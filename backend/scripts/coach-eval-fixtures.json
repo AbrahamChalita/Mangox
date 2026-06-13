@@ -1,0 +1,11 @@
+{
+  "description": "Routing and validation fixtures mirrored from FoundationModelsCoachEvaluation.swift for fm CLI / external harnesses.",
+  "routingFixtures": [
+    { "name": "stats_tss", "message": "What's my TSS this week?", "expectOnDevice": true, "expectPCC": false, "expectCloudBackend": false },
+    { "name": "plan_build", "message": "Build me a training plan for my event", "expectOnDevice": false, "expectPCC": true, "expectCloudBackend": false },
+    { "name": "web_search", "message": "Search the web for latest polarized training study", "expectOnDevice": false, "expectPCC": false, "expectCloudBackend": true },
+    { "name": "local_spotlight", "message": "Find my notes about Leadville training", "expectOnDevice": true, "expectPCC": false, "expectCloudBackend": false },
+    { "name": "intervals_today", "message": "Should I do intervals today?", "expectOnDevice": false, "expectPCC": true, "expectCloudBackend": false }
+  ],
+  "sampleFactSheet": "Rider: FTP 245W, max HR 188, resting HR 52. Week TSS: 312. Recovery: moderate."
+}

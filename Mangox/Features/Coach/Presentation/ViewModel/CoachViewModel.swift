@@ -55,9 +55,10 @@ final class CoachViewModel {
     func canSendCoachMessage(
         _ text: String,
         isPro: Bool,
-        forcePlanIntake: Bool = false
+        forcePlanIntake: Bool = false,
+        hasImage: Bool = false
     ) -> Bool {
-        coach.canSendCoachMessage(text, isPro: isPro, forcePlanIntake: forcePlanIntake)
+        coach.canSendCoachMessage(text, isPro: isPro, forcePlanIntake: forcePlanIntake, hasImage: hasImage)
     }
 
     func remainingFreeMessages(isPro: Bool) -> Int {
@@ -82,11 +83,14 @@ final class CoachViewModel {
             return
         }
         let sessionAtStart = currentSessionID
-        let content = await coach.loadCoachEmptyStartersContent()
+        if starterContent == nil {
+            starterContent = coach.instantCoachEmptyStartersContent()
+        }
+        let enhanced = await coach.loadCoachEmptyStartersContent()
         // Bail if the user switched sessions or sent a message while we were
         // generating starters, so stale starters don't land over the new state.
         guard sessionAtStart == currentSessionID, messages.isEmpty else { return }
-        starterContent = content
+        starterContent = enhanced
     }
 
     func contextualQuickPrompts() -> [QuickPrompt] {
@@ -108,18 +112,20 @@ final class CoachViewModel {
     func sendMessage(
         _ text: String,
         isPro: Bool,
-        forcePlanIntake: Bool = false
+        forcePlanIntake: Bool = false,
+        image: CoachUserImageAttachment? = nil
     ) async {
-        await coach.sendMessage(text, isPro: isPro, forcePlanIntake: forcePlanIntake)
+        await coach.sendMessage(text, isPro: isPro, forcePlanIntake: forcePlanIntake, image: image)
     }
 
     @discardableResult
     func prepareOutgoingMessage(
         _ text: String,
         isPro: Bool,
-        forcePlanIntake: Bool = false
+        forcePlanIntake: Bool = false,
+        hasImage: Bool = false
     ) -> Bool {
-        coach.prepareOutgoingMessage(text, isPro: isPro, forcePlanIntake: forcePlanIntake)
+        coach.prepareOutgoingMessage(text, isPro: isPro, forcePlanIntake: forcePlanIntake, hasImage: hasImage)
     }
 
     func cancelActiveChatTurn() {
@@ -137,7 +143,13 @@ final class CoachViewModel {
     }
 
     func deleteSession(_ sessionID: UUID) {
+        starterContent = nil
         coach.deleteSession(sessionID)
+    }
+
+    func deleteSessions(_ sessionIDs: Set<UUID>) {
+        starterContent = nil
+        coach.deleteSessions(sessionIDs)
     }
 
     func dismissError() {
@@ -145,10 +157,20 @@ final class CoachViewModel {
     }
 
     func retryLastUserMessage(isPro: Bool) async {
-        guard let lastUser = messages.last(where: { $0.role == .user })?.content,
-              !lastUser.isEmpty
-        else { return }
-        await coach.sendMessage(lastUser, isPro: isPro, forcePlanIntake: false)
+        guard let lastUser = messages.last(where: { $0.role == .user }) else { return }
+        let image: CoachUserImageAttachment?
+        if let jpeg = lastUser.imageJPEG {
+            image = CoachUserImageAttachment(jpegData: jpeg, pixelWidth: 0, pixelHeight: 0)
+        } else {
+            image = nil
+        }
+        guard !lastUser.content.isEmpty || image != nil else { return }
+        await coach.sendMessage(
+            lastUser.content,
+            isPro: isPro,
+            forcePlanIntake: false,
+            image: image
+        )
     }
 
     func submitFeedback(for messageID: UUID, score: Int) {

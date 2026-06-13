@@ -2,9 +2,10 @@
   "name": "mangox-coach-backend-helpers",
   "private": true,
   "type": "module",
-  "scripts": {
-    "check": "tsc --noEmit"
-  },
+    "scripts": {
+        "check": "tsc --noEmit",
+        "eval:fixtures": "node -e \"JSON.parse(require('fs').readFileSync('scripts/coach-eval-fixtures.json','utf8')); console.log('coach-eval-fixtures.json OK')\""
+    },
   "devDependencies": {
     "typescript": "^5.7.0"
   },

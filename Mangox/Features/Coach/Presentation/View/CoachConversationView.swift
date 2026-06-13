@@ -1,4 +1,5 @@
 import SwiftData
+import PhotosUI
 import SwiftUI
 import UIKit
 
@@ -11,6 +12,14 @@ private enum CoachChatColumnWidthKey: PreferenceKey {
     static var defaultValue: CGFloat = 400
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+extension CoachConversationView: Equatable {
+    static func == (lhs: CoachConversationView, rhs: CoachConversationView) -> Bool {
+        lhs.navigationPath == rhs.navigationPath
+            && lhs.chatSheetPresented == rhs.chatSheetPresented
+            && lhs.greetingText == rhs.greetingText
     }
 }
 
@@ -32,6 +41,18 @@ struct CoachConversationView: View {
     @State private var sentChipKey: String?
     @State private var contextBannerDismissed = false
 
+    // MARK: - State Management
+
+    @MainActor
+    private func handleChatSheetDismissed() {
+        chatSheetPresented = false
+    }
+
+    @MainActor
+    private func handleConversationsListDismissed() {
+        showConversationsList = false
+    }
+
     private static let planBuilderSeed =
         "I want to build a structured training plan for an event. Ask me about my goal, target date, weekly training hours, and experience, then outline next steps."
 
@@ -51,13 +72,303 @@ struct CoachConversationView: View {
         return min(580, max(120, w - horizontalPadding))
     }
 
+    // MARK: - Extracted Components
+
+    @ViewBuilder
+    private var coachBackgroundView: some View {
+        ZStack {
+            AppColor.bg
+            OptimizedRadialGradient()
+        }
+        .ignoresSafeArea()
+        .mangoxGridBackground(opacity: 0.35)
+    }
+
+    private struct OptimizedRadialGradient: View, Equatable {
+        @Environment(\.colorScheme) private var colorScheme
+
+        var body: some View {
+            let mangoOpacity = colorScheme == .dark ? 0.08 : 0.07
+            let blueOpacity = colorScheme == .dark ? 0.05 : 0.06
+
+            RadialGradient(
+                colors: [AppColor.mango.opacity(mangoOpacity), Color.clear],
+                center: .topTrailing,
+                startRadius: 20,
+                endRadius: 420
+            )
+            .blur(radius: 0.5)
+
+            RadialGradient(
+                colors: [Color.blue.opacity(blueOpacity), Color.clear],
+                center: .bottomLeading,
+                startRadius: 10,
+                endRadius: 380
+            )
+            .blur(radius: 0.5)
+        }
+
+        static func == (lhs: OptimizedRadialGradient, rhs: OptimizedRadialGradient) -> Bool {
+            lhs.colorScheme == rhs.colorScheme
+        }
+    }
+
+    // MARK: - Reusable Components
+
+    private struct CoachMetricsStrip: View, Equatable {
+        @Environment(CoachViewModel.self) private var coachViewModel
+        @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.coachViewModel.isPro == rhs.coachViewModel.isPro }
+
+        var body: some View {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    metricCapsule(
+                        icon: "bolt.fill", label: "FTP", value: "\(PowerZone.ftp)W",
+                        color: AppColor.yellow)
+                    metricCapsule(
+                        icon: "heart.fill", label: "Max HR", value: "\(HeartRateZone.maxHR)",
+                        color: AppColor.heartRate)
+                    if !coachViewModel.isPro {
+                        if coachViewModel.bypassesDailyLimit {
+                            metricCapsule(
+                                icon: "person.fill.checkmark",
+                                label: "Coach",
+                                value: "Staff",
+                                color: AppColor.mango.opacity(0.85)
+                            )
+                        } else {
+                            let left = coachViewModel.remainingFreeMessages(isPro: coachViewModel.isPro)
+                            metricCapsule(
+                                icon: "cloud.fill",
+                                label: "Cloud",
+                                value: left > 0 ? "\(left) left" : "limit",
+                                color: left > 0 ? AppColor.fg2 : AppColor.red
+                            )
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(AppColor.hair)
+                    .frame(height: 1)
+            }
+        }
+
+        private func metricCapsule(icon: String, label: String, value: String, color: Color)
+            -> some View
+        {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(color)
+                Text(label.uppercased())
+                    .mangoxFont(.micro)
+                    .foregroundStyle(AppColor.fg3)
+                    .tracking(0.6)
+                Text(value)
+                    .font(MangoxFont.caption.value)
+                    .foregroundStyle(AppColor.fg1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
+        }
+    }
+
+    private struct CoachContextBanner: View, Equatable {
+        let currentCount: Int
+        let windowSize: Int
+        let onStartFresh: () -> Void
+        var onDismiss: (() -> Void)? = nil
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.currentCount == rhs.currentCount && lhs.windowSize == rhs.windowSize
+        }
+
+        var body: some View {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "text.bubble")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppColor.yellow.opacity(0.9))
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Context \(currentCount)/\(windowSize)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.82))
+                    Text("Older turns are summarized. Start a new chat for sharper follow-ups.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button(action: onStartFresh) {
+                        Text("New chat")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(AppColor.mango)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 2)
+                }
+
+                Spacer(minLength: 0)
+
+                if let onDismiss {
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.35))
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss")
+                }
+            }
+            .padding(12)
+            .mangoxSurface(
+                .flatCustom(fill: Color.white.opacity(0.04), border: AppColor.yellow.opacity(0.2)),
+                shape: .rounded(MangoxRadius.sharp.rawValue)
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var topChromeView: some View {
+        ZStack {
+            HStack(spacing: 0) {
+                Button {
+                    chatSheetPresented = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(AppColor.fg2)
+                        .frame(width: 42, height: 42)
+                        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(A11yL10n.closeChat)
+
+                Spacer(minLength: 0)
+
+                HStack(spacing: 8) {
+                    Button {
+                        showConversationsList = true
+                    } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 17, weight: .medium))
+                            .frame(width: 40, height: 40)
+                            .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(AppColor.fg2)
+                    .accessibilityLabel(A11yL10n.conversations)
+
+                    Button {
+                        coachViewModel.createNewSession()
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 17, weight: .medium))
+                            .frame(width: 40, height: 40)
+                            .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(AppColor.fg2)
+                    .accessibilityLabel(A11yL10n.newConversation)
+                    .disabled(coachViewModel.isLoading)
+                }
+            }
+            .padding(.horizontal, 8)
+
+            VStack(spacing: 2) {
+                Text("COACH")
+                    .mangoxFont(.label)
+                    .foregroundStyle(AppColor.mango)
+                    .tracking(1.4)
+                Text(greetingText)
+                    .font(MangoxFont.caption.value)
+                    .foregroundStyle(AppColor.fg2)
+            }
+                .accessibilityAddTraits(.isHeader)
+                .allowsHitTesting(false)
+        }
+        .padding(.top, 4)
+        .padding(.bottom, 8)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(AppColor.hair)
+                .frame(height: 1)
+        }
+    }
+
+    @ViewBuilder
+    private var metricsStripView: some View {
+        CoachMetricsStrip()
+    }
+
+    @ViewBuilder
+    private var contextBannerView: some View {
+        if coachViewModel.suggestsFreshConversation,
+            !coachViewModel.isLoading,
+            !contextBannerDismissed
+        {
+            CoachContextWindowBanner(
+                currentCount: coachViewModel.currentContextCount,
+                windowSize: coachViewModel.contextWindowSize,
+                onStartFresh: {
+                    coachViewModel.createNewSession()
+                    contextBannerDismissed = false
+                },
+                onDismiss: { contextBannerDismissed = true }
+            )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .transition(
+                accessibilityReduceMotion
+                    ? .opacity
+                    : .move(edge: .top).combined(with: .opacity)
+            )
+            .animation(
+                accessibilityReduceMotion ? .easeInOut(duration: 0.16) : .smooth(duration: 0.24),
+                value: coachViewModel.suggestsFreshConversation
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var inputBarView: some View {
+        CoachInputBarWrapper(
+            navigationPath: $navigationPath,
+            chatSheetPresented: $chatSheetPresented,
+            auxiliarySheet: $auxiliarySheet,
+            showComposerLimitBanner: showComposerLimitBanner,
+            onPlanBuilder: { send(Self.planBuilderSeed, forcePlanIntake: true) },
+            sendAction: { text, image in send(text, image: image) },
+            onFocusChanged: { focused in
+                if focused && !coachViewModel.messages.isEmpty {
+                    composerFocusScrollNonce += 1
+                }
+            }
+        )
+        .animation(
+            accessibilityReduceMotion ? .easeInOut(duration: 0.16) : .smooth(duration: 0.28),
+            value: showComposerLimitBanner
+        )
+    }
+
     var body: some View {
         ZStack {
-            coachBackground
+            coachBackgroundView
             VStack(spacing: 0) {
-                topChrome
-                metricsStrip
-                contextBanner
+                topChromeView
+                metricsStripView
+                contextBannerView
                 CoachChatTranscriptView(
                     bubbleMaxWidth: Self.bubbleMaxWidth(containerWidth: chatColumnWidth),
                     greetingText: greetingText,
@@ -100,7 +411,7 @@ struct CoachConversationView: View {
                 chatColumnWidth = clampedWidth
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                inputBar
+                inputBarView
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -342,34 +653,17 @@ struct CoachConversationView: View {
         return 28
     }
 
-    private var inputBar: some View {
-        CoachInputBarWrapper(
-            navigationPath: $navigationPath,
-            chatSheetPresented: $chatSheetPresented,
-            auxiliarySheet: $auxiliarySheet,
-            showComposerLimitBanner: showComposerLimitBanner,
-            onPlanBuilder: { send(Self.planBuilderSeed, forcePlanIntake: true) },
-            sendAction: { send($0) },
-            onFocusChanged: { focused in
-                if focused && !coachViewModel.messages.isEmpty {
-                    composerFocusScrollNonce += 1
-                }
-            }
-        )
-        .animation(
-            accessibilityReduceMotion ? .easeInOut(duration: 0.16) : .smooth(duration: 0.32),
-            value: showComposerLimitBanner
-        )
-    }
+    // MARK: - Actions
 
-    private func send(_ text: String, forcePlanIntake: Bool = false) {
+    private func send(_ text: String, forcePlanIntake: Bool = false, image: CoachUserImageAttachment? = nil) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty || image != nil else { return }
         let planIntake = forcePlanIntake || AIService.shouldForcePlanIntake(for: trimmed)
         guard coachViewModel.canSendCoachMessage(
             trimmed,
             isPro: coachViewModel.isPro,
-            forcePlanIntake: planIntake
+            forcePlanIntake: planIntake,
+            hasImage: image != nil
         ) else {
             auxiliarySheet = .paywall
             return
@@ -377,7 +671,8 @@ struct CoachConversationView: View {
         guard coachViewModel.prepareOutgoingMessage(
             trimmed,
             isPro: coachViewModel.isPro,
-            forcePlanIntake: planIntake
+            forcePlanIntake: planIntake,
+            hasImage: image != nil
         ) else {
             return
         }
@@ -386,7 +681,8 @@ struct CoachConversationView: View {
             await coachViewModel.sendMessage(
                 trimmed,
                 isPro: coachViewModel.isPro,
-                forcePlanIntake: forcePlanIntake || AIService.shouldForcePlanIntake(for: trimmed)
+                forcePlanIntake: forcePlanIntake || AIService.shouldForcePlanIntake(for: trimmed),
+                image: image
             )
         }
     }
@@ -434,29 +730,25 @@ struct CoachConversationView: View {
     }
 }
 
+/// Isolates all per-token stream reads in its own body so token updates re-render
+/// only this subtree, never the full transcript.
 struct CoachStreamingSection: View {
     @Environment(CoachViewModel.self) private var coachViewModel
-    var onPendingHeightChange: (CGFloat) -> Void = { _ in }
+    var bubbleMaxWidth: CGFloat = .infinity
 
     var body: some View {
         if coachViewModel.isLoading {
             CoachPendingReplyBubble(
                 streamingText: coachViewModel.streamDraftText,
+                bubbleMaxWidth: bubbleMaxWidth,
                 delivery: coachViewModel.streamDelivery,
                 partialTags: coachViewModel.streamPartialTags,
                 isSearchingWeb: coachViewModel.streamIsSearchingWeb,
                 isThinking: coachViewModel.streamIsThinking,
                 statusText: coachViewModel.streamStatusText,
-                routeStatus: coachViewModel.streamRouteStatus,
-                onHeightChange: onPendingHeightChange
+                routeStatus: coachViewModel.streamRouteStatus
             )
             .id("pending-bubble")
-            .transition(
-                .asymmetric(
-                    insertion: .move(edge: .bottom).combined(with: .opacity),
-                    removal: .opacity
-                )
-            )
         }
     }
 }
@@ -467,12 +759,15 @@ struct CoachInputBarWrapper: View {
     @Binding var auxiliarySheet: CoachAuxiliarySheet?
     let showComposerLimitBanner: Bool
     let onPlanBuilder: () -> Void
-    let sendAction: (String) -> Void
+    let sendAction: (String, CoachUserImageAttachment?) -> Void
     let onFocusChanged: (Bool) -> Void
 
     @Environment(CoachViewModel.self) private var coachViewModel
 
     @State private var inputText = ""
+    @State private var attachedImage: CoachUserImageAttachment?
+    @State private var photoPickerItem: PhotosPickerItem?
+    @State private var hasAttachedPhoto = false
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -481,15 +776,20 @@ struct CoachInputBarWrapper: View {
             chatSheetPresented: $chatSheetPresented,
             auxiliarySheet: $auxiliarySheet,
             inputText: $inputText,
+            attachedImage: $attachedImage,
+            photoPickerItem: $photoPickerItem,
+            hasAttachedPhoto: $hasAttachedPhoto,
             inputFocused: _inputFocused,
             showComposerLimitBanner: showComposerLimitBanner,
             onPlanBuilder: onPlanBuilder,
             sendAction: { text in
                 let wasFocused = inputFocused
-                sendAction(text)
+                let image = attachedImage
+                sendAction(text, image)
                 inputText = ""
-                // Keep the keyboard up across sends without an arbitrary sleep —
-                // SwiftUI sometimes drops focus when the parent reflows after send.
+                attachedImage = nil
+                photoPickerItem = nil
+                hasAttachedPhoto = false
                 if wasFocused {
                     inputFocused = true
                 }
@@ -514,6 +814,9 @@ struct InputBarView: View {
     @Binding var chatSheetPresented: Bool
     @Binding var auxiliarySheet: CoachAuxiliarySheet?
     @Binding var inputText: String
+    @Binding var attachedImage: CoachUserImageAttachment?
+    @Binding var photoPickerItem: PhotosPickerItem?
+    @Binding var hasAttachedPhoto: Bool
     @FocusState var inputFocused: Bool
     let showComposerLimitBanner: Bool
     let onPlanBuilder: () -> Void
@@ -566,7 +869,7 @@ struct InputBarView: View {
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(AppColor.mango.opacity(0.95))
                         }
-                        Text("On-device stats questions still work — tap to unlock cloud & plans.")
+                        Text("On-device stats and Private Cloud still work — cloud web search needs Mangox Cloud.")
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.42))
                             .multilineTextAlignment(.leading)
@@ -599,6 +902,35 @@ struct InputBarView: View {
                 )
             }
 
+            if hasAttachedPhoto {
+                HStack(spacing: 10) {
+                    if let image = attachedImage?.uiImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 52, height: 52)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    Text("Photo attached")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.72))
+                    Spacer(minLength: 0)
+                    Button {
+                        attachedImage = nil
+                        photoPickerItem = nil
+                        hasAttachedPhoto = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.white.opacity(0.45))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove photo")
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            }
+
             HStack(alignment: .bottom, spacing: 10) {
                 Button(action: onPlanBuilder) {
                     Image(systemName: "calendar.badge.plus")
@@ -615,6 +947,13 @@ struct InputBarView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(A11yL10n.planBuilder)
                 .disabled(coachViewModel.isLoading)
+
+                CoachAttachPhotoPicker(
+                    photoPickerItem: $photoPickerItem,
+                    attachedImage: $attachedImage,
+                    hasAttachedPhoto: $hasAttachedPhoto,
+                    isDisabled: coachViewModel.isLoading
+                )
 
                 TextField(
                     "Message",
@@ -661,8 +1000,12 @@ struct InputBarView: View {
 
     private var sendButtonHint: String {
         let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !coachViewModel.canSendCoachMessage(trimmed, isPro: coachViewModel.isPro) {
-            return "Cloud coach limit reached. Upgrade for cloud replies, or ask a short on-device stats question."
+        if !coachViewModel.canSendCoachMessage(
+            trimmed,
+            isPro: coachViewModel.isPro,
+            hasImage: hasAttachedPhoto
+        ) {
+            return "Cloud coach limit reached. Upgrade for live web search, or keep using on-device stats and Private Cloud."
         }
         if coachViewModel.isLoading {
             return "Coach is replying. Wait for the response to finish."
@@ -676,9 +1019,13 @@ struct InputBarView: View {
     private var sendButton: some View {
         let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let canSend =
-            !trimmed.isEmpty
+            (!trimmed.isEmpty || hasAttachedPhoto)
             && !coachViewModel.isLoading
-            && coachViewModel.canSendCoachMessage(trimmed, isPro: coachViewModel.isPro)
+            && coachViewModel.canSendCoachMessage(
+                trimmed,
+                isPro: coachViewModel.isPro,
+                hasImage: hasAttachedPhoto
+            )
 
         return Button {
             sendAction(inputText)
@@ -702,5 +1049,56 @@ struct InputBarView: View {
             accessibilityReduceMotion ? .easeInOut(duration: 0.12) : .smooth(duration: 0.22),
             value: canSend
         )
+    }
+}
+
+private struct CoachPhotoPickerLabel: View {
+    let hasAttachedPhoto: Bool
+
+    var body: some View {
+        Image(systemName: "photo.on.rectangle")
+            .font(.system(size: 16, weight: .medium))
+            .foregroundStyle(AppColor.mango.opacity(hasAttachedPhoto ? 1 : 0.9))
+            .frame(width: 40, height: 44)
+            .background(AppColor.bg2)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(
+                        hasAttachedPhoto
+                            ? AppColor.mango.opacity(0.55) : AppColor.mango.opacity(0.28),
+                        lineWidth: 1
+                    )
+            )
+    }
+}
+
+private struct CoachAttachPhotoPicker: View {
+    @Binding var photoPickerItem: PhotosPickerItem?
+    @Binding var attachedImage: CoachUserImageAttachment?
+    @Binding var hasAttachedPhoto: Bool
+    let isDisabled: Bool
+
+    var body: some View {
+        let attached = hasAttachedPhoto
+        PhotosPicker(selection: $photoPickerItem, matching: .images) {
+            CoachPhotoPickerLabel(hasAttachedPhoto: attached)
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .accessibilityLabel("Attach photo")
+        .onChange(of: photoPickerItem) { _, item in
+            guard let item else { return }
+            Task {
+                guard let data = try? await item.loadTransferable(type: Data.self),
+                    let uiImage = UIImage(data: data),
+                    let attachment = CoachUserImageAttachment.fromUIImage(uiImage)
+                else { return }
+                await MainActor.run {
+                    attachedImage = attachment
+                    hasAttachedPhoto = true
+                }
+            }
+        }
     }
 }

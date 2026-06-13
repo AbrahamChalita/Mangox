@@ -120,14 +120,13 @@ struct CoachMessageRow: View {
     }
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 4) {
             if showTimestamp {
                 Text(CoachMessageTimestampFormatting.label(for: message.timestamp))
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.28))
                     .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
                     .padding(.horizontal, 4)
-                    .padding(.bottom, 2)
             }
 
             if message.role == .user {
@@ -135,6 +134,8 @@ struct CoachMessageRow: View {
                     Spacer(minLength: 48)
                     CoachUserBubble(
                         text: message.content,
+                        imageJPEG: message.imageJPEG,
+                        imageCacheKey: message.id,
                         bubbleMaxWidth: bubbleMaxWidth
                     )
                 }
@@ -214,50 +215,84 @@ struct CoachMessageRow: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 6)
     }
 }
 
 // MARK: - User
 
+private enum CoachUserBubbleImageCache {
+    private static let cache = NSCache<NSString, UIImage>()
+
+    static func image(for data: Data, key: UUID) -> UIImage? {
+        let cacheKey = key.uuidString as NSString
+        if let cached = cache.object(forKey: cacheKey) { return cached }
+        guard let image = UIImage(data: data) else { return nil }
+        cache.setObject(image, forKey: cacheKey)
+        return image
+    }
+}
+
 struct CoachUserBubble: View {
     let text: String
+    let imageJPEG: Data?
+    var imageCacheKey: UUID? = nil
     let bubbleMaxWidth: CGFloat
 
     var body: some View {
-        Text(text)
-            .font(.body)
-            .foregroundStyle(AppColor.bg0)
-            .lineSpacing(4)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [AppColor.mango, AppColor.mango.opacity(0.88)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+        VStack(alignment: .trailing, spacing: 8) {
+            if let imageJPEG,
+                let cacheKey = imageCacheKey,
+                let uiImage = CoachUserBubbleImageCache.image(for: imageJPEG, key: cacheKey)
+            {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: min(bubbleMaxWidth, 220), maxHeight: 180)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
                     )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
-            )
-            .shadow(color: AppColor.mango.opacity(0.22), radius: 8, y: 3)
-            .frame(maxWidth: bubbleMaxWidth, alignment: .trailing)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(A11yL10n.yourMessage)
-            .accessibilityValue(text)
-            .contextMenu {
+            }
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(text)
+                    .font(.body)
+                    .foregroundStyle(AppColor.bg0)
+                    .lineSpacing(4)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [AppColor.mango, AppColor.mango.opacity(0.88)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+                    )
+                    .shadow(color: AppColor.mango.opacity(0.22), radius: 8, y: 3)
+            }
+        }
+        .frame(maxWidth: bubbleMaxWidth, alignment: .trailing)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(A11yL10n.yourMessage)
+        .accessibilityValue(text.isEmpty ? "Photo message" : text)
+        .contextMenu {
+            if !text.isEmpty {
                 Button {
                     UIPasteboard.general.string = text
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
             }
+        }
     }
 }
 
@@ -276,7 +311,7 @@ struct CoachAssistantBubble: View {
     @State private var sourcesExpanded = false
 
     private var displayText: AttributedString {
-        CoachAssistantFormatting.attributedContent(from: message.content, category: message.category)
+        CoachAssistantFormatting.cachedAttributedContent(from: message.content, category: message.category)
     }
 
     private var responseAppearance: CoachResponseAppearance {
@@ -313,8 +348,8 @@ struct CoachAssistantBubble: View {
     }
 
     private var shouldTruncateBody: Bool {
-        message.content.count > 420
-            || message.content.components(separatedBy: "\n").count > 6
+        message.content.count > 2000
+            || message.content.components(separatedBy: "\n").count > 30
     }
 
     private var visibleTags: [String] {
@@ -335,13 +370,19 @@ struct CoachAssistantBubble: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 if isShortReply {
-                    HStack(alignment: .top, spacing: 0) {
-                        Spacer(minLength: 0)
+                    // Short replies hug their text — the badge rides alongside instead of
+                    // a full-width trailing row that would stretch the bubble to max width.
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(displayText)
+                            .font(.body)
+                            .foregroundStyle(.white.opacity(0.94))
+                            .lineSpacing(5)
                         CoachDeliveryBadge(appearance: responseAppearance, compact: true)
+                            .padding(.top, 2)
                     }
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, 16)
                     .padding(.top, 10)
-                    .padding(.bottom, 4)
+                    .padding(.bottom, 10)
                 } else {
                     HStack(spacing: 6) {
                         Image(systemName: categoryIcon)
@@ -357,23 +398,19 @@ struct CoachAssistantBubble: View {
                         Text(responseAppearance.label)
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(categoryAccent.opacity(0.72))
-                        Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 14)
                     .padding(.top, 12)
                     .padding(.bottom, 6)
-                }
 
-                Group {
                     Text(displayText)
                         .font(.body)
                         .foregroundStyle(.white.opacity(0.94))
                         .lineSpacing(5)
-                        .lineLimit(expandedLongBody || !shouldTruncateBody ? nil : 8)
+                        .lineLimit(expandedLongBody || !shouldTruncateBody ? nil : 20)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, shouldTruncateBody && !expandedLongBody ? 4 : 10)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, isShortReply ? 0 : 0)
-                .padding(.bottom, shouldTruncateBody && !expandedLongBody ? 4 : 10)
 
                 if shouldTruncateBody {
                     Button {
@@ -448,7 +485,7 @@ struct CoachAssistantBubble: View {
                 if !message.thinkingSteps.isEmpty, metadataRevealStage >= 3 {
                     Divider()
                         .background(Color.white.opacity(0.08))
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 14)
                     CoachThinkingDisclosure(steps: message.thinkingSteps)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
@@ -481,14 +518,14 @@ struct CoachAssistantBubble: View {
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(responseAppearance.bubbleFill)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(responseAppearance.bubbleStroke, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
         .accessibilityElement(children: .ignore)
@@ -512,6 +549,12 @@ struct CoachAssistantBubble: View {
     private func beginMetadataReveal() {
         metadataRevealStage = 1
         sourcesExpanded = false
+
+        if (message.category ?? "").lowercased() == "plan_intake" {
+            metadataRevealStage = 3
+            return
+        }
+
         let wantsFeedback = showsFeedback && onFeedback != nil
         let hasMetadata =
             !visibleTags.isEmpty
@@ -581,7 +624,7 @@ private struct CoachCollapsedSourcesSection: View {
     var body: some View {
         Divider()
             .background(Color.white.opacity(0.1))
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 14)
 
         VStack(alignment: .leading, spacing: 6) {
             Button {
@@ -639,7 +682,7 @@ private struct CoachInlineFollowUpSection: View {
     var body: some View {
         Divider()
             .background(Color.white.opacity(0.08))
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 14)
 
         VStack(alignment: .leading, spacing: 8) {
             if !trimmedQuestion.isEmpty {
@@ -702,6 +745,7 @@ struct CoachMessageFeedbackRow: View {
                 .foregroundStyle(.white.opacity(0.38))
 
             Button {
+                HapticManager.shared.coachQuickReplyTapped()
                 onSubmit(1)
             } label: {
                 Image(systemName: thumbsUpSelected ? "hand.thumbsup.fill" : "hand.thumbsup")
@@ -713,6 +757,7 @@ struct CoachMessageFeedbackRow: View {
             .accessibilityLabel("Helpful")
 
             Button {
+                HapticManager.shared.coachQuickReplyTapped()
                 onSubmit(-1)
             } label: {
                 Image(systemName: thumbsDownSelected ? "hand.thumbsdown.fill" : "hand.thumbsdown")
@@ -740,6 +785,7 @@ struct CoachErrorBubble: View {
         switch failedTier {
         case .onDeviceNarrow: "On-device coach"
         case .privateCloudCompute: "Private Cloud"
+        case .thirdPartyLanguageModel: "Fallback model"
         case .mangoxCloudBackend: "Coach server"
         case nil: nil
         }
@@ -893,31 +939,51 @@ struct CoachStreamStatusRow: View {
     }
 }
 
-/// Compact typing indicator — three pulsing dots, optional globe when searching the web.
+/// Compact typing indicator — lightweight TimelineView wave (cheaper than three PhaseAnimators).
 private struct CoachTypingDotsIndicator: View {
     let accent: Color
     var spacing: CGFloat = 5
 
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
     var body: some View {
-        HStack(spacing: spacing) {
-            ForEach(0..<3, id: \.self) { i in
-                PulsingDot(accent: accent, delay: Double(i) * 0.16)
+        Group {
+            if accessibilityReduceMotion {
+                HStack(spacing: spacing) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        Circle()
+                            .fill(accent.opacity(0.72))
+                            .frame(width: 7, height: 7)
+                    }
+                }
+            } else {
+                TimelineView(.periodic(from: .now, by: 0.42)) { context in
+                    let activeIndex = Int(context.date.timeIntervalSinceReferenceDate / 0.42) % 3
+                    HStack(spacing: spacing) {
+                        ForEach(0..<3, id: \.self) { index in
+                            Circle()
+                                .fill(accent.opacity(index == activeIndex ? 0.92 : 0.34))
+                                .frame(width: 7, height: 7)
+                        }
+                    }
+                }
             }
         }
         .accessibilityHidden(true)
     }
 }
 
-/// Single full-width bubble for the pending assistant turn — same chrome as the final card.
+/// Bubble for the pending assistant turn — same chrome as the final card, hugging its content
+/// up to `bubbleMaxWidth` so it matches the committed bubble and never jumps width on finalize.
 struct CoachPendingReplyBubble: View {
     let streamingText: String
+    var bubbleMaxWidth: CGFloat = .infinity
     var delivery: CoachStreamDelivery = .cloud
     var partialTags: [String] = []
     var isSearchingWeb: Bool = false
     var isThinking: Bool = false
     var statusText: String? = nil
     var routeStatus: String? = nil
-    var onHeightChange: (CGFloat) -> Void = { _ in }
 
     private var responseAppearance: CoachResponseAppearance { delivery.appearance }
 
@@ -945,8 +1011,8 @@ struct CoachPendingReplyBubble: View {
         return nil
     }
 
-    private var streamAttributed: AttributedString {
-        CoachAssistantFormatting.attributedContentForStreaming(from: streamingText)
+    private var streamPlainText: String {
+        CoachAssistantFormatting.plainTextForStreaming(streamingText)
     }
 
     var body: some View {
@@ -966,19 +1032,23 @@ struct CoachPendingReplyBubble: View {
                         .font(.system(size: 9, weight: .heavy))
                         .foregroundStyle(.white.opacity(0.38))
                         .tracking(0.65)
-                    Spacer(minLength: 0)
+                    Text("·")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.22))
+                    Text(responseAppearance.label)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(responseAppearance.accent.opacity(0.72))
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 12)
                 .padding(.bottom, 6)
 
                 if hasVisibleBody {
-                    Text(streamAttributed)
+                    Text(streamPlainText)
                         .font(.body)
                         .foregroundStyle(.white.opacity(0.9))
                         .lineSpacing(5)
                         .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                         .contentTransition(.identity)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
@@ -988,7 +1058,6 @@ struct CoachPendingReplyBubble: View {
                             Image(systemName: "globe")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(responseAppearance.accent.opacity(0.88))
-                                .symbolEffect(.pulse, isActive: true)
                                 .accessibilityHidden(true)
                         }
                         CoachTypingDotsIndicator(accent: responseAppearance.accent)
@@ -1030,21 +1099,16 @@ struct CoachPendingReplyBubble: View {
             .padding(.bottom, 4)
         }
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(responseAppearance.bubbleFill)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(responseAppearance.bubbleStroke, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .fixedSize(horizontal: false, vertical: true)
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            proxy.size.height
-        } action: { _, height in
-            onHeightChange(height)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityDescription)
         .accessibilityValue(streamingText.isEmpty ? (statusLine ?? "") : streamingText)
@@ -1061,34 +1125,6 @@ struct CoachPendingReplyBubble: View {
             isSearchingWeb ? "Coach is searching the web" : "Web coach is writing a reply"
         case .cloud:
             hasVisibleBody ? "Coach is writing a reply" : "Coach is preparing a reply"
-        }
-    }
-}
-
-private struct PulsingDot: View {
-    private enum Phase: CaseIterable { case small, large }
-
-    let accent: Color
-    let delay: Double
-
-    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
-
-    var body: some View {
-        Group {
-            if accessibilityReduceMotion {
-                Circle()
-                    .fill(accent.opacity(0.72))
-                    .frame(width: 7, height: 7)
-            } else {
-                PhaseAnimator(Phase.allCases) { phase in
-                    Circle()
-                        .fill(accent.opacity(0.72))
-                        .frame(width: 7, height: 7)
-                        .scaleEffect(phase == .large ? 1.2 : 0.72)
-                } animation: { _ in
-                    .easeInOut(duration: 0.38).delay(delay)
-                }
-            }
         }
     }
 }
@@ -1458,11 +1494,11 @@ private struct CoachFollowUpBlocksCarousel: View {
         .padding(14)
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(Color.white.opacity(0.05))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(sourceAppearance.statusStroke, lineWidth: 1)
         )
     }
@@ -1618,46 +1654,4 @@ struct CoachFollowUpRepliesPanel: View {
         )
     }
 
-}
-
-// MARK: - Typing
-
-struct CoachTypingRow: View {
-    var style: CoachResponseAppearance = .cloud
-    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
-    @State private var phase: Int = 0
-
-    var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<3, id: \.self) { i in
-                Circle()
-                    .fill(style.accent.opacity(0.72))
-                    .frame(width: 7, height: 7)
-                    .scaleEffect(accessibilityReduceMotion ? 1 : (phase == 0 ? 0.72 : 1.2))
-                    .animation(
-                        .easeInOut(duration: 0.38)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(i) * 0.14),
-                        value: phase
-                    )
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(style.statusFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(style.statusStroke, lineWidth: 1)
-        )
-        .onAppear {
-            if !accessibilityReduceMotion { phase = 1 }
-        }
-        .onDisappear { phase = 0 }
-        .accessibilityLabel(A11yL10n.coachTyping)
-    }
 }

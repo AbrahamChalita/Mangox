@@ -139,6 +139,7 @@ private struct MangoxBackendChatProvider: ChatProviderAdapter {
                         req.timeoutInterval = 300
                         req.httpBody = try JSONEncoder().encode(request)
 
+                        var receivedStreamPayload = false
                         do {
                             let (bytes, response) = try await URLSession.shared.bytes(for: req)
                             if let httpResponse = response as? HTTPURLResponse,
@@ -162,20 +163,24 @@ private struct MangoxBackendChatProvider: ChatProviderAdapter {
                                     }
                                 case "delta":
                                     if let delta = event.delta {
+                                        receivedStreamPayload = true
                                         continuation.yield(.textDelta(delta))
                                     }
                                 case "reasoning_delta":
                                     if let delta = event.delta {
+                                        receivedStreamPayload = true
                                         continuation.yield(.reasoningDelta(delta))
                                     }
                                 case "final":
                                     if let message = event.message {
+                                        receivedStreamPayload = true
                                         if !message.toolCalls.isEmpty {
                                             continuation.yield(.toolCalls(message.toolCalls))
                                         }
                                         continuation.yield(.completed(message))
                                     }
                                 case "error":
+                                    receivedStreamPayload = true
                                     continuation.yield(.failed(event.error ?? "Streaming failed"))
                                 case "done", "meta":
                                     break
@@ -189,7 +194,15 @@ private struct MangoxBackendChatProvider: ChatProviderAdapter {
                             if error is CancellationError {
                                 throw error
                             }
-                            logger.error("SSE stream failed, falling back to POST: \(error)")
+                            if !MangoxSSEFallbackPolicy.shouldFallbackToNonStreaming(
+                                receivedStreamPayload: receivedStreamPayload
+                            ) {
+                                logger.error(
+                                    "SSE stream failed after partial output; skipping POST retry: \(error)"
+                                )
+                                throw error
+                            }
+                            logger.error("SSE stream failed before output, falling back to POST: \(error)")
                         }
                     }
 

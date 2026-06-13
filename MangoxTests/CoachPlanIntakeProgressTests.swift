@@ -18,7 +18,8 @@ final class CoachPlanIntakeProgressTests: XCTestCase {
             references: [],
             usedWebSearch: false,
             feedbackScore: nil,
-            confidence: 1
+            confidence: 1,
+            imageJPEG: nil
         )
 
         let snapshot = CoachPlanIntakeProgress.snapshot(for: message)
@@ -42,7 +43,8 @@ final class CoachPlanIntakeProgressTests: XCTestCase {
             references: [],
             usedWebSearch: false,
             feedbackScore: nil,
-            confidence: 1
+            confidence: 1,
+            imageJPEG: nil
         )
 
         XCTAssertTrue(CoachMessageTimestampFormatting.shouldShow(before: earlier, current: later))

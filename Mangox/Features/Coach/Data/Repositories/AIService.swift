@@ -479,14 +479,79 @@ final class AIService: AIServiceProtocol, CoachRepository {
     private var pccCoachSessionOwnerID: UUID?
     /// Raw `CoachAgentMode` storage (iOS 27+); avoids availability on stored property type.
     private var pccCoachSessionModeRaw: String?
+
+    /// Reused third-party `LanguageModel` coach session; reset on createNewSession/switchToSession.
+    private var thirdPartyCoachLanguageSession: LanguageModelSession?
+    private var thirdPartyCoachSessionOwnerID: UUID?
     /// When true, the next turn skips on-device narrow and PCC (cloud-only retry).
     private var skipLocalCoachForNextTurn = false
     /// Delivery tier that failed before the last error bubble (for retry UI).
     var lastFailedDeliveryPath: CoachDeliveryPath?
     private var activeTurnIsWebSearch = false
 
+    // MARK: - Coach context cache (one aggregate build per invalidation)
+
+    var coachContextCacheToken = UUID()
+    var cachedUserContextEntry: UserContext?
+    var cachedFactSheetFull: String?
+    var cachedFactSheetCompact: String?
+    var cachedStarterAvailability: CoachStarterPromptAvailability?
+    var cachedOnDeviceToolDigests: CoachOnDeviceToolDigestBundle?
+    var cachedOnDeviceToolDigestsOwnerID: UUID?
+
+    func invalidateCoachContextCache() {
+        coachContextCacheToken = UUID()
+        cachedUserContextEntry = nil
+        cachedFactSheetFull = nil
+        cachedFactSheetCompact = nil
+        cachedStarterAvailability = nil
+        cachedOnDeviceToolDigests = nil
+        cachedOnDeviceToolDigestsOwnerID = nil
+    }
+
+    func cachedUserContext(modelContext: ModelContext) -> UserContext {
+        if let cachedUserContextEntry { return cachedUserContextEntry }
+        let ctx = buildUserContext(modelContext: modelContext)
+        cachedUserContextEntry = ctx
+        return ctx
+    }
+
+    /// Rule-based empty-state starters (no on-device AI); safe to show immediately.
+    func instantCoachEmptyStartersContent() -> CoachEmptyStartersContent {
+        CoachEmptyStartersContent(
+            prompts: contextualQuickPrompts(modelContext: persistenceContext),
+            topicTags: []
+        )
+    }
+
+    func onDeviceToolDigests(modelContext: ModelContext) -> CoachOnDeviceToolDigestBundle {
+        if cachedOnDeviceToolDigestsOwnerID == currentSessionID,
+            let cachedOnDeviceToolDigests
+        {
+            return cachedOnDeviceToolDigests
+        }
+        let bundle = buildOnDeviceToolDigestBundle(modelContext: modelContext)
+        cachedOnDeviceToolDigests = bundle
+        cachedOnDeviceToolDigestsOwnerID = currentSessionID
+        return bundle
+    }
+
+    func preparedOnDeviceToolDigests(modelContext: ModelContext) async
+        -> CoachOnDeviceToolDigestBundle
+    {
+        if cachedOnDeviceToolDigestsOwnerID == currentSessionID,
+            let cachedOnDeviceToolDigests
+        {
+            return cachedOnDeviceToolDigests
+        }
+        await Task.yield()
+        return onDeviceToolDigests(modelContext: modelContext)
+    }
+
     // MARK: Constants
 
+    /// Daily cap for **Mangox Cloud** turns only (web search until PCC ships, legacy fallback).
+    /// On-device stats, Private Cloud Compute, and third-party LanguageModel turns are not counted.
     static let freeDailyLimit = 5
 
     /// When `Info.plist` `MangoxCoachStaffTier` is `admin` or `superuser` (via build setting `MANGOX_COACH_STAFF_TIER`), the free-tier daily coach cap is skipped. Leave empty for App Store builds.
@@ -503,12 +568,14 @@ final class AIService: AIServiceProtocol, CoachRepository {
     func sendMessage(
         _ text: String,
         isPro: Bool,
-        forcePlanIntake: Bool = false
+        forcePlanIntake: Bool = false,
+        image: CoachUserImageAttachment? = nil
     ) async {
         await sendMessage(
             text,
             isPro: isPro,
             forcePlanIntake: forcePlanIntake,
+            image: image,
             modelContext: persistenceContext
         )
     }
@@ -568,7 +635,11 @@ final class AIService: AIServiceProtocol, CoachRepository {
     }
 
     func deleteSession(_ sessionID: UUID) {
-        deleteSession(sessionID, modelContext: persistenceContext)
+        deleteSessions([sessionID], modelContext: persistenceContext)
+    }
+
+    func deleteSessions(_ sessionIDs: Set<UUID>) {
+        deleteSessions(sessionIDs, modelContext: persistenceContext)
     }
 
     func fetchSessions() -> [ChatSession] {
@@ -892,7 +963,9 @@ final class AIService: AIServiceProtocol, CoachRepository {
         Self.dateFormatter.string(from: .now)
     }
 
-    var todayMessageCount: Int {
+    var todayMessageCount: Int { todayCloudMessageCount }
+
+    private var todayCloudMessageCount: Int {
         guard UserDefaults.standard.string(forKey: udDateKey) == todayDateString else { return 0 }
         return UserDefaults.standard.integer(forKey: udCountKey)
     }
@@ -900,19 +973,39 @@ final class AIService: AIServiceProtocol, CoachRepository {
     func hasReachedFreeLimit(isPro: Bool) -> Bool {
         if isPro { return false }
         if Self.bypassesDailyCoachMessageLimit { return false }
-        return todayMessageCount >= Self.freeDailyLimit
+        return todayCloudMessageCount >= Self.freeDailyLimit
     }
 
-    /// Free tier: on-device narrow stats questions do not count against the daily cap.
+    /// Free tier: on-device narrow stats and Private Cloud turns do not count against the cloud cap.
     func canSendCoachMessage(
         _ text: String,
         isPro: Bool,
-        forcePlanIntake: Bool = false
+        forcePlanIntake: Bool = false,
+        hasImage: Bool = false
     ) -> Bool {
         if isPro || Self.bypassesDailyCoachMessageLimit { return true }
-        if todayMessageCount < Self.freeDailyLimit { return true }
+        if todayCloudMessageCount < Self.freeDailyLimit { return true }
         if forcePlanIntake || planIntakeModeActive { return false }
-        return qualifiesForUnbilledOnDeviceNarrow(text)
+        if hasImage { return qualifiesForUnbilledPCCCoach(text, forcePlanIntake: forcePlanIntake) }
+        if qualifiesForUnbilledOnDeviceNarrow(text) { return true }
+        if qualifiesForUnbilledPCCCoach(text, forcePlanIntake: forcePlanIntake) { return true }
+        return false
+    }
+
+    private func qualifiesForUnbilledPCCCoach(_ text: String, forcePlanIntake: Bool) -> Bool {
+        if skipLocalCoachForNextTurn { return false }
+        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return false }
+        guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return false }
+        guard MangoxFoundationModelsSupport.privateCloudComputeSupportsCurrentLocale() else { return false }
+        if OnDeviceCoachEngine.heuristicPrefersPCCWebSearch(for: text),
+            !Self.isPCCLiveWebSearchAvailable
+        {
+            return false
+        }
+        if forcePlanIntake || planIntakeModeActive { return true }
+        if OnDeviceCoachEngine.heuristicPrefersPCCCoach(for: text) { return true }
+        if !OnDeviceCoachEngine.heuristicCloudRoute(for: text) { return true }
+        return false
     }
 
     private func qualifiesForUnbilledOnDeviceNarrow(_ text: String) -> Bool {
@@ -990,14 +1083,12 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
     // MARK: - Streaming display (debounced)
 
+    private static let streamDisplayThrottleMs: Int = 50
+
     private func scheduleStreamDraftDisplayFlush() {
         streamDisplayThrottleTask?.cancel()
-        if !streamUsesTokenDeltas {
-            applyStreamDraftToUI()
-            return
-        }
         streamDisplayThrottleTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(40))
+            try? await Task.sleep(for: .milliseconds(Self.streamDisplayThrottleMs))
             guard !Task.isCancelled else { return }
             applyStreamDraftToUI()
         }
@@ -1074,8 +1165,8 @@ final class AIService: AIServiceProtocol, CoachRepository {
     private func recordBillableCoachTurnIfNeeded(for message: ChatMessage) {
         guard message.role == .assistant else { return }
         guard message.category != "error" else { return }
-        let cat = message.category?.lowercased() ?? ""
-        if cat == "on_device" || cat == "on_device_coach" { return }
+        let path = CoachDeliveryPath.fromMessageCategory(message.category)
+        guard path == .mangoxCloudBackend else { return }
         incrementDailyCount()
     }
 
@@ -1090,10 +1181,16 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
     /// Flips loading + pending bubble immediately so chip/starter taps feel instant (before async work).
     @discardableResult
-    func prepareOutgoingMessage(_ text: String, isPro: Bool, forcePlanIntake: Bool = false) -> Bool {
+    func prepareOutgoingMessage(
+        _ text: String,
+        isPro: Bool,
+        forcePlanIntake: Bool = false,
+        hasImage: Bool = false
+    ) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        guard canSendCoachMessage(trimmed, isPro: isPro, forcePlanIntake: forcePlanIntake) else {
+        guard !trimmed.isEmpty || hasImage else { return false }
+        guard canSendCoachMessage(trimmed, isPro: isPro, forcePlanIntake: forcePlanIntake, hasImage: hasImage)
+        else {
             return false
         }
         guard !isLoading else { return false }
@@ -1125,7 +1222,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
         deliveryCategoryOverride: String? = nil
     ) async {
         let history = buildHistory()
-        let context = buildUserContext(modelContext: modelContext)
+        let context = cachedUserContext(modelContext: modelContext)
         let encryptedContext = encryptUserContext(context)
 
         // Strong release guard: never send rich training context (FTP, recent workouts, plans, etc.)
@@ -1302,7 +1399,8 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 references: response.references,
                 usedWebSearch: usedWebSearch,
                 feedbackScore: nil,
-                confidence: response.confidence
+                confidence: response.confidence,
+                imageJPEG: nil
             )
             finishCoachReply(aiMsg, modelContext: modelContext)
 
@@ -1413,7 +1511,8 @@ final class AIService: AIServiceProtocol, CoachRepository {
             references: [],
             usedWebSearch: false,
             feedbackScore: nil,
-            confidence: 0
+            confidence: 0,
+            imageJPEG: nil
         )
         commitAssistantMessage(errMsg, modelContext: modelContext)
     }
@@ -1457,22 +1556,25 @@ final class AIService: AIServiceProtocol, CoachRepository {
         _ text: String,
         isPro: Bool,
         forcePlanIntake: Bool = false,
+        image: CoachUserImageAttachment? = nil,
         modelContext: ModelContext
     ) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let planIntake = forcePlanIntake || planIntakeModeActive || Self.shouldForcePlanIntake(for: trimmed)
         let alreadyPrepared = isLoading
+        let hasImage = image != nil
 
         if planIntake {
             planIntakeModeActive = true
         }
 
-        guard !trimmed.isEmpty else {
+        guard !trimmed.isEmpty || hasImage else {
             logCoachFlow("coachFlow sendMessage abort reason=empty")
             if alreadyPrepared { resetStreamingState(clearLoading: true) }
             return
         }
-        guard canSendCoachMessage(trimmed, isPro: isPro, forcePlanIntake: planIntake) else {
+        guard canSendCoachMessage(trimmed, isPro: isPro, forcePlanIntake: planIntake, hasImage: hasImage)
+        else {
             logCoachFlow("coachFlow sendMessage abort reason=dailyLimit isPro=\(isPro)")
             if alreadyPrepared { resetStreamingState(clearLoading: true) }
             return
@@ -1504,7 +1606,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
             )
         }
 
-        let userMsg = ChatMessage.user(trimmed)
+        let userMsg = ChatMessage.user(trimmed, imageJPEG: image?.jpegData)
         do {
             try persistCoachMessage(userMsg, modelContext: modelContext)
             messages.append(userMsg)
@@ -1529,11 +1631,19 @@ final class AIService: AIServiceProtocol, CoachRepository {
             streamDelivery = planIntake ? .planIntake : .onDevice
         }
 
+        await Task.yield()
+
         activeChatTurnTask?.cancel()
         activeChatTurnGeneration &+= 1
         let turnGeneration = activeChatTurnGeneration
         let turnTask = Task {
-            if !planIntake, !skipLocalCoachForNextTurn,
+            defer {
+                if activeChatTurnGeneration == turnGeneration {
+                    activeChatTurnTask = nil
+                }
+            }
+            await Task.yield()
+            if !planIntake, !skipLocalCoachForNextTurn, !hasImage,
                 await tryOnDeviceNarrowTurn(
                     userText: trimmed,
                     modelContext: modelContext
@@ -1544,7 +1654,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 return
             }
 
-            let webSearchTurn = activeTurnIsWebSearch
+            let webSearchTurn = activeTurnIsWebSearch && !hasImage
 
             // PCC cannot ground live web until Apple's webSearch extension ships — use Mangox Cloud.
             if webSearchTurn, !Self.isPCCLiveWebSearchAvailable {
@@ -1588,6 +1698,25 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 return
             }
 
+            if MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable,
+                let quotaMessage = MangoxPCCSupport.coachTurnQuotaBlockMessage()
+            {
+                logCoachFlow("coachFlow sendMessage path=pccQuotaBlocked")
+                self.error = quotaMessage
+                appendAssistantErrorBubble(
+                    quotaMessage,
+                    category: "error",
+                    modelContext: modelContext,
+                    failedPath: .privateCloudCompute
+                )
+                resetStreamingState(clearLoading: true)
+                if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) {
+                    PrivateCloudComputeLanguageModel().quotaUsage.limitIncreaseSuggestion?.show()
+                }
+                skipLocalCoachForNextTurn = false
+                return
+            }
+
             streamRouteStatus = planIntake
                 ? "Designing on Private Cloud…"
                 : "Trying Private Cloud…"
@@ -1603,6 +1732,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
             if await tryPrivateCloudComputeCoachTurn(
                 userText: trimmed,
                 planIntake: planIntake,
+                image: image,
                 modelContext: modelContext
             ) {
                 logCoachFlow("coachFlow sendMessage path=privateCloudCompute")
@@ -1610,18 +1740,40 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 return
             }
 
+            if await tryThirdPartyLanguageModelCoachTurn(
+                userText: trimmed,
+                planIntake: planIntake,
+                image: image,
+                modelContext: modelContext
+            ) {
+                logCoachFlow("coachFlow sendMessage path=thirdPartyLanguageModel")
+                skipLocalCoachForNextTurn = false
+                return
+            }
+
             if !planIntake, !webSearchTurn {
                 logRoutingFallback(
-                    from: .onDeviceNarrow,
+                    from: .privateCloudCompute,
                     to: .mangoxCloudBackend,
-                    reason: "pcc_miss"
+                    reason: "pcc_and_third_party_miss"
                 )
-            } else {
+            } else if !webSearchTurn {
                 logRoutingFallback(
                     from: .privateCloudCompute,
                     to: .mangoxCloudBackend,
                     reason: "pcc_miss"
                 )
+            }
+
+            if hasImage {
+                logCoachFlow("coachFlow sendMessage abort reason=imageRequiresLocalModel")
+                appendAssistantErrorBubble(
+                    "Photo questions need Private Cloud Compute or a configured fallback model in Settings → AI Coach.",
+                    category: "error",
+                    modelContext: modelContext
+                )
+                skipLocalCoachForNextTurn = false
+                return
             }
 
             streamRouteStatus = "Connecting to coach server…"
@@ -1638,10 +1790,6 @@ final class AIService: AIServiceProtocol, CoachRepository {
             skipLocalCoachForNextTurn = false
         }
         activeChatTurnTask = turnTask
-        await turnTask.value
-        if activeChatTurnGeneration == turnGeneration {
-            activeChatTurnTask = nil
-        }
     }
 
     // MARK: - On-device narrow routing
@@ -1655,6 +1803,8 @@ final class AIService: AIServiceProtocol, CoachRepository {
         pccCoachLanguageSession = nil
         pccCoachSessionOwnerID = nil
         pccCoachSessionModeRaw = nil
+        thirdPartyCoachLanguageSession = nil
+        thirdPartyCoachSessionOwnerID = nil
     }
 
     private func resetCoachLanguageSessions() {
@@ -1662,52 +1812,39 @@ final class AIService: AIServiceProtocol, CoachRepository {
         resetPCCCoachLanguageSession()
     }
 
-    private func coachOnDeviceTools(modelContext: ModelContext) -> [any Tool] {
+    /// Releases coach chat FM/PCC sessions so plan generation can open its own session.
+    private func prepareForPlanGeneration() {
+        activeChatTurnTask?.cancel()
+        activeChatTurnTask = nil
+        resetCoachLanguageSessions()
+    }
+
+    private func coachOnDeviceTools(digests: CoachOnDeviceToolDigestBundle) -> [any Tool] {
         var tools: [any Tool] = [
-            MangoxOnDeviceRecentWorkoutsTool(
-                digest: coachWorkoutHistoryDigestForOnDeviceTools(modelContext: modelContext)
-            ),
-            MangoxOnDeviceRiderExtendedTool(
-                digest: coachRiderExtendedProfileToolPayload(modelContext: modelContext)
-            ),
-            MangoxOnDeviceFTPHistoryTool(digest: coachFTPTestHistoryToolPayload()),
-            MangoxOnDeviceWhoopRecoveryTool(
-                digest: coachWhoopRecoveryToolPayload(modelContext: modelContext)
-            ),
-            MangoxOnDeviceActivePlanTool(
-                digest: coachActivePlanContextToolPayload(modelContext: modelContext)
-            ),
-            MangoxOnDeviceDecouplingTrendTool(
-                digest: coachDecouplingTrendToolPayload(modelContext: modelContext)
-            ),
-            MangoxOnDevicePowerCurveSummaryTool(
-                digest: coachPowerCurveSummaryToolPayload(modelContext: modelContext)
-            ),
-            MangoxOnDeviceCriticalPowerTool(
-                digest: coachCriticalPowerToolPayload(modelContext: modelContext)
-            ),
-            MangoxOnDevicePlanForwardSimTool(
-                dailyTSSFromPlan: coachPlanForwardDailyTSSForTools(modelContext: modelContext)
-            ),
+            MangoxOnDeviceRecentWorkoutsTool(digest: digests.recentWorkouts),
+            MangoxOnDeviceRiderExtendedTool(digest: digests.riderExtended),
+            MangoxOnDeviceFTPHistoryTool(digest: digests.ftpHistory),
+            MangoxOnDeviceWhoopRecoveryTool(digest: digests.whoopRecovery),
+            MangoxOnDeviceActivePlanTool(digest: digests.activePlan),
+            MangoxOnDeviceDecouplingTrendTool(digest: digests.decouplingTrend),
+            MangoxOnDevicePowerCurveSummaryTool(digest: digests.powerCurveSummary),
+            MangoxOnDeviceCriticalPowerTool(digest: digests.criticalPower),
+            MangoxOnDevicePlanForwardSimTool(dailyTSSFromPlan: digests.planForwardDailyTSS),
             MangoxOnDevicePMCProjectionTool(),
         ]
         tools.append(MangoxCoachSpotlightToolFactory.makeSpotlightSearchTool())
         return tools
     }
 
-    private func narrowOnDeviceTools(modelContext: ModelContext) -> [any Tool] {
-        coachOnDeviceTools(modelContext: modelContext)
-    }
-
     /// Reuses the narrow `LanguageModelSession` for the active chat session; creates on first turn.
-    private func narrowCoachSession(modelContext: ModelContext) -> LanguageModelSession {
+    private func narrowCoachSession(digests: CoachOnDeviceToolDigestBundle) -> LanguageModelSession {
         if let session = narrowCoachLanguageSession,
             narrowCoachSessionOwnerID == currentSessionID
         {
             return session
         }
         let session = OnDeviceCoachEngine.makeNarrowSession(
-            tools: narrowOnDeviceTools(modelContext: modelContext)
+            tools: coachOnDeviceTools(digests: digests)
         )
         narrowCoachLanguageSession = session
         narrowCoachSessionOwnerID = currentSessionID
@@ -1745,7 +1882,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
     @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
     private func pccCoachSession(
         mode: CoachAgentMode,
-        modelContext: ModelContext
+        digests: CoachOnDeviceToolDigestBundle
     ) -> LanguageModelSession {
         if let session = pccCoachLanguageSession,
             pccCoachSessionOwnerID == currentSessionID,
@@ -1753,7 +1890,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
         {
             return session
         }
-        let tools = narrowOnDeviceTools(modelContext: modelContext)
+        let tools = coachOnDeviceTools(digests: digests)
         let history: [Transcript.Entry] =
             pccCoachLanguageSession.map { Array($0.transcript) } ?? []
         let session = OnDeviceCoachEngine.makePCCCoachSession(
@@ -1771,6 +1908,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
     private func tryPrivateCloudComputeCoachTurn(
         userText: String,
         planIntake: Bool,
+        image: CoachUserImageAttachment? = nil,
         modelContext: ModelContext
     ) async -> Bool {
         guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return false }
@@ -1783,8 +1921,12 @@ final class AIService: AIServiceProtocol, CoachRepository {
             logCoachFlow("coachFlow pcc skip webSearch -> cloud fallback")
             return false
         }
-        let snapshot = coachFactSheetText(modelContext: modelContext)
-        let session = pccCoachSession(mode: mode, modelContext: modelContext)
+        let digests = await preparedOnDeviceToolDigests(modelContext: modelContext)
+        let snapshot = await coachTrainingSnapshotForCoachTurn(
+            modelContext: modelContext,
+            usePrivateCloudCompute: true
+        )
+        let session = pccCoachSession(mode: mode, digests: digests)
 
         do {
             let final = try await OnDeviceCoachEngine.signpostOnDeviceNarrow {
@@ -1792,7 +1934,8 @@ final class AIService: AIServiceProtocol, CoachRepository {
                     userMessage: userText,
                     trainingSnapshot: snapshot,
                     planIntake: planIntake,
-                    session: session
+                    session: session,
+                    image: image
                 ) { partial in
                     let body = partial.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     self.streamDelivery = CoachStreamDelivery.forPCCTurn(
@@ -1858,16 +2001,289 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 references: references,
                 usedWebSearch: usedWebSearch,
                 feedbackScore: nil,
-                confidence: 1.0
+                confidence: 1.0,
+                imageJPEG: nil
             )
             finishCoachReply(aiMsg, modelContext: modelContext)
+            syncPlanIntakeMode(
+                userText: userText,
+                forcePlanIntake: planIntake,
+                response: nil,
+                blocks: [],
+                panelFollowUp: followUp.isEmpty ? nil : followUp,
+                usedWebSearch: usedWebSearch
+            )
+            stagePlanConfirmationFromLocalIntakeIfReady(
+                planIntake: planIntake,
+                body: reply.body,
+                followUp: followUp,
+                suggestedActions: Array(actions),
+                category: deliveryCategory,
+                followUpBlocksCount: 0
+            )
             logCoachFlow("coachFlow pcc success chars=\(reply.body.count) mode=\(mode) webSearch=\(usedWebSearch)")
             return true
         } catch {
             logger.error("PCC coach turn failed: \(error)")
+            if MangoxPCCSupport.isQuotaLimitReached(error) {
+                let message = MangoxPCCSupport.userFacingMessage(for: error)
+                    ?? "Private Cloud daily limit reached."
+                self.error = message
+                appendAssistantErrorBubble(
+                    message,
+                    category: "error",
+                    modelContext: modelContext,
+                    failedPath: .privateCloudCompute
+                )
+                resetStreamingState(clearLoading: true)
+                MangoxPCCSupport.presentQuotaLimitIncreaseIfAvailable(from: error)
+                logCoachFlow("coachFlow pcc quotaLimitReached")
+                return true
+            }
+            if MangoxPCCSupport.isNetworkFailure(error) {
+                logCoachFlow("coachFlow pcc networkFailure -> onDevice retry")
+                if await tryOnDeviceCoachDegradedTurn(
+                    userText: userText,
+                    planIntake: planIntake,
+                    image: image,
+                    modelContext: modelContext
+                ) {
+                    return true
+                }
+            }
             logCoachFlow("coachFlow pcc error -> fallback cloud")
             return false
         }
+    }
+
+    /// On-device retry after PCC network failure (Apple's recommended fallback).
+    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
+    private func tryOnDeviceCoachDegradedTurn(
+        userText: String,
+        planIntake: Bool,
+        image: CoachUserImageAttachment?,
+        modelContext: ModelContext
+    ) async -> Bool {
+        guard OnDeviceCoachEngine.isOnDeviceWritingModelAvailable else { return false }
+
+        let digests = await preparedOnDeviceToolDigests(modelContext: modelContext)
+        let snapshot = await coachTrainingSnapshotForCoachTurn(
+            modelContext: modelContext,
+            usePrivateCloudCompute: false
+        )
+        let session = narrowCoachSession(digests: digests)
+        streamDelivery = planIntake ? .planIntake : .onDevice
+        streamRouteStatus = "Using on-device Apple Intelligence…"
+        streamIsSearchingWeb = false
+
+        do {
+            let final = try await OnDeviceCoachEngine.signpostOnDeviceNarrow {
+                try await OnDeviceCoachEngine.streamGuidedCoachReply(
+                    userMessage: userText,
+                    trainingSnapshot: snapshot,
+                    session: session,
+                    image: image,
+                    logLabel: "coach_pcc_network_fallback"
+                ) { partial in
+                    let body = partial.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    self.streamDelivery = planIntake ? .planIntake : .onDevice
+                    self.applyFMStreamPartial(
+                        body: body,
+                        partialTags: partial.tags,
+                        partialCategory: partial.category,
+                        planIntake: planIntake,
+                        usedWebSearch: false
+                    )
+                }
+            }
+
+            guard let reply = final, !reply.body.isEmpty else {
+                logCoachFlow("coachFlow pccNetworkFallback empty -> fallback cloud")
+                return false
+            }
+
+            let actions = reply.suggestedActions
+                .map { SuggestedAction(label: $0.label, type: "follow_up") }
+                .prefix(4)
+                .map { $0 }
+            let followUp = reply.followUp.trimmingCharacters(in: .whitespacesAndNewlines)
+            let tags = CoachReplyMetadataSupport.resolvedTags(
+                modelTags: reply.tags,
+                modelCategory: reply.category,
+                body: reply.body,
+                usedWebSearch: false,
+                planIntake: planIntake
+            )
+            let aiMsg = ChatMessage(
+                id: UUID(),
+                role: .assistant,
+                content: reply.body,
+                timestamp: .now,
+                suggestedActions: Self.sanitizedSuggestedActions(actions),
+                followUpQuestion: followUp.isEmpty ? nil : followUp,
+                followUpBlocks: [],
+                thinkingSteps: CoachReplyMetadataSupport.thinkingSteps(from: reply.reasoning),
+                category: planIntake ? "plan_intake" : "on_device",
+                tags: tags,
+                references: [],
+                usedWebSearch: false,
+                feedbackScore: nil,
+                confidence: 1.0,
+                imageJPEG: nil
+            )
+            finishCoachReply(aiMsg, modelContext: modelContext)
+            syncPlanIntakeMode(
+                userText: userText,
+                forcePlanIntake: planIntake,
+                response: nil,
+                blocks: [],
+                panelFollowUp: followUp.isEmpty ? nil : followUp,
+                usedWebSearch: false
+            )
+            stagePlanConfirmationFromLocalIntakeIfReady(
+                planIntake: planIntake,
+                body: reply.body,
+                followUp: followUp,
+                suggestedActions: Array(actions),
+                category: planIntake ? "plan_intake" : "on_device",
+                followUpBlocksCount: 0
+            )
+            logCoachFlow("coachFlow pccNetworkFallback success chars=\(reply.body.count)")
+            return true
+        } catch {
+            logger.error("On-device fallback after PCC network failure failed: \(error)")
+            logCoachFlow("coachFlow pccNetworkFallback error -> fallback cloud")
+            return false
+        }
+    }
+
+    /// Third-party `LanguageModel` path (Anthropic / Google SPM). Returns `false` when not configured.
+    private func tryThirdPartyLanguageModelCoachTurn(
+        userText: String,
+        planIntake: Bool,
+        image: CoachUserImageAttachment? = nil,
+        modelContext: ModelContext
+    ) async -> Bool {
+        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return false }
+        guard MangoxCoachLanguageModelProviderSupport.isThirdPartyFallbackConfigured else { return false }
+
+        let digests = await preparedOnDeviceToolDigests(modelContext: modelContext)
+        let snapshot = coachFactSheetText(modelContext: modelContext)
+        let session = thirdPartyCoachSession(planIntake: planIntake, digests: digests)
+        guard let session else {
+            logCoachFlow("coachFlow thirdParty skip reason=packageOrKeyMissing")
+            return false
+        }
+
+        streamDelivery = planIntake ? .planIntake : .onDevice
+        streamRouteStatus = "Trying fallback model…"
+
+        do {
+            let final = try await OnDeviceCoachEngine.signpostOnDeviceNarrow {
+                try await OnDeviceCoachEngine.streamGuidedCoachReply(
+                    userMessage: userText,
+                    trainingSnapshot: snapshot,
+                    session: session,
+                    image: image,
+                    logLabel: "coach_third_party_stream"
+                ) { partial in
+                    let body = partial.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    self.streamDelivery = planIntake ? .planIntake : .onDevice
+                    self.streamIsSearchingWeb = false
+                    self.applyFMStreamPartial(
+                        body: body,
+                        partialTags: partial.tags,
+                        partialCategory: partial.category,
+                        planIntake: planIntake,
+                        usedWebSearch: false
+                    )
+                }
+            }
+
+            guard let reply = final, !reply.body.isEmpty else {
+                logCoachFlow("coachFlow thirdParty empty -> fallback")
+                return false
+            }
+
+            let actions = reply.suggestedActions
+                .map { SuggestedAction(label: $0.label, type: "follow_up") }
+                .prefix(4)
+                .map { $0 }
+            let followUp = reply.followUp.trimmingCharacters(in: .whitespacesAndNewlines)
+            let tags = CoachReplyMetadataSupport.resolvedTags(
+                modelTags: reply.tags,
+                modelCategory: reply.category,
+                body: reply.body,
+                usedWebSearch: false,
+                planIntake: planIntake
+            )
+            let aiMsg = ChatMessage(
+                id: UUID(),
+                role: .assistant,
+                content: reply.body,
+                timestamp: .now,
+                suggestedActions: Self.sanitizedSuggestedActions(actions),
+                followUpQuestion: followUp.isEmpty ? nil : followUp,
+                followUpBlocks: [],
+                thinkingSteps: CoachReplyMetadataSupport.thinkingSteps(from: reply.reasoning),
+                category: "third_party_coach",
+                tags: tags,
+                references: [],
+                usedWebSearch: false,
+                feedbackScore: nil,
+                confidence: 1.0,
+                imageJPEG: nil
+            )
+            finishCoachReply(aiMsg, modelContext: modelContext)
+            syncPlanIntakeMode(
+                userText: userText,
+                forcePlanIntake: planIntake,
+                response: nil,
+                blocks: [],
+                panelFollowUp: followUp.isEmpty ? nil : followUp,
+                usedWebSearch: false
+            )
+            stagePlanConfirmationFromLocalIntakeIfReady(
+                planIntake: planIntake,
+                body: reply.body,
+                followUp: followUp,
+                suggestedActions: Array(actions),
+                category: planIntake ? "plan_intake" : "third_party_coach",
+                followUpBlocksCount: 0
+            )
+            logCoachFlow("coachFlow thirdParty success chars=\(reply.body.count)")
+            return true
+        } catch {
+            logger.error("Third-party coach turn failed: \(error)")
+            logCoachFlow("coachFlow thirdParty error -> fallback")
+            return false
+        }
+    }
+
+    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
+    private func thirdPartyCoachSession(
+        planIntake: Bool,
+        digests: CoachOnDeviceToolDigestBundle
+    ) -> LanguageModelSession? {
+        if let session = thirdPartyCoachLanguageSession,
+            thirdPartyCoachSessionOwnerID == currentSessionID
+        {
+            return session
+        }
+        let tools = coachOnDeviceTools(digests: digests)
+        let history = pccCoachLanguageSession.map { Array($0.transcript) }
+            ?? thirdPartyCoachLanguageSession.map { Array($0.transcript) }
+            ?? []
+        guard
+            let session = MangoxCoachLanguageModelProviderSupport.makeThirdPartyCoachSession(
+                planIntake: planIntake,
+                tools: tools,
+                history: history
+            )
+        else { return nil }
+        thirdPartyCoachLanguageSession = session
+        thirdPartyCoachSessionOwnerID = currentSessionID
+        return session
     }
 
     /// Returns `true` when the on-device Foundation Models path produced a final assistant
@@ -1882,8 +2298,9 @@ final class AIService: AIServiceProtocol, CoachRepository {
             modelContext: modelContext
         ) else { return false }
 
+        let digests = await preparedOnDeviceToolDigests(modelContext: modelContext)
         let snapshot = await coachTrainingSnapshotForOnDeviceNarrow(modelContext: modelContext)
-        let session = narrowCoachSession(modelContext: modelContext)
+        let session = narrowCoachSession(digests: digests)
         streamDelivery = .onDevice
         streamRouteStatus = nil
 
@@ -1942,7 +2359,8 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 references: [],
                 usedWebSearch: false,
                 feedbackScore: nil,
-                confidence: 1.0
+                confidence: 1.0,
+                imageJPEG: nil
             )
             finishCoachReply(aiMsg, modelContext: modelContext)
             logCoachFlow("coachFlow onDevice success chars=\(reply.body.count)")
@@ -1969,13 +2387,16 @@ final class AIService: AIServiceProtocol, CoachRepository {
             planProgress = nil
         }
 
+        prepareForPlanGeneration()
+
         if OnDevicePlanGenerator.canGenerateOnDevice {
             do {
                 let factSheet = coachFactSheetText(modelContext: modelContext)
                 let plan = try await OnDevicePlanGenerator.generate(
                     inputs: inputs,
                     factSheet: factSheet,
-                    ftp: PowerZone.ftp
+                    ftp: PowerZone.ftp,
+                    tools: []
                 ) { [weak self] progress in
                     Task { @MainActor in
                         self?.planProgress = progress
@@ -1990,13 +2411,22 @@ final class AIService: AIServiceProtocol, CoachRepository {
                     generationMetrics: nil
                 )
             } catch {
+                if MangoxPCCSupport.isQuotaLimitReached(error) {
+                    throw error
+                }
                 logger.info(
-                    "On-device plan generation failed, falling back to cloud: \(error.localizedDescription)"
+                    "On-device plan generation failed: \(error.localizedDescription)"
                 )
             }
         }
 
-        let encrypted = encryptUserContext(buildUserContext(modelContext: modelContext))
+        guard MangoxCoachLanguageModelProviderSupport.planCloudFallbackEnabled else {
+            throw OnDevicePlanGenerator.canGenerateOnDevice
+                ? OnDevicePlanGeneratorError.cloudFallbackDisabled
+                : OnDevicePlanGeneratorError.unavailable
+        }
+
+        let encrypted = encryptUserContext(cachedUserContext(modelContext: modelContext))
 
         #if !DEBUG
         if encrypted == nil {
@@ -2013,13 +2443,22 @@ final class AIService: AIServiceProtocol, CoachRepository {
             client_time_zone: TimeZone.current.identifier
         )
 
-        // Try streaming endpoint first (progress events); fall back to regular endpoint.
+        // Try streaming endpoint first (progress events); fall back to regular endpoint only
+        // when the stream never delivered model output (avoids duplicate generation).
         do {
             return try await generatePlanStreaming(request: request, idempotencyKey: idempotencyKey)
+        } catch let streamError as PlanStreamError {
+            if MangoxSSEFallbackPolicy.shouldFallbackToNonStreaming(
+                receivedStreamPayload: streamError.receivedStreamPayload
+            ) {
+                logger.info(
+                    "Streaming plan endpoint unavailable, falling back to regular: \(streamError.underlying.localizedDescription)"
+                )
+            } else {
+                throw streamError.underlying
+            }
         } catch {
-            logger.info(
-                "Streaming plan endpoint unavailable, falling back to regular: \(error.localizedDescription)"
-            )
+            throw error
         }
 
         let response: PlanGenerationResponse = try await post(
@@ -2068,7 +2507,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
             }
         }
 
-        let encrypted = encryptUserContext(buildUserContext(modelContext: modelContext))
+        let encrypted = encryptUserContext(cachedUserContext(modelContext: modelContext))
 
         #if !DEBUG
         if encrypted == nil {
@@ -2108,18 +2547,30 @@ final class AIService: AIServiceProtocol, CoachRepository {
         urlReq.timeoutInterval = 300
         urlReq.httpBody = try JSONEncoder().encode(request)
 
-        let (bytes, response) = try await URLSession.shared.bytes(for: urlReq)
+        let (bytes, response): (URLSession.AsyncBytes, URLResponse)
+        do {
+            (bytes, response) = try await URLSession.shared.bytes(for: urlReq)
+        } catch {
+            throw PlanStreamError(underlying: error, receivedStreamPayload: false)
+        }
 
         if let http = response as? HTTPURLResponse {
             // If the streaming endpoint doesn't exist (404) or returns non-SSE, throw to trigger fallback
             guard http.statusCode == 200 else {
-                throw URLError(.badServerResponse)
+                throw PlanStreamError(
+                    underlying: URLError(.badServerResponse),
+                    receivedStreamPayload: false
+                )
             }
             let ct = http.value(forHTTPHeaderField: "Content-Type") ?? ""
             if ct.contains("application/json") {
                 // Server returned a cached idempotent response (regular JSON, not SSE)
                 var data = Data()
-                for try await byte in bytes { data.append(byte) }
+                do {
+                    for try await byte in bytes { data.append(byte) }
+                } catch {
+                    throw PlanStreamError(underlying: error, receivedStreamPayload: false)
+                }
                 let decoded = try JSONDecoder().decode(PlanGenerationResponse.self, from: data)
                 lastCreditsRemaining = decoded.credits_remaining
                 return PlanGenerationResult(
@@ -2133,49 +2584,71 @@ final class AIService: AIServiceProtocol, CoachRepository {
         }
 
         // Parse SSE events
-        for try await line in bytes.lines {
-            guard line.hasPrefix("data: ") else { continue }
-            let json = String(line.dropFirst(6))
-            guard let data = json.data(using: .utf8) else { continue }
+        var receivedStreamPayload = false
+        do {
+            for try await line in bytes.lines {
+                guard line.hasPrefix("data: ") else { continue }
+                let json = String(line.dropFirst(6))
+                guard let data = json.data(using: .utf8) else { continue }
 
-            guard let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let type = event["type"] as? String
-            else { continue }
+                guard let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                    let type = event["type"] as? String
+                else { continue }
 
-            switch type {
-            case "progress":
-                let phase = event["phase"] as? String ?? ""
-                let message = event["message"] as? String ?? ""
-                let current = event["current"] as? Int
-                let total = event["total"] as? Int
-                planProgress = PlanGenerationProgress(
-                    phase: phase, message: message, current: current, total: total
-                )
+                switch type {
+                case "progress":
+                    receivedStreamPayload = true
+                    let phase = event["phase"] as? String ?? ""
+                    let message = event["message"] as? String ?? ""
+                    let current = event["current"] as? Int
+                    let total = event["total"] as? Int
+                    planProgress = PlanGenerationProgress(
+                        phase: phase, message: message, current: current, total: total
+                    )
 
-            case "complete":
-                // The complete event contains the full response payload
-                let decoded = try JSONDecoder().decode(PlanGenerationResponse.self, from: data)
-                lastCreditsRemaining = decoded.credits_remaining
-                return PlanGenerationResult(
-                    plan: decoded.plan,
-                    requestId: decoded.request_id,
-                    validationWarnings: decoded.validation_warnings ?? [],
-                    creditsRemaining: decoded.credits_remaining,
-                    generationMetrics: decoded.generation_metrics
-                )
+                case "complete":
+                    receivedStreamPayload = true
+                    let decoded = try JSONDecoder().decode(PlanGenerationResponse.self, from: data)
+                    lastCreditsRemaining = decoded.credits_remaining
+                    return PlanGenerationResult(
+                        plan: decoded.plan,
+                        requestId: decoded.request_id,
+                        validationWarnings: decoded.validation_warnings ?? [],
+                        creditsRemaining: decoded.credits_remaining,
+                        generationMetrics: decoded.generation_metrics
+                    )
 
-            case "error":
-                let errorMsg = event["error"] as? String ?? "Plan generation failed"
-                throw NSError(
-                    domain: "PlanGeneration", code: -1,
-                    userInfo: [NSLocalizedDescriptionKey: errorMsg])
+                case "error":
+                    receivedStreamPayload = true
+                    let errorMsg = event["error"] as? String ?? "Plan generation failed"
+                    throw NSError(
+                        domain: "PlanGeneration", code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: errorMsg])
 
-            default:
-                break
+                default:
+                    break
+                }
             }
+        } catch {
+            throw PlanStreamError(underlying: error, receivedStreamPayload: receivedStreamPayload)
         }
 
-        throw URLError(.badServerResponse)
+        if receivedStreamPayload {
+            throw PlanStreamError(
+                underlying: URLError(.badServerResponse),
+                receivedStreamPayload: true
+            )
+        }
+
+        throw PlanStreamError(
+            underlying: URLError(.badServerResponse),
+            receivedStreamPayload: false
+        )
+    }
+
+    private struct PlanStreamError: Error {
+        let underlying: Error
+        let receivedStreamPayload: Bool
     }
 
     /// Persists `AIGeneratedPlan`, clears the confirmation draft, and presents success.
@@ -2290,6 +2763,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
         }
 
         if OnDevicePlanGenerator.canGenerateOnDevice {
+            prepareForPlanGeneration()
             do {
                 let factSheet = coachFactSheetText(modelContext: modelContext)
                 let days = try await OnDevicePlanGenerator.regenerateWeek(
@@ -2297,7 +2771,8 @@ final class AIService: AIServiceProtocol, CoachRepository {
                     plan: plan,
                     weekNumber: weekNumber,
                     factSheet: factSheet,
-                    ftp: PowerZone.ftp
+                    ftp: PowerZone.ftp,
+                    tools: []
                 )
                 let updated = plan.replacingDays(forWeekNumber: weekNumber, days: days)
                 guard let json = try? JSONEncoder().encode(updated) else {
@@ -2324,12 +2799,16 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 return
             } catch {
                 logger.info(
-                    "On-device week regeneration failed, falling back to cloud: \(error.localizedDescription)"
+                    "On-device week regeneration failed: \(error.localizedDescription)"
                 )
             }
         }
 
-        let enc = encryptUserContext(buildUserContext(modelContext: modelContext))
+        guard MangoxCoachLanguageModelProviderSupport.planCloudFallbackEnabled else {
+            throw OnDevicePlanGeneratorError.cloudFallbackDisabled
+        }
+
+        let enc = encryptUserContext(cachedUserContext(modelContext: modelContext))
         let body = RegeneratePlanWeekRequest(
             inputs: inputs,
             week_number: weekNumber,
@@ -2407,6 +2886,41 @@ final class AIService: AIServiceProtocol, CoachRepository {
             return
         }
 
+        stagePlanConfirmationDraft(from: detail, modelContext: modelContext)
+    }
+
+    /// PCC / on-device plan intake: stage confirmation when transcript has required fields.
+    private func stagePlanConfirmationFromLocalIntakeIfReady(
+        planIntake: Bool,
+        body: String,
+        followUp: String,
+        suggestedActions: [SuggestedAction],
+        category: String,
+        followUpBlocksCount: Int
+    ) {
+        guard planIntake, planConfirmationDraft == nil else { return }
+        let turn = PlanIntakeLocalDraftStaging.TurnContext(
+            body: body,
+            followUp: followUp,
+            suggestedActionLabels: suggestedActions.map(\.label),
+            category: category,
+            followUpBlocksCount: followUpBlocksCount
+        )
+        guard
+            let draft = PlanIntakeLocalDraftStaging.draftIfReady(
+                messages: messages,
+                turn: turn,
+                ftp: PowerZone.ftp
+            )
+        else { return }
+        planConfirmationDraft = draft
+        logCoachFlow("coachFlow localPlanIntake stagedConfirmation event=\(draft.inputs.event_name)")
+    }
+
+    private func stagePlanConfirmationDraft(
+        from detail: GeneratePlanToolDetail,
+        modelContext: ModelContext
+    ) {
         let eventName = detail.event_name.trimmingCharacters(in: .whitespacesAndNewlines)
         let eventDateRaw = (detail.event_date ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !eventName.isEmpty else {
@@ -2559,7 +3073,8 @@ final class AIService: AIServiceProtocol, CoachRepository {
             references: [],
             usedWebSearch: false,
             feedbackScore: nil,
-            confidence: 1.0
+            confidence: 1.0,
+            imageJPEG: nil
         )
         commitAssistantMessage(msg, modelContext: modelContext)
     }
@@ -2832,7 +3347,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
         await Task.yield()
 
         if let sessionID = currentSessionID {
-            loadSession(sessionID, modelContext: modelContext)
+            await loadSession(sessionID, modelContext: modelContext)
             return
         }
 
@@ -2841,14 +3356,15 @@ final class AIService: AIServiceProtocol, CoachRepository {
         )
         if let sessions = try? modelContext.fetch(sessionDescriptor), let latest = sessions.first {
             currentSessionID = latest.id
-            loadSession(latest.id, modelContext: modelContext)
+            await loadSession(latest.id, modelContext: modelContext)
             return
         }
 
         logger.debug("No sessions found, starting fresh")
     }
 
-    private func loadSession(_ sessionID: UUID, modelContext: ModelContext) {
+    private func loadSession(_ sessionID: UUID, modelContext: ModelContext) async {
+        await Task.yield()
         // Fetch newest 100 messages (sort descending so the limit keeps the tail,
         // then reverse in-memory for chronological display order).
         var descriptor = FetchDescriptor<CoachChatMessage>(
@@ -2873,6 +3389,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
             cancelActiveChatTurnIfNeeded()
         }
         resetCoachLanguageSessions()
+        invalidateCoachContextCache()
         let session = ChatSession()
         modelContext.insert(session)
         do {
@@ -2894,38 +3411,55 @@ final class AIService: AIServiceProtocol, CoachRepository {
     func switchToSession(_ sessionID: UUID, modelContext: ModelContext) {
         cancelActiveChatTurnIfNeeded()
         resetCoachLanguageSessions()
+        invalidateCoachContextCache()
         currentSessionID = sessionID
         clearPlanIntakeMode()
         planConfirmationDraft = nil
         planSaveCelebration = nil
         workoutConfirmationDraft = nil
         workoutSaveCelebration = nil
-        loadSession(sessionID, modelContext: modelContext)
+        messages.removeAll()
+        Task { await loadSession(sessionID, modelContext: modelContext) }
     }
 
-    /// Deletes a session by ID. If it's the current session, clears messages too.
-    func deleteSession(_ sessionID: UUID, modelContext: ModelContext) {
-        let descriptor = FetchDescriptor<ChatSession>(
-            predicate: #Predicate<ChatSession> { $0.id == sessionID }
-        )
-        if let sessions = try? modelContext.fetch(descriptor), let session = sessions.first {
-            modelContext.delete(session)
-            do {
-                try modelContext.save()
-                if currentSessionID == sessionID {
-                    messages.removeAll()
-                    currentSessionID = nil
-                    resetCoachLanguageSessions()
-                    clearPlanIntakeMode()
-                    planConfirmationDraft = nil
-                    planSaveCelebration = nil
-                    workoutConfirmationDraft = nil
-                    workoutSaveCelebration = nil
-                }
-                logger.debug("Deleted session \(sessionID)")
-            } catch {
-                logger.error("Failed to delete session: \(error)")
+    /// Deletes one or more sessions in a single save. Clears in-memory state when the active session is removed.
+    func deleteSessions(_ sessionIDs: Set<UUID>, modelContext: ModelContext) {
+        guard !sessionIDs.isEmpty else { return }
+        let deletingCurrent = currentSessionID.map { sessionIDs.contains($0) } ?? false
+        if deletingCurrent {
+            cancelActiveChatTurnIfNeeded()
+        }
+
+        var deletedCount = 0
+        for sessionID in sessionIDs {
+            let descriptor = FetchDescriptor<ChatSession>(
+                predicate: #Predicate<ChatSession> { $0.id == sessionID }
+            )
+            guard let sessions = try? modelContext.fetch(descriptor), let session = sessions.first else {
+                continue
             }
+            modelContext.delete(session)
+            deletedCount += 1
+        }
+
+        guard deletedCount > 0 else { return }
+
+        do {
+            try modelContext.save()
+            if deletingCurrent {
+                messages.removeAll()
+                currentSessionID = nil
+                resetCoachLanguageSessions()
+                invalidateCoachContextCache()
+                clearPlanIntakeMode()
+                planConfirmationDraft = nil
+                planSaveCelebration = nil
+                workoutConfirmationDraft = nil
+                workoutSaveCelebration = nil
+            }
+            logger.debug("Deleted \(deletedCount) coach session(s)")
+        } catch {
+            logger.error("Failed to delete coach sessions: \(error)")
         }
     }
 
@@ -3144,7 +3678,18 @@ final class AIService: AIServiceProtocol, CoachRepository {
             skipLocalCoachForNextTurn = true
             resetCoachLanguageSessions()
         }
-        await sendMessage(lastUserMsg.content, isPro: isPro, modelContext: modelContext)
+        let retryImage: CoachUserImageAttachment?
+        if let jpeg = lastUserMsg.imageJPEG {
+            retryImage = CoachUserImageAttachment(jpegData: jpeg, pixelWidth: 0, pixelHeight: 0)
+        } else {
+            retryImage = nil
+        }
+        await sendMessage(
+            lastUserMsg.content,
+            isPro: isPro,
+            image: retryImage,
+            modelContext: modelContext
+        )
     }
 
     // MARK: - Context Window
@@ -3216,6 +3761,12 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
     /// User-visible copy for plan API failures (avoids raw DecodingError strings in the confirm banner).
     static func userFacingPlanGenerationError(_ error: Error) -> String {
+        if let planErr = error as? OnDevicePlanGeneratorError {
+            return planErr.localizedDescription
+        }
+        if MangoxPCCSupport.isSessionEstablishmentFailure(error) {
+            return "Apple Intelligence couldn't start a plan session. Mangox tried cloud generation — check Settings → AI Coach that **Allow Mangox Cloud fallback** is on and your backend URL is set."
+        }
         if let urlErr = error as? URLError, urlErr.code == .badServerResponse {
             return "The plan server returned an error. Check your connection and try again."
         }
@@ -3227,7 +3778,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
     }
 
     func contextualQuickPrompts(modelContext: ModelContext) -> [QuickPrompt] {
-        let availability = starterPromptAvailability(modelContext: modelContext)
+        let availability = cachedStarterPromptAvailability(modelContext: modelContext)
         var prompts: [QuickPrompt] = []
         let status = recoveryStatus(modelContext: modelContext)
         if let whoop = whoopDataSource, whoop.isConnected, let pct = whoop.latestRecoveryScore,

@@ -241,9 +241,7 @@ struct CoachSessionsSheet: View {
     }
 
     private func removeSessions(ids: Set<UUID>) {
-        for id in ids {
-            coachViewModel.deleteSession(id)
-        }
+        coachViewModel.deleteSessions(ids)
     }
 
     private func deleteSessionsAtOffsets(_ offsets: IndexSet) {

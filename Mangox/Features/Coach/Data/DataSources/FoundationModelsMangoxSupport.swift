@@ -208,4 +208,51 @@ enum MangoxFoundationModelsSupport {
             desiredResponseText: desiredResponseText
         )
     }
+
+    // MARK: - Dynamic Profile hooks (iOS 27)
+
+    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
+    static func recordDynamicProfilePrompt(mode: CoachAgentMode, prompt: Transcript.Prompt) {
+        guard tokenBudgetLoggingEnabled || coachFlowLoggingEnabled else { return }
+        logger.info(
+            "FM dynamicProfile prompt mode=\(mode.rawStorageKey, privacy: .public) segments=\(prompt.segments.count)"
+        )
+        PrecisionCoachInstrumentation.coachDynamicProfileEvent(
+            phase: "prompt",
+            mode: mode.rawStorageKey,
+            detail: "segments=\(prompt.segments.count)"
+        )
+    }
+
+    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
+    static func recordDynamicProfileResponse(mode: CoachAgentMode, response: Transcript.Response) {
+        guard tokenBudgetLoggingEnabled || coachFlowLoggingEnabled else { return }
+        logger.info("FM dynamicProfile response mode=\(mode.rawStorageKey, privacy: .public)")
+        PrecisionCoachInstrumentation.coachDynamicProfileEvent(
+            phase: "response",
+            mode: mode.rawStorageKey,
+            detail: nil
+        )
+    }
+
+    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
+    static func recordDynamicProfileToolCall(mode: CoachAgentMode, toolCall: Transcript.ToolCall) {
+        guard tokenBudgetLoggingEnabled || coachFlowLoggingEnabled else { return }
+        logger.info(
+            "FM dynamicProfile toolCall mode=\(mode.rawStorageKey, privacy: .public) tool=\(toolCall.toolName, privacy: .public)"
+        )
+        PrecisionCoachInstrumentation.coachDynamicProfileEvent(
+            phase: "toolCall",
+            mode: mode.rawStorageKey,
+            detail: toolCall.toolName
+        )
+    }
+
+    private static var coachFlowLoggingEnabled: Bool {
+        #if DEBUG
+        return UserDefaults.standard.object(forKey: "MangoxCoachChatFlowLog") as? Bool ?? true
+        #else
+        return UserDefaults.standard.bool(forKey: "MangoxCoachChatFlowLog")
+        #endif
+    }
 }
