@@ -100,6 +100,10 @@ struct CoachChatTranscriptView: View {
         }
         .onChange(of: coach.messages.count) { oldCount, newCount in
             guard newCount > oldCount else { return }
+            // Only force-pin for outgoing user messages; incoming coach replies rely on
+            // defaultScrollAnchor(.bottom, for: .sizeChanges) so reading history isn't jerked.
+            let isOutgoing = coach.messages.last?.role == .user
+            guard isOutgoing else { return }
             schedulePinToBottom(animated: false)
         }
         .onChange(of: coach.planSaveCelebration?.planID) { _, _ in

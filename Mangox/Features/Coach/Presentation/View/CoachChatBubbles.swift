@@ -1186,6 +1186,7 @@ struct CoachTallPromptButton: View {
     var body: some View {
         Button {
             guard isEnabled, !isSent else { return }
+            HapticManager.shared.coachQuickReplyTapped()
             action()
         } label: {
             HStack(alignment: .center, spacing: 12) {
