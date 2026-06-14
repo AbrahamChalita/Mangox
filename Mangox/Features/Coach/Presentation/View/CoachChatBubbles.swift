@@ -223,13 +223,20 @@ struct CoachMessageRow: View {
 // MARK: - User
 
 private enum CoachUserBubbleImageCache {
-    private static let cache = NSCache<NSString, UIImage>()
+    private static let cache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 64
+        cache.totalCostLimit = 50 * 1024 * 1024 // 50 MB
+        return cache
+    }()
 
     static func image(for data: Data, key: UUID) -> UIImage? {
         let cacheKey = key.uuidString as NSString
         if let cached = cache.object(forKey: cacheKey) { return cached }
         guard let image = UIImage(data: data) else { return nil }
-        cache.setObject(image, forKey: cacheKey)
+        // Cost roughly tracks decoded pixel buffer size.
+        let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+        cache.setObject(image, forKey: cacheKey, cost: max(1, cost))
         return image
     }
 }
@@ -307,7 +314,7 @@ struct CoachAssistantBubble: View {
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var expandedLongBody = false
-    @State private var metadataRevealStage = 0
+    @State private var isMetadataVisible = false
     @State private var sourcesExpanded = false
 
     private var displayText: AttributedString {
@@ -455,7 +462,7 @@ struct CoachAssistantBubble: View {
                     .accessibilityLabel(A11yL10n.webSourcesAnswer)
                 }
 
-                if !visibleTags.isEmpty, metadataRevealStage >= 2 {
+                if !visibleTags.isEmpty, isMetadataVisible {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
                             ForEach(visibleTags, id: \.self) { tag in
@@ -482,7 +489,7 @@ struct CoachAssistantBubble: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                if !message.thinkingSteps.isEmpty, metadataRevealStage >= 3 {
+                if !message.thinkingSteps.isEmpty, isMetadataVisible {
                     Divider()
                         .background(Color.white.opacity(0.08))
                         .padding(.horizontal, 14)
@@ -492,7 +499,7 @@ struct CoachAssistantBubble: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                if !message.references.isEmpty, metadataRevealStage >= 3 {
+                if !message.references.isEmpty, isMetadataVisible {
                     CoachCollapsedSourcesSection(
                         references: message.references,
                         isExpanded: $sourcesExpanded,
@@ -501,7 +508,7 @@ struct CoachAssistantBubble: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                if let inlineFollowUp, metadataRevealStage >= 3 {
+                if let inlineFollowUp, isMetadataVisible {
                     CoachInlineFollowUpSection(
                         model: inlineFollowUp,
                         accent: categoryAccent
@@ -509,7 +516,7 @@ struct CoachAssistantBubble: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                if showsFeedback, let onFeedback, metadataRevealStage >= 3 {
+                if showsFeedback, let onFeedback, isMetadataVisible {
                     CoachMessageFeedbackRow(score: message.feedbackScore, onSubmit: onFeedback)
                         .padding(.horizontal, 14)
                         .padding(.bottom, 10)
@@ -529,7 +536,7 @@ struct CoachAssistantBubble: View {
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(A11yL10n.coach)
+        .accessibilityLabel(A11yL10n.coachReplyFormat(categoryLabel, responseAppearance.label))
         .accessibilityValue(message.content)
         .onAppear { beginMetadataReveal() }
         .onChange(of: message.id) { _, _ in beginMetadataReveal() }
@@ -547,11 +554,11 @@ struct CoachAssistantBubble: View {
     }
 
     private func beginMetadataReveal() {
-        metadataRevealStage = 1
+        isMetadataVisible = false
         sourcesExpanded = false
 
         if (message.category ?? "").lowercased() == "plan_intake" {
-            metadataRevealStage = 3
+            isMetadataVisible = true
             return
         }
 
@@ -565,7 +572,7 @@ struct CoachAssistantBubble: View {
         guard hasMetadata else { return }
 
         if accessibilityReduceMotion || (isShortReply && wantsFeedback) {
-            metadataRevealStage = 3
+            isMetadataVisible = true
             return
         }
 
@@ -573,19 +580,13 @@ struct CoachAssistantBubble: View {
             message.thinkingSteps.isEmpty, message.references.isEmpty,
             inlineFollowUp == nil
         {
-            metadataRevealStage = 3
+            isMetadataVisible = true
             return
         }
 
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(120))
-            withAnimation(CoachChatMotionSupport.animation(reduceMotion: false, MangoxMotion.snappy)) {
-                metadataRevealStage = 2
-            }
-            try? await Task.sleep(for: .milliseconds(140))
-            withAnimation(CoachChatMotionSupport.animation(reduceMotion: false, MangoxMotion.smooth)) {
-                metadataRevealStage = 3
-            }
+        // Reveal metadata in one smooth step instead of staged sleeps.
+        withAnimation(CoachChatMotionSupport.animation(reduceMotion: false, MangoxMotion.smooth)) {
+            isMetadataVisible = true
         }
     }
 }
@@ -744,29 +745,29 @@ struct CoachMessageFeedbackRow: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.38))
 
-            Button {
-                HapticManager.shared.coachQuickReplyTapped()
-                onSubmit(1)
-            } label: {
-                Image(systemName: thumbsUpSelected ? "hand.thumbsup.fill" : "hand.thumbsup")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(thumbsUpSelected ? AppColor.mango : .white.opacity(0.42))
-                    .frame(width: 36, height: 32)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Helpful")
+                Button {
+                    HapticManager.shared.coachQuickReplyTapped()
+                    onSubmit(1)
+                } label: {
+                    Image(systemName: thumbsUpSelected ? "hand.thumbsup.fill" : "hand.thumbsup")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(thumbsUpSelected ? AppColor.mango : .white.opacity(0.42))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Helpful")
 
-            Button {
-                HapticManager.shared.coachQuickReplyTapped()
-                onSubmit(-1)
-            } label: {
-                Image(systemName: thumbsDownSelected ? "hand.thumbsdown.fill" : "hand.thumbsdown")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(thumbsDownSelected ? AppColor.red.opacity(0.9) : .white.opacity(0.42))
-                    .frame(width: 36, height: 32)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Not helpful")
+                Button {
+                    HapticManager.shared.coachQuickReplyTapped()
+                    onSubmit(-1)
+                } label: {
+                    Image(systemName: thumbsDownSelected ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(thumbsDownSelected ? AppColor.red.opacity(0.9) : .white.opacity(0.42))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Not helpful")
         }
         .accessibilityElement(children: .combine)
     }
@@ -832,6 +833,7 @@ struct CoachErrorBubble: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Try again")
 
                 Button(action: onRetryCloud) {
                     HStack(spacing: 6) {
@@ -851,6 +853,7 @@ struct CoachErrorBubble: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Retry on cloud server")
             }
         }
         .padding(.horizontal, 16)
@@ -860,6 +863,7 @@ struct CoachErrorBubble: View {
             shape: .rounded(MangoxRadius.sharp.rawValue)
         )
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -939,7 +943,8 @@ struct CoachStreamStatusRow: View {
     }
 }
 
-/// Compact typing indicator — lightweight TimelineView wave (cheaper than three PhaseAnimators).
+/// Smooth sine-wave typing indicator. Updates every 50 ms but interpolates
+/// opacity continuously so the wave feels fluid rather than stepped.
 private struct CoachTypingDotsIndicator: View {
     let accent: Color
     var spacing: CGFloat = 5
@@ -957,12 +962,14 @@ private struct CoachTypingDotsIndicator: View {
                     }
                 }
             } else {
-                TimelineView(.periodic(from: .now, by: 0.42)) { context in
-                    let activeIndex = Int(context.date.timeIntervalSinceReferenceDate / 0.42) % 3
+                TimelineView(.periodic(from: .now, by: 0.05)) { context in
+                    let t = context.date.timeIntervalSinceReferenceDate
                     HStack(spacing: spacing) {
                         ForEach(0..<3, id: \.self) { index in
+                            let offset = Double(index) * 0.18
+                            let opacity = 0.34 + 0.58 * ((sin((t - offset) * 10.0) + 1.0) / 2.0)
                             Circle()
-                                .fill(accent.opacity(index == activeIndex ? 0.92 : 0.34))
+                                .fill(accent.opacity(opacity))
                                 .frame(width: 7, height: 7)
                         }
                     }

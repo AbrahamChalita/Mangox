@@ -33,6 +33,7 @@ protocol AIServiceProtocol: AnyObject {
     func canSendCoachMessage(_ text: String, isPro: Bool, forcePlanIntake: Bool, hasImage: Bool) -> Bool
     func instantCoachEmptyStartersContent() -> CoachEmptyStartersContent
     func loadCoachEmptyStartersContent() async -> CoachEmptyStartersContent
+    func warmCoachContextCache() async
     func contextualQuickPrompts() -> [QuickPrompt]
 
     func sendMessage(
@@ -41,9 +42,6 @@ protocol AIServiceProtocol: AnyObject {
         forcePlanIntake: Bool,
         image: CoachUserImageAttachment?
     ) async
-
-    @discardableResult
-    func prepareOutgoingMessage(_ text: String, isPro: Bool, forcePlanIntake: Bool, hasImage: Bool) -> Bool
 
     func cancelActiveChatTurn()
 

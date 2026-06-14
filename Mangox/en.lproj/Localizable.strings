@@ -113,6 +113,7 @@
 "coach.a11y.on_device_answer" = "On-device answer, private on this device";
 "coach.a11y.web_sources_answer" = "Answer used live web sources";
 "coach.a11y.coach" = "Coach";
+"coach.a11y.coach_reply_format" = "%1$@ reply from %2$@ coach";
 "coach.a11y.coach_status_format" = "Coach status: %@";
 "coach.a11y.question_format" = "Question %1$d of %2$d";
 "coach.a11y.coach_typing" = "Coach is typing";

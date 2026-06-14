@@ -5,411 +5,6 @@ import SwiftData
 import SwiftUI
 import os.log
 
-// MARK: - API Request / Response Models
-
-struct ChatRequest: Encodable {
-    let message: String
-    let history: [HistoryTurn]?
-    /// Plaintext context — only set when no encryption key is available (dev/fallback).
-    let user_context: UserContext?
-    /// AES-256-GCM encrypted context: base64(nonce[12] ‖ ciphertext ‖ tag[16]).
-    /// When present, `user_context` is nil.
-    let user_context_encrypted: String?
-    let is_pro: Bool
-    /// Device local calendar date `yyyy-MM-dd` so the coach anchors schedules correctly.
-    let client_local_date: String
-    /// IANA zone id (e.g. `America/Los_Angeles`).
-    let client_time_zone: String
-    /// When true, backend prepends plan-intake booster and forces full tier + user context.
-    let force_plan_intake: Bool?
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(message, forKey: .message)
-        try container.encodeIfPresent(history, forKey: .history)
-        try container.encodeIfPresent(user_context, forKey: .user_context)
-        try container.encodeIfPresent(user_context_encrypted, forKey: .user_context_encrypted)
-        try container.encode(is_pro, forKey: .is_pro)
-        try container.encode(client_local_date, forKey: .client_local_date)
-        try container.encode(client_time_zone, forKey: .client_time_zone)
-        if force_plan_intake == true {
-            try container.encode(true, forKey: .force_plan_intake)
-        }
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case message, history, user_context, user_context_encrypted
-        case is_pro, client_local_date, client_time_zone, force_plan_intake
-    }
-}
-
-struct HistoryTurn: Encodable {
-    let role: String
-    let content: String
-}
-
-struct ChatAPIResponse: Decodable {
-    let category: String
-    let content: String
-    let suggestedActions: [SuggestedAction]
-    let followUpQuestion: String?
-    let followUpBlocks: [CoachFollowUpBlock]
-    let confidence: Double
-    let thinkingSteps: [String]
-    let tags: [String]
-    let references: [ChatReference]
-    let toolCalls: [ToolCall]
-    let usedWebSearch: Bool
-
-    init(
-        category: String,
-        content: String,
-        suggestedActions: [SuggestedAction],
-        followUpQuestion: String?,
-        followUpBlocks: [CoachFollowUpBlock] = [],
-        confidence: Double,
-        thinkingSteps: [String],
-        tags: [String],
-        references: [ChatReference],
-        toolCalls: [ToolCall],
-        usedWebSearch: Bool = false
-    ) {
-        self.category = category
-        self.content = content
-        self.suggestedActions = suggestedActions
-        self.followUpQuestion = followUpQuestion
-        self.followUpBlocks = followUpBlocks
-        self.confidence = confidence
-        self.thinkingSteps = thinkingSteps
-        self.tags = tags
-        self.references = references
-        self.toolCalls = toolCalls
-        self.usedWebSearch = usedWebSearch
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        category = (try? c.decodeIfPresent(String.self, forKey: .category)) ?? "training_advice"
-        content = try c.decode(String.self, forKey: .content)
-        suggestedActions =
-            (try? c.decodeIfPresent([SuggestedAction].self, forKey: .suggestedActions))
-            ?? (try? c.decodeIfPresent([SuggestedAction].self, forKey: .suggested_actions))
-            ?? []
-        followUpQuestion =
-            (try? c.decodeIfPresent(String.self, forKey: .followUpQuestion))
-            ?? (try? c.decodeIfPresent(String.self, forKey: .follow_up_question))
-        followUpBlocks =
-            (try? c.decodeIfPresent([CoachFollowUpBlock].self, forKey: .followUpBlocks))
-            ?? (try? c.decodeIfPresent([CoachFollowUpBlock].self, forKey: .follow_up_blocks))
-            ?? []
-        confidence = (try? c.decodeIfPresent(Double.self, forKey: .confidence)) ?? 1.0
-        thinkingSteps = (try? c.decodeIfPresent([String].self, forKey: .thinkingSteps)) ?? []
-        tags = (try? c.decodeIfPresent([String].self, forKey: .tags)) ?? []
-        references = (try? c.decodeIfPresent([ChatReference].self, forKey: .references)) ?? []
-        toolCalls = (try? c.decodeIfPresent([ToolCall].self, forKey: .toolCalls)) ?? []
-        usedWebSearch = (try? c.decodeIfPresent(Bool.self, forKey: .usedWebSearch)) ?? false
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case category, content, suggestedActions, followUpQuestion, followUpBlocks, confidence,
-            thinkingSteps, tags, references, toolCalls
-        case suggested_actions, follow_up_question, follow_up_blocks
-        case usedWebSearch = "used_web_search"
-    }
-}
-
-struct UserContext: Encodable {
-    let ftp: Int
-    let maxHR: Int
-    let restingHR: Int
-    let recentWorkoutsCount: Int
-    let activePlanName: String?
-    let activePlanProgress: String?
-    /// `builtin` (template) or `ai` when an active plan is resolved.
-    let activePlanSource: String?
-    /// Sum of TSS from valid completed rides in the current calendar week.
-    let weekActualTss: Int
-    /// Guided ERG scale as percent (100 = plan as written).
-    let adaptiveErgPercent: Int
-    let ftpHistory: String?
-    let lastRide: LastRideContext?
-    /// Reserved; always `nil` (goal/season UI removed).
-    let seasonGoalSummary: String?
-    /// Short hint about optional vs mandatory plan days when the active week includes flexible sessions.
-    let planKeyDaySemanticsHint: String?
-    /// Compact multi-line digest of the most recent completed rides for broader training context.
-    let recentRideDigest: String?
-    /// Latest ride Pw:HR aerobic drift summary when enough power and HR data exists.
-    let lastRideAerobicDecoupling: String?
-    /// Rider body weight in kg when set. Used to compute W/kg context.
-    let riderWeightKg: Double?
-    /// Rider age in years when birth year is set.
-    let riderAge: Int?
-    /// True when a WHOOP account is connected in-app (OAuth).
-    let whoopLinked: Bool
-    /// Latest WHOOP recovery score (0–100) when available.
-    let whoopRecoveryPercent: Double?
-    /// Resting HR from latest WHOOP recovery payload, when present.
-    let whoopRestingHR: Int?
-    /// HRV (RMSSD, ms) rounded from WHOOP when present.
-    let whoopHrvMs: Int?
-    /// Max HR from WHOOP body-measurement endpoint when present (not workout peak).
-    let whoopMaxHeartRate: Int?
-    /// Current chronic training load when PMC history is loaded.
-    let currentCtl: Double?
-    /// Current acute training load when PMC history is loaded.
-    let currentAtl: Double?
-    /// Current training stress balance when PMC history is loaded.
-    let currentTsb: Double?
-    /// 14/28-day PMC delta summary when enough history exists.
-    let pmcTrendSummary: String?
-    /// Multi-ride aerobic decoupling trend when enough steady rides exist.
-    let aerobicDecouplingTrend: String?
-    /// Compact best-power curve summary from recent rides.
-    let powerCurveSummary: String?
-    /// Two-parameter critical power fit when enough curve points exist.
-    let criticalPowerSummary: String?
-}
-
-struct LastRideContext: Encodable {
-    let date: String
-    let durationMinutes: Int
-    let distanceKm: Double
-    let avgPower: Double
-    let maxPower: Int
-    let avgHR: Double
-    let avgSpeed: Double
-    let elevationGain: Double
-    let normalizedPower: Double
-    let tss: Double
-    let intensityFactor: Double
-    /// Human-readable line for the coach; omits misleading 0W/NP when no power meter.
-    let summary: String
-    let powerDataAvailable: Bool
-    let aerobicDecouplingPercent: Double?
-    let aerobicDecouplingStatus: String?
-}
-
-struct PlanGenerationRequest: Encodable {
-    let inputs: PlanInputs
-    let is_pro: Bool
-    let user_context_encrypted: String?
-    let client_local_date: String
-    let client_time_zone: String
-}
-
-struct PlanGenerationResponse: Decodable {
-    let plan: TrainingPlan
-    let credits_used: Int?
-    let credits_remaining: Int?
-    let request_id: String?
-    let validation_warnings: [String]?
-    let generation_metrics: PlanGenerationMetrics?
-}
-
-struct WorkoutGenerationRequest: Encodable {
-    let inputs: WorkoutGenerationInputs
-    let is_pro: Bool
-    let user_context_encrypted: String?
-    let client_local_date: String
-    let client_time_zone: String
-}
-
-struct WorkoutGenerationResponse: Decodable {
-    let workout: GeneratedWorkout
-    let request_id: String?
-    let validation_warnings: [String]?
-}
-
-struct ToolCall: Codable, Identifiable, Equatable, Sendable {
-    var id: String { "\(name)-\(state)-\(detail ?? "")" }
-    let name: String
-    let state: String
-    let detail: String?
-}
-
-/// JSON in `ToolCall.detail` when `name == "generate_plan"` (matches `/api/generate-plan` inputs).
-private struct GeneratePlanToolDetail: Decodable {
-    let event_name: String
-    let event_date: String?
-    let weekly_hours: Int?
-    let experience: String?
-    let route_option: String?
-    let target_distance_km: Double?
-    let target_elevation_m: Double?
-    let event_location: String?
-    let event_notes: String?
-
-    enum CodingKeys: String, CodingKey {
-        case event_name, event_date, weekly_hours, experience
-        case route_option, target_distance_km, target_elevation_m, event_location, event_notes
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        event_name = try c.decode(String.self, forKey: .event_name)
-        event_date = try c.decodeIfPresent(String.self, forKey: .event_date)
-        weekly_hours = Self.decodeFlexibleInt(c, forKey: .weekly_hours)
-        experience = try c.decodeIfPresent(String.self, forKey: .experience)
-        route_option = try c.decodeIfPresent(String.self, forKey: .route_option)
-        target_distance_km = Self.decodeFlexibleDouble(c, forKey: .target_distance_km)
-        target_elevation_m = Self.decodeFlexibleDouble(c, forKey: .target_elevation_m)
-        event_location = try c.decodeIfPresent(String.self, forKey: .event_location)
-        event_notes = try c.decodeIfPresent(String.self, forKey: .event_notes)
-    }
-
-    private static func decodeFlexibleDouble(
-        _ c: KeyedDecodingContainer<CodingKeys>,
-        forKey key: CodingKeys
-    ) -> Double? {
-        if let d = try? c.decodeIfPresent(Double.self, forKey: key) { return d }
-        if let i = try? c.decodeIfPresent(Int.self, forKey: key) { return Double(i) }
-        if let s = try? c.decodeIfPresent(String.self, forKey: key) {
-            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let d = Double(t) { return d }
-            let filtered = t.filter { $0.isNumber || $0 == "." || $0 == "," }
-            let normalized = filtered.replacingOccurrences(of: ",", with: ".")
-            if let d = Double(normalized) { return d }
-        }
-        return nil
-    }
-
-    private static func decodeFlexibleInt(
-        _ c: KeyedDecodingContainer<CodingKeys>,
-        forKey key: CodingKeys
-    ) -> Int? {
-        if let i = try? c.decodeIfPresent(Int.self, forKey: key) { return i }
-        if let d = try? c.decodeIfPresent(Double.self, forKey: key) { return Int(d.rounded()) }
-        if let s = try? c.decodeIfPresent(String.self, forKey: key),
-            let v = Int(s.trimmingCharacters(in: .whitespacesAndNewlines))
-        {
-            return v
-        }
-        return nil
-    }
-}
-
-private struct GenerateWorkoutToolDetail: Decodable {
-    let goal: String
-    let duration_minutes: Int?
-    let experience: String?
-    let preferred_intensity: String?
-    let environment: String?
-    let planned_date: String?
-    let plan_context: String?
-}
-
-/// Normalizes model-supplied dates to `yyyy-MM-dd` for `/api/generate-plan` and UI.
-private enum PlanEventDateNormalization {
-    private static let ymd: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone.current
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
-
-    static func normalizedYYYYMMDD(from raw: String) -> String? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        let cal = Calendar.current
-
-        if let d = ymd.date(from: trimmed) {
-            return ymd.string(from: cal.startOfDay(for: d))
-        }
-
-        let isoFull = ISO8601DateFormatter()
-        isoFull.formatOptions = [
-            .withInternetDateTime, .withDashSeparatorInDate, .withColonSeparatorInTime,
-        ]
-        if let d = isoFull.date(from: trimmed) {
-            return ymd.string(from: cal.startOfDay(for: d))
-        }
-
-        let isoDay = ISO8601DateFormatter()
-        isoDay.formatOptions = [.withFullDate, .withDashSeparatorInDate]
-        if let d = isoDay.date(from: trimmed) {
-            return ymd.string(from: cal.startOfDay(for: d))
-        }
-
-        let medium = DateFormatter()
-        medium.locale = .current
-        medium.timeZone = TimeZone.current
-        medium.dateStyle = .medium
-        medium.timeStyle = .none
-        if let d = medium.date(from: trimmed) {
-            return ymd.string(from: cal.startOfDay(for: d))
-        }
-
-        let long = DateFormatter()
-        long.locale = .current
-        long.timeZone = TimeZone.current
-        long.dateStyle = .long
-        long.timeStyle = .none
-        if let d = long.date(from: trimmed) {
-            return ymd.string(from: cal.startOfDay(for: d))
-        }
-
-        let us = DateFormatter()
-        us.locale = Locale(identifier: "en_US_POSIX")
-        us.timeZone = TimeZone.current
-        for pattern in ["MM/dd/yyyy", "M/d/yyyy", "MM-dd-yyyy"] {
-            us.dateFormat = pattern
-            if let d = us.date(from: trimmed) {
-                return ymd.string(from: cal.startOfDay(for: d))
-            }
-        }
-
-        let eu = DateFormatter()
-        eu.locale = Locale(identifier: "en_GB")
-        eu.timeZone = TimeZone.current
-        for pattern in ["dd/MM/yyyy", "d/M/yyyy", "dd-MM-yyyy"] {
-            eu.dateFormat = pattern
-            if let d = eu.date(from: trimmed) {
-                return ymd.string(from: cal.startOfDay(for: d))
-            }
-        }
-
-        if let d = extractDateWithDataDetector(from: trimmed) {
-            return ymd.string(from: cal.startOfDay(for: d))
-        }
-
-        return nil
-    }
-
-    private static func extractDateWithDataDetector(from string: String) -> Date? {
-        guard
-            let detector = try? NSDataDetector(
-                types: NSTextCheckingResult.CheckingType.date.rawValue)
-        else { return nil }
-        let range = NSRange(string.startIndex..<string.endIndex, in: string)
-        var found: Date?
-        detector.enumerateMatches(in: string, options: [], range: range) { match, _, _ in
-            guard let match, let d = match.date else { return }
-            if found == nil { found = d }
-        }
-        return found
-    }
-}
-
-enum ChatRuntimeEvent: Sendable {
-    case status(String)
-    case textDelta(String)
-    case reasoningDelta(String)
-    case toolCalls([ToolCall])
-    case completed(ChatAPIResponse)
-    case failed(String)
-}
-
-struct ChatWireEvent: Decodable, Sendable {
-    let type: String
-    let delta: String?
-    let status: String?
-    let message: ChatAPIResponse?
-    let error: String?
-}
-
 // MARK: - AIService
 
 @Observable @MainActor
@@ -514,6 +109,73 @@ final class AIService: AIServiceProtocol, CoachRepository {
         let ctx = buildUserContext(modelContext: modelContext)
         cachedUserContextEntry = ctx
         return ctx
+    }
+
+    /// Gathers only the scalar values that must be read on MainActor; the heavy
+    /// `UserContext` build then runs off the main thread via ``CoachContextBuilder``.
+    func coachContextScalarSnapshot() -> CoachContextScalarSnapshot {
+        let whoop = whoopDataSource
+        let whoopLinked = whoop?.isConnected == true
+        let ft = FitnessTracker.shared
+        let recovery = recoveryStatus(modelContext: persistenceContext)
+        let riderPrefs = RidePreferences.shared
+
+        return CoachContextScalarSnapshot(
+            ftp: PowerZone.ftp,
+            maxHR: HeartRateZone.maxHR,
+            restingHR: HeartRateZone.restingHR,
+            riderWeightKg: riderPrefs.riderWeightKg > 0 ? riderPrefs.riderWeightKg : nil,
+            riderAge: riderPrefs.riderAge,
+            recoveryStatusLabel: String(describing: recovery),
+            whoopLinked: whoopLinked,
+            whoopRecoveryPercent: whoopLinked ? whoop?.latestRecoveryScore : nil,
+            whoopRestingHR: whoopLinked ? whoop?.latestRecoveryRestingHR : nil,
+            whoopHrvMs: whoopLinked ? whoop?.latestRecoveryHRV : nil,
+            whoopMaxHeartRate: whoopLinked ? whoop?.latestMaxHeartRateFromProfile : nil,
+            whoopSleepPerformancePercent: whoopLinked ? whoop?.latestSleepPerformancePercent : nil,
+            whoopSleepHours: whoopLinked ? whoop?.latestSleepHours : nil,
+            fitnessTrackerLoaded: ft.isLoaded,
+            currentCtl: ft.isLoaded ? ft.currentCTL : nil,
+            currentAtl: ft.isLoaded ? ft.currentATL : nil,
+            currentTsb: ft.isLoaded ? ft.currentTSB : nil,
+            pmcTrendSummary: ft.isLoaded ? PMCTrend.compactTrendLine(history: ft.history) : nil
+        )
+    }
+
+    /// Proactively builds and caches the full user context off the main actor so the
+    /// first coach turn does not pay the SwiftData/power-curve cost synchronously.
+    func warmCoachContextCache() async {
+        guard cachedUserContextEntry == nil else { return }
+        let snapshot = coachContextScalarSnapshot()
+        let context = await Task.detached(priority: .userInitiated) {
+            let backgroundContext = ModelContext(PersistenceContainer.shared)
+            return CoachContextBuilder.buildUserContext(
+                snapshot: snapshot,
+                modelContext: backgroundContext
+            )
+        }.value
+        cachedUserContextEntry = context
+        cachedFactSheetFull = CoachContextBuilder.factSheetTextFull(userContext: context)
+        cachedFactSheetCompact = CoachContextBuilder.factSheetTextCompact(userContext: context)
+    }
+
+    /// Builds and encrypts the full user context off the main actor; updates caches.
+    private func buildEncryptedUserContext() async -> (context: UserContext, encrypted: String?) {
+        let snapshot = coachContextScalarSnapshot()
+        let key = encryptionKey
+        let (context, encrypted) = await Task.detached(priority: .userInitiated) {
+            let backgroundContext = ModelContext(PersistenceContainer.shared)
+            let ctx = CoachContextBuilder.buildUserContext(
+                snapshot: snapshot,
+                modelContext: backgroundContext
+            )
+            let enc = CoachContextBuilder.encryptUserContext(context: ctx, key: key)
+            return (ctx, enc)
+        }.value
+        cachedUserContextEntry = context
+        cachedFactSheetFull = CoachContextBuilder.factSheetTextFull(userContext: context)
+        cachedFactSheetCompact = CoachContextBuilder.factSheetTextCompact(userContext: context)
+        return (context, encrypted)
     }
 
     /// Rule-based empty-state starters (no on-device AI); safe to show immediately.
@@ -1081,9 +743,11 @@ final class AIService: AIServiceProtocol, CoachRepository {
         return combined.base64EncodedString()
     }
 
-    // MARK: - Streaming display (debounced)
+    // MARK: - Streaming display (frame-aligned)
 
-    private static let streamDisplayThrottleMs: Int = 50
+    /// ~1 frame at 60 Hz. Keeps the typing feel responsive without repainting
+    /// every single token on 120 Hz ProMotion devices.
+    private static let streamDisplayThrottleMs: Int = 16
 
     private func scheduleStreamDraftDisplayFlush() {
         streamDisplayThrottleTask?.cancel()
@@ -1179,28 +843,6 @@ final class AIService: AIServiceProtocol, CoachRepository {
         )
     }
 
-    /// Flips loading + pending bubble immediately so chip/starter taps feel instant (before async work).
-    @discardableResult
-    func prepareOutgoingMessage(
-        _ text: String,
-        isPro: Bool,
-        forcePlanIntake: Bool = false,
-        hasImage: Bool = false
-    ) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || hasImage else { return false }
-        guard canSendCoachMessage(trimmed, isPro: isPro, forcePlanIntake: forcePlanIntake, hasImage: hasImage)
-        else {
-            return false
-        }
-        guard !isLoading else { return false }
-        isLoading = true
-        error = nil
-        resetStreamingState(clearLoading: false)
-        streamDelivery = .onDevice
-        return true
-    }
-
     private func cancelActiveChatTurnIfNeeded() {
         activeChatTurnTask?.cancel()
         activeChatTurnTask = nil
@@ -1222,8 +864,26 @@ final class AIService: AIServiceProtocol, CoachRepository {
         deliveryCategoryOverride: String? = nil
     ) async {
         let history = buildHistory()
-        let context = cachedUserContext(modelContext: modelContext)
-        let encryptedContext = encryptUserContext(context)
+
+        // Build and encrypt the full user context off the main actor. The encryption key
+        // and scalar snapshot are gathered on MainActor; everything else (SwiftData fetches,
+        // power-curve math, AES-GCM) runs in a detached task.
+        let snapshot = coachContextScalarSnapshot()
+        let key = encryptionKey
+        let (context, encryptedContext) = await Task.detached(priority: .userInitiated) {
+            let backgroundContext = ModelContext(PersistenceContainer.shared)
+            let ctx = CoachContextBuilder.buildUserContext(
+                snapshot: snapshot,
+                modelContext: backgroundContext
+            )
+            let enc = CoachContextBuilder.encryptUserContext(context: ctx, key: key)
+            return (ctx, enc)
+        }.value
+
+        // Cache the result so synchronous callers (starters, fact sheets) benefit too.
+        cachedUserContextEntry = context
+        cachedFactSheetFull = CoachContextBuilder.factSheetTextFull(userContext: context)
+        cachedFactSheetCompact = CoachContextBuilder.factSheetTextCompact(userContext: context)
 
         // Strong release guard: never send rich training context (FTP, recent workouts, plans, etc.)
         // in plaintext to the cloud coach from a production build.
@@ -1568,7 +1228,6 @@ final class AIService: AIServiceProtocol, CoachRepository {
     ) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let planIntake = forcePlanIntake || planIntakeModeActive || Self.shouldForcePlanIntake(for: trimmed)
-        let alreadyPrepared = isLoading
         let hasImage = image != nil
 
         if planIntake {
@@ -1577,30 +1236,24 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
         guard !trimmed.isEmpty || hasImage else {
             logCoachFlow("coachFlow sendMessage abort reason=empty")
-            if alreadyPrepared { resetStreamingState(clearLoading: true) }
             return
         }
         guard canSendCoachMessage(trimmed, isPro: isPro, forcePlanIntake: planIntake, hasImage: hasImage)
         else {
             logCoachFlow("coachFlow sendMessage abort reason=dailyLimit isPro=\(isPro)")
-            if alreadyPrepared { resetStreamingState(clearLoading: true) }
             return
         }
-        if !alreadyPrepared {
-            guard !isLoading else {
-                logCoachFlow("coachFlow sendMessage abort reason=alreadyLoading")
-                return
-            }
-            isLoading = true
-            error = nil
-            resetStreamingState(clearLoading: false)
+        guard !isLoading else {
+            logCoachFlow("coachFlow sendMessage abort reason=alreadyLoading")
+            return
         }
 
-        let sessionBefore = currentSessionID
-        let deliveryLogLabel = planIntake ? "cloudPlanIntake" : "cloudOnly"
+        isLoading = true
+        error = nil
 
+        let deliveryLogLabel = planIntake ? "cloudPlanIntake" : "cloudOnly"
         logCoachFlow(
-            "coachFlow sendMessage start delivery=\(deliveryLogLabel) isPro=\(isPro) chars=\(trimmed.count) session=\(sessionBefore?.uuidString ?? "nil")"
+            "coachFlow sendMessage start delivery=\(deliveryLogLabel) isPro=\(isPro) chars=\(trimmed.count) session=\(currentSessionID?.uuidString ?? "nil")"
         )
 
         activeTurnIsWebSearch = OnDeviceCoachEngine.heuristicPrefersPCCWebSearch(for: trimmed)
@@ -1619,7 +1272,6 @@ final class AIService: AIServiceProtocol, CoachRepository {
             messages.append(userMsg)
         } catch {
             logger.error("sendMessage user persist failed: \(error)")
-            self.error = "Couldn't save your message: \(error.localizedDescription)"
             // Still show it locally so the user sees what they typed.
             messages.append(userMsg)
         }
@@ -1627,16 +1279,9 @@ final class AIService: AIServiceProtocol, CoachRepository {
         // Update session title from first user message
         updateSessionTitleIfNeeded(modelContext: modelContext)
 
-        if !alreadyPrepared {
-            error = nil
-            resetStreamingState(clearLoading: false)
-        } else {
-            error = nil
-        }
-
-        if !alreadyPrepared {
-            streamDelivery = planIntake ? .planIntake : .onDevice
-        }
+        error = nil
+        resetStreamingState(clearLoading: false)
+        streamDelivery = planIntake ? .planIntake : .onDevice
 
         await Task.yield()
 
@@ -1650,153 +1295,173 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 }
             }
             await Task.yield()
-            if !planIntake, !skipLocalCoachForNextTurn, !hasImage,
-                await tryOnDeviceNarrowTurn(
-                    userText: trimmed,
-                    modelContext: modelContext
-                )
-            {
-                logCoachFlow("coachFlow sendMessage path=onDeviceNarrow")
-                skipLocalCoachForNextTurn = false
-                return
-            }
-
-            let webSearchTurn = activeTurnIsWebSearch && !hasImage
-
-            // PCC cannot ground live web until Apple's webSearch extension ships — use Mangox Cloud.
-            if webSearchTurn, !Self.isPCCLiveWebSearchAvailable {
-                if !skipLocalCoachForNextTurn {
-                    logRoutingFallback(
-                        from: .privateCloudCompute,
-                        to: .mangoxCloudBackend,
-                        reason: "pcc_web_unavailable"
-                    )
-                }
-                streamDelivery = .webSearch
-                streamIsSearchingWeb = true
-                streamStatusText = "Searching the web…"
-                streamRouteStatus = nil
-                streamUsesTokenDeltas = true
-                logCoachFlow("coachFlow sendMessage path=mangoxCloudWebSearch")
-                await runMangoxCloudCoachTurn(
-                    userText: trimmed,
-                    isPro: isPro,
-                    forcePlanIntake: planIntake,
-                    modelContext: modelContext,
-                    deliveryCategoryOverride: "pcc_web_search"
-                )
-                skipLocalCoachForNextTurn = false
-                return
-            }
-
-            if skipLocalCoachForNextTurn {
-                streamRouteStatus = "Connecting to coach server…"
-                streamDelivery = .cloud
-                streamUsesTokenDeltas = true
-                streamPartialTags = []
-                logCoachFlow("coachFlow sendMessage path=mangoxCloudForcedRetry")
-                await runMangoxCloudCoachTurn(
-                    userText: trimmed,
-                    isPro: isPro,
-                    forcePlanIntake: planIntake,
-                    modelContext: modelContext
-                )
-                skipLocalCoachForNextTurn = false
-                return
-            }
-
-            if MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable,
-                let quotaMessage = MangoxPCCSupport.coachTurnQuotaBlockMessage()
-            {
-                logCoachFlow("coachFlow sendMessage path=pccQuotaBlocked")
-                self.error = quotaMessage
-                appendAssistantErrorBubble(
-                    quotaMessage,
-                    category: "error",
-                    modelContext: modelContext,
-                    failedPath: .privateCloudCompute
-                )
-                resetStreamingState(clearLoading: true)
-                if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) {
-                    PrivateCloudComputeLanguageModel().quotaUsage.limitIncreaseSuggestion?.show()
-                }
-                skipLocalCoachForNextTurn = false
-                return
-            }
-
-            streamRouteStatus = planIntake
-                ? "Designing on Private Cloud…"
-                : "Trying Private Cloud…"
-            streamDelivery = CoachStreamDelivery.forPCCTurn(
+            await executeCoachTurn(
+                userText: trimmed,
+                isPro: isPro,
                 planIntake: planIntake,
-                webSearch: webSearchTurn
+                hasImage: hasImage,
+                image: image,
+                modelContext: modelContext
             )
-            streamIsSearchingWeb = webSearchTurn
-            if webSearchTurn {
-                streamStatusText = "Searching the web…"
-            }
+        }
+        activeChatTurnTask = turnTask
+    }
 
-            if await tryPrivateCloudComputeCoachTurn(
-                userText: trimmed,
-                planIntake: planIntake,
-                image: image,
+    /// Shared routing logic for a coach turn. Callers must have already ensured the
+    /// user message exists in `messages` (for retries) or just appended it (for new sends).
+    private func executeCoachTurn(
+        userText: String,
+        isPro: Bool,
+        planIntake: Bool,
+        hasImage: Bool,
+        image: CoachUserImageAttachment?,
+        modelContext: ModelContext
+    ) async {
+        if !planIntake, !skipLocalCoachForNextTurn, !hasImage,
+            await tryOnDeviceNarrowTurn(
+                userText: userText,
                 modelContext: modelContext
-            ) {
-                logCoachFlow("coachFlow sendMessage path=privateCloudCompute")
-                skipLocalCoachForNextTurn = false
-                return
-            }
+            )
+        {
+            logCoachFlow("coachFlow sendMessage path=onDeviceNarrow")
+            skipLocalCoachForNextTurn = false
+            return
+        }
 
-            if await tryThirdPartyLanguageModelCoachTurn(
-                userText: trimmed,
-                planIntake: planIntake,
-                image: image,
-                modelContext: modelContext
-            ) {
-                logCoachFlow("coachFlow sendMessage path=thirdPartyLanguageModel")
-                skipLocalCoachForNextTurn = false
-                return
-            }
+        let webSearchTurn = activeTurnIsWebSearch && !hasImage
 
-            if !planIntake, !webSearchTurn {
+        // PCC cannot ground live web until Apple's webSearch extension ships — use Mangox Cloud.
+        if webSearchTurn, !Self.isPCCLiveWebSearchAvailable {
+            if !skipLocalCoachForNextTurn {
                 logRoutingFallback(
                     from: .privateCloudCompute,
                     to: .mangoxCloudBackend,
-                    reason: "pcc_and_third_party_miss"
-                )
-            } else if !webSearchTurn {
-                logRoutingFallback(
-                    from: .privateCloudCompute,
-                    to: .mangoxCloudBackend,
-                    reason: "pcc_miss"
+                    reason: "pcc_web_unavailable"
                 )
             }
+            streamDelivery = .webSearch
+            streamIsSearchingWeb = true
+            streamStatusText = "Searching the web…"
+            streamRouteStatus = nil
+            streamUsesTokenDeltas = true
+            logCoachFlow("coachFlow sendMessage path=mangoxCloudWebSearch")
+            await runMangoxCloudCoachTurn(
+                userText: userText,
+                isPro: isPro,
+                forcePlanIntake: planIntake,
+                modelContext: modelContext,
+                deliveryCategoryOverride: "pcc_web_search"
+            )
+            skipLocalCoachForNextTurn = false
+            return
+        }
 
-            if hasImage {
-                logCoachFlow("coachFlow sendMessage abort reason=imageRequiresLocalModel")
-                appendAssistantErrorBubble(
-                    "Photo questions need Private Cloud Compute or a configured fallback model in Settings → AI Coach.",
-                    category: "error",
-                    modelContext: modelContext
-                )
-                skipLocalCoachForNextTurn = false
-                return
-            }
-
+        if skipLocalCoachForNextTurn {
             streamRouteStatus = "Connecting to coach server…"
             streamDelivery = .cloud
             streamUsesTokenDeltas = true
             streamPartialTags = []
-            logCoachFlow("coachFlow sendMessage path=mangoxCloudFallback")
+            logCoachFlow("coachFlow sendMessage path=mangoxCloudForcedRetry")
             await runMangoxCloudCoachTurn(
-                userText: trimmed,
+                userText: userText,
                 isPro: isPro,
                 forcePlanIntake: planIntake,
                 modelContext: modelContext
             )
             skipLocalCoachForNextTurn = false
+            return
         }
-        activeChatTurnTask = turnTask
+
+        if MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable,
+            let quotaMessage = MangoxPCCSupport.coachTurnQuotaBlockMessage()
+        {
+            logCoachFlow("coachFlow sendMessage path=pccQuotaBlocked")
+            self.error = quotaMessage
+            appendAssistantErrorBubble(
+                quotaMessage,
+                category: "error",
+                modelContext: modelContext,
+                failedPath: .privateCloudCompute
+            )
+            resetStreamingState(clearLoading: true)
+            if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) {
+                PrivateCloudComputeLanguageModel().quotaUsage.limitIncreaseSuggestion?.show()
+            }
+            skipLocalCoachForNextTurn = false
+            return
+        }
+
+        streamRouteStatus = planIntake
+            ? "Designing on Private Cloud…"
+            : "Trying Private Cloud…"
+        streamDelivery = CoachStreamDelivery.forPCCTurn(
+            planIntake: planIntake,
+            webSearch: webSearchTurn
+        )
+        streamIsSearchingWeb = webSearchTurn
+        if webSearchTurn {
+            streamStatusText = "Searching the web…"
+        }
+
+        if await tryPrivateCloudComputeCoachTurn(
+            userText: userText,
+            planIntake: planIntake,
+            image: image,
+            modelContext: modelContext
+        ) {
+            logCoachFlow("coachFlow sendMessage path=privateCloudCompute")
+            skipLocalCoachForNextTurn = false
+            return
+        }
+
+        if await tryThirdPartyLanguageModelCoachTurn(
+            userText: userText,
+            planIntake: planIntake,
+            image: image,
+            modelContext: modelContext
+        ) {
+            logCoachFlow("coachFlow sendMessage path=thirdPartyLanguageModel")
+            skipLocalCoachForNextTurn = false
+            return
+        }
+
+        if !planIntake, !webSearchTurn {
+            logRoutingFallback(
+                from: .privateCloudCompute,
+                to: .mangoxCloudBackend,
+                reason: "pcc_and_third_party_miss"
+            )
+        } else if !webSearchTurn {
+            logRoutingFallback(
+                from: .privateCloudCompute,
+                to: .mangoxCloudBackend,
+                reason: "pcc_miss"
+            )
+        }
+
+        if hasImage {
+            logCoachFlow("coachFlow sendMessage abort reason=imageRequiresLocalModel")
+            appendAssistantErrorBubble(
+                "Photo questions need Private Cloud Compute or a configured fallback model in Settings → AI Coach.",
+                category: "error",
+                modelContext: modelContext
+            )
+            skipLocalCoachForNextTurn = false
+            return
+        }
+
+        streamRouteStatus = "Connecting to coach server…"
+        streamDelivery = .cloud
+        streamUsesTokenDeltas = true
+        streamPartialTags = []
+        logCoachFlow("coachFlow sendMessage path=mangoxCloudFallback")
+        await runMangoxCloudCoachTurn(
+            userText: userText,
+            isPro: isPro,
+            forcePlanIntake: planIntake,
+            modelContext: modelContext
+        )
+        skipLocalCoachForNextTurn = false
     }
 
     // MARK: - On-device narrow routing
@@ -1840,6 +1505,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
             MangoxOnDevicePMCProjectionTool(),
         ]
         tools.append(MangoxCoachSpotlightToolFactory.makeSpotlightSearchTool())
+        // OCRTool not yet shipped in Xcode 27 beta SDK — enable when sdkExposesOCRTool is set true.
         return tools
     }
 
@@ -1858,7 +1524,8 @@ final class AIService: AIServiceProtocol, CoachRepository {
         return session
     }
 
-    /// Heuristic fast path, then on-device `classifyRoute` for ambiguous messages.
+    /// Heuristic fast path, then on-device `classifyRoute` only for short ambiguous messages.
+    /// Longer ambiguous messages default to PCC/cloud to avoid paying for a full routing inference.
     private func shouldUseOnDeviceNarrowPath(
         userText: String,
         modelContext: ModelContext
@@ -1866,6 +1533,14 @@ final class AIService: AIServiceProtocol, CoachRepository {
         guard OnDeviceCoachEngine.isOnDeviceWritingModelAvailable else { return false }
         if OnDeviceCoachEngine.heuristicCloudRoute(for: userText) { return false }
         if OnDeviceCoachEngine.passesOnDeviceNarrowHeuristics(for: userText) { return true }
+
+        // Skip the routing model for longer ambiguous messages — the routing prompt itself
+        // says "when in doubt choose pccCoach", so this avoids an extra inference that is
+        // very likely to end at PCC/cloud anyway.
+        guard userText.count <= 280 else {
+            logCoachFlow("coachFlow classifyRoute skip reason=longAmbiguous")
+            return false
+        }
 
         do {
             let factSheet = coachFactSheetTextCompact(modelContext: modelContext)
@@ -2433,7 +2108,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 : OnDevicePlanGeneratorError.unavailable
         }
 
-        let encrypted = encryptUserContext(cachedUserContext(modelContext: modelContext))
+        let (_, encrypted) = await buildEncryptedUserContext()
 
         #if !DEBUG
         if encrypted == nil {
@@ -2514,7 +2189,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
             }
         }
 
-        let encrypted = encryptUserContext(cachedUserContext(modelContext: modelContext))
+        let (_, encrypted) = await buildEncryptedUserContext()
 
         #if !DEBUG
         if encrypted == nil {
@@ -2815,7 +2490,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
             throw OnDevicePlanGeneratorError.cloudFallbackDisabled
         }
 
-        let enc = encryptUserContext(cachedUserContext(modelContext: modelContext))
+        let (_, enc) = await buildEncryptedUserContext()
         let body = RegeneratePlanWeekRequest(
             inputs: inputs,
             week_number: weekNumber,
@@ -3252,12 +2927,15 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
         let riderPrefs = RidePreferences.shared
         let riderWeight: Double? = riderPrefs.riderWeightKg > 0 ? riderPrefs.riderWeightKg : nil
+        let recovery = recoveryStatus(modelContext: modelContext)
 
         let whoop = whoopDataSource
         let whoopLinked = whoop?.isConnected == true
         let whoopPct = whoopLinked ? whoop?.latestRecoveryScore : nil
         let whoopRhr = whoopLinked ? whoop?.latestRecoveryRestingHR : nil
         let whoopHrv = whoopLinked ? whoop?.latestRecoveryHRV : nil
+        let whoopSleepPct = whoopLinked ? whoop?.latestSleepPerformancePercent : nil
+        let whoopSleepHrs = whoopLinked ? whoop?.latestSleepHours : nil
 
         let ft = FitnessTracker.shared
         let pmcTrendSummary = ft.isLoaded ? PMCTrend.compactTrendLine(history: ft.history) : nil
@@ -3322,11 +3000,15 @@ final class AIService: AIServiceProtocol, CoachRepository {
             },
             riderWeightKg: riderWeight,
             riderAge: riderPrefs.riderAge,
+            recoveryStatusLabel: String(describing: recovery),
+            fitnessTrackerLoaded: ft.isLoaded,
             whoopLinked: whoopLinked,
             whoopRecoveryPercent: whoopPct,
             whoopRestingHR: whoopRhr,
             whoopHrvMs: whoopHrv,
             whoopMaxHeartRate: whoopLinked ? whoop?.latestMaxHeartRateFromProfile : nil,
+            whoopSleepPerformancePercent: whoopSleepPct,
+            whoopSleepHours: whoopSleepHrs,
             currentCtl: ft.isLoaded ? ft.currentCTL : nil,
             currentAtl: ft.isLoaded ? ft.currentATL : nil,
             currentTsb: ft.isLoaded ? ft.currentTSB : nil,
@@ -3677,26 +3359,48 @@ final class AIService: AIServiceProtocol, CoachRepository {
         }
         if let lastAssistant = messages.last(where: { $0.role == .assistant }) {
             removeCoachMessage(id: lastAssistant.id, modelContext: modelContext)
-            logCoachFlow("coachFlow regenerate removedLastAssistant then sendMessage automatic")
+            logCoachFlow("coachFlow regenerate removedLastAssistant")
         } else {
-            logCoachFlow("coachFlow regenerate noAssistantRemoved then sendMessage automatic")
+            logCoachFlow("coachFlow regenerate noAssistantRemoved")
         }
         if preferCloud {
             skipLocalCoachForNextTurn = true
             resetCoachLanguageSessions()
         }
+
+        isLoading = true
+        error = nil
+        resetStreamingState(clearLoading: false)
+        streamDelivery = .onDevice
+        activeTurnIsWebSearch = OnDeviceCoachEngine.heuristicPrefersPCCWebSearch(for: lastUserMsg.content)
+
         let retryImage: CoachUserImageAttachment?
         if let jpeg = lastUserMsg.imageJPEG {
             retryImage = CoachUserImageAttachment(jpegData: jpeg, pixelWidth: 0, pixelHeight: 0)
         } else {
             retryImage = nil
         }
-        await sendMessage(
-            lastUserMsg.content,
-            isPro: isPro,
-            image: retryImage,
-            modelContext: modelContext
-        )
+
+        activeChatTurnTask?.cancel()
+        activeChatTurnGeneration &+= 1
+        let turnGeneration = activeChatTurnGeneration
+        let turnTask = Task {
+            defer {
+                if activeChatTurnGeneration == turnGeneration {
+                    activeChatTurnTask = nil
+                }
+            }
+            await Task.yield()
+            await executeCoachTurn(
+                userText: lastUserMsg.content,
+                isPro: isPro,
+                planIntake: false,
+                hasImage: retryImage != nil,
+                image: retryImage,
+                modelContext: modelContext
+            )
+        }
+        activeChatTurnTask = turnTask
     }
 
     // MARK: - Context Window

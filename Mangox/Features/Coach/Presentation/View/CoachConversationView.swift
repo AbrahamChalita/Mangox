@@ -15,14 +15,6 @@ private enum CoachChatColumnWidthKey: PreferenceKey {
     }
 }
 
-extension CoachConversationView: Equatable {
-    static func == (lhs: CoachConversationView, rhs: CoachConversationView) -> Bool {
-        lhs.navigationPath == rhs.navigationPath
-            && lhs.chatSheetPresented == rhs.chatSheetPresented
-            && lhs.greetingText == rhs.greetingText
-    }
-}
-
 /// Primary coach chat surface: streaming replies and plan-builder entry.
 /// Avoids a root `GeometryReader` so the system keyboard safe area correctly lifts the transcript.
 struct CoachConversationView: View {
@@ -40,18 +32,6 @@ struct CoachConversationView: View {
     @State private var composerFocusScrollNonce = 0
     @State private var sentChipKey: String?
     @State private var contextBannerDismissed = false
-
-    // MARK: - State Management
-
-    @MainActor
-    private func handleChatSheetDismissed() {
-        chatSheetPresented = false
-    }
-
-    @MainActor
-    private func handleConversationsListDismissed() {
-        showConversationsList = false
-    }
 
     private static let planBuilderSeed =
         "I want to build a structured training plan for an event. Ask me about my goal, target date, weekly training hours, and experience, then outline next steps."
@@ -84,7 +64,7 @@ struct CoachConversationView: View {
         .mangoxGridBackground(opacity: 0.35)
     }
 
-    private struct OptimizedRadialGradient: View, Equatable {
+    private struct OptimizedRadialGradient: View {
         @Environment(\.colorScheme) private var colorScheme
 
         var body: some View {
@@ -107,19 +87,14 @@ struct CoachConversationView: View {
             )
             .blur(radius: 0.5)
         }
-
-        static func == (lhs: OptimizedRadialGradient, rhs: OptimizedRadialGradient) -> Bool {
-            lhs.colorScheme == rhs.colorScheme
-        }
     }
 
     // MARK: - Reusable Components
 
-    private struct CoachMetricsStrip: View, Equatable {
-        @Environment(CoachViewModel.self) private var coachViewModel
-        @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
-
-        static func == (lhs: Self, rhs: Self) -> Bool { lhs.coachViewModel.isPro == rhs.coachViewModel.isPro }
+    private struct CoachMetricsStrip: View {
+        let isPro: Bool
+        let bypassesDailyLimit: Bool
+        let remainingFreeMessages: Int
 
         var body: some View {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -130,8 +105,8 @@ struct CoachConversationView: View {
                     metricCapsule(
                         icon: "heart.fill", label: "Max HR", value: "\(HeartRateZone.maxHR)",
                         color: AppColor.heartRate)
-                    if !coachViewModel.isPro {
-                        if coachViewModel.bypassesDailyLimit {
+                    if !isPro {
+                        if bypassesDailyLimit {
                             metricCapsule(
                                 icon: "person.fill.checkmark",
                                 label: "Coach",
@@ -139,12 +114,11 @@ struct CoachConversationView: View {
                                 color: AppColor.mango.opacity(0.85)
                             )
                         } else {
-                            let left = coachViewModel.remainingFreeMessages(isPro: coachViewModel.isPro)
                             metricCapsule(
                                 icon: "cloud.fill",
                                 label: "Cloud",
-                                value: left > 0 ? "\(left) left" : "limit",
-                                color: left > 0 ? AppColor.fg2 : AppColor.red
+                                value: remainingFreeMessages > 0 ? "\(remainingFreeMessages) left" : "limit",
+                                color: remainingFreeMessages > 0 ? AppColor.fg2 : AppColor.red
                             )
                         }
                     }
@@ -180,64 +154,8 @@ struct CoachConversationView: View {
         }
     }
 
-    private struct CoachContextBanner: View, Equatable {
-        let currentCount: Int
-        let windowSize: Int
-        let onStartFresh: () -> Void
-        var onDismiss: (() -> Void)? = nil
-
-        static func == (lhs: Self, rhs: Self) -> Bool {
-            lhs.currentCount == rhs.currentCount && lhs.windowSize == rhs.windowSize
-        }
-
-        var body: some View {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "text.bubble")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(AppColor.yellow.opacity(0.9))
-                    .padding(.top, 2)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Context \(currentCount)/\(windowSize)")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.82))
-                    Text("Older turns are summarized. Start a new chat for sharper follow-ups.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.42))
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Button(action: onStartFresh) {
-                        Text("New chat")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(AppColor.mango)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 2)
-                }
-
-                Spacer(minLength: 0)
-
-                if let onDismiss {
-                    Button(action: onDismiss) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.35))
-                            .frame(width: 28, height: 28)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Dismiss")
-                }
-            }
-            .padding(12)
-            .mangoxSurface(
-                .flatCustom(fill: Color.white.opacity(0.04), border: AppColor.yellow.opacity(0.2)),
-                shape: .rounded(MangoxRadius.sharp.rawValue)
-            )
-        }
-    }
-
     @ViewBuilder
-    private var topChromeView: some View {
+    private func topChromeView(coach: CoachViewModel) -> some View {
         ZStack {
             HStack(spacing: 0) {
                 Button {
@@ -246,7 +164,7 @@ struct CoachConversationView: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(AppColor.fg2)
-                        .frame(width: 42, height: 42)
+                        .frame(width: 44, height: 44)
                         .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
                         .contentShape(Rectangle())
                 }
@@ -261,7 +179,7 @@ struct CoachConversationView: View {
                     } label: {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.system(size: 17, weight: .medium))
-                            .frame(width: 40, height: 40)
+                            .frame(width: 44, height: 44)
                             .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
                             .contentShape(Rectangle())
                     }
@@ -270,18 +188,18 @@ struct CoachConversationView: View {
                     .accessibilityLabel(A11yL10n.conversations)
 
                     Button {
-                        coachViewModel.createNewSession()
+                        coach.createNewSession()
                     } label: {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 17, weight: .medium))
-                            .frame(width: 40, height: 40)
+                            .frame(width: 44, height: 44)
                             .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(AppColor.fg2)
                     .accessibilityLabel(A11yL10n.newConversation)
-                    .disabled(coachViewModel.isLoading)
+                    .disabled(coach.isLoading)
                 }
             }
             .padding(.horizontal, 8)
@@ -308,21 +226,28 @@ struct CoachConversationView: View {
     }
 
     @ViewBuilder
-    private var metricsStripView: some View {
-        CoachMetricsStrip()
+    private func metricsStripView(coach: CoachViewModel) -> some View {
+        CoachMetricsStrip(
+            isPro: coach.isPro,
+            bypassesDailyLimit: coach.bypassesDailyLimit,
+            remainingFreeMessages: coach.remainingFreeMessages(isPro: coach.isPro)
+        )
     }
 
     @ViewBuilder
-    private var contextBannerView: some View {
-        if coachViewModel.suggestsFreshConversation,
-            !coachViewModel.isLoading,
+    private func contextBannerView(
+        coach: CoachViewModel,
+        suggestsFreshConversation: Bool
+    ) -> some View {
+        if suggestsFreshConversation,
+            !coach.isLoading,
             !contextBannerDismissed
         {
             CoachContextWindowBanner(
-                currentCount: coachViewModel.currentContextCount,
-                windowSize: coachViewModel.contextWindowSize,
+                currentCount: coach.currentContextCount,
+                windowSize: coach.contextWindowSize,
                 onStartFresh: {
-                    coachViewModel.createNewSession()
+                    coach.createNewSession()
                     contextBannerDismissed = false
                 },
                 onDismiss: { contextBannerDismissed = true }
@@ -336,22 +261,25 @@ struct CoachConversationView: View {
             )
             .animation(
                 accessibilityReduceMotion ? .easeInOut(duration: 0.16) : .smooth(duration: 0.24),
-                value: coachViewModel.suggestsFreshConversation
+                value: suggestsFreshConversation
             )
         }
     }
 
     @ViewBuilder
-    private var inputBarView: some View {
+    private func inputBarView(
+        coach: CoachViewModel,
+        showComposerLimitBanner: Bool
+    ) -> some View {
         CoachInputBarWrapper(
             navigationPath: $navigationPath,
             chatSheetPresented: $chatSheetPresented,
             auxiliarySheet: $auxiliarySheet,
             showComposerLimitBanner: showComposerLimitBanner,
-            onPlanBuilder: { send(Self.planBuilderSeed, forcePlanIntake: true) },
-            sendAction: { text, image in send(text, image: image) },
+            onPlanBuilder: { send(Self.planBuilderSeed, forcePlanIntake: true, coach: coach) },
+            sendAction: { text, image in send(text, image: image, coach: coach) },
             onFocusChanged: { focused in
-                if focused && !coachViewModel.messages.isEmpty {
+                if focused && !coach.messages.isEmpty {
                     composerFocusScrollNonce += 1
                 }
             }
@@ -363,38 +291,49 @@ struct CoachConversationView: View {
     }
 
     var body: some View {
+        @Bindable var coach = coachViewModel
+
+        let showComposerLimitBanner =
+            coach.hasReachedFreeLimit(isPro: coach.isPro) && !coach.messages.isEmpty
+        let suggestsFreshConversation = coach.suggestsFreshConversation
+        let transcriptBottomSpacer = coachTranscriptBottomSpacerHeight(for: coach)
+        let starterTaskID = coach.currentSessionID?.uuidString ?? "none"
+
         ZStack {
             coachBackgroundView
             VStack(spacing: 0) {
-                topChromeView
-                metricsStripView
-                contextBannerView
+                topChromeView(coach: coach)
+                metricsStripView(coach: coach)
+                contextBannerView(
+                    coach: coach,
+                    suggestsFreshConversation: suggestsFreshConversation
+                )
                 CoachChatTranscriptView(
                     bubbleMaxWidth: Self.bubbleMaxWidth(containerWidth: chatColumnWidth),
                     greetingText: greetingText,
-                    bottomSpacerHeight: coachTranscriptBottomSpacerHeight,
+                    bottomSpacerHeight: transcriptBottomSpacer,
                     composerFocusScrollNonce: composerFocusScrollNonce,
                     sentChipKey: sentChipKey,
-                    onSend: { send($0) },
-                    onPlanBuilder: { send(Self.planBuilderSeed, forcePlanIntake: true) },
+                    onSend: { send($0, coach: coach) },
+                    onPlanBuilder: { send(Self.planBuilderSeed, forcePlanIntake: true, coach: coach) },
                     onPaywall: { auxiliarySheet = .paywall },
-                    onSuggestedAction: handleSuggestedAction,
+                    onSuggestedAction: { messageID, action in
+                        handleSuggestedAction(from: messageID, action, coach: coach)
+                    },
                     onRetry: {
                         HapticManager.shared.coachMessageSent()
                         Task { @MainActor in
-                            await coachViewModel.retryLastUserMessage(
-                                isPro: coachViewModel.isPro)
+                            await coach.retryLastUserMessage(isPro: coach.isPro)
                         }
                     },
                     onRetryCloud: {
                         HapticManager.shared.coachMessageSent()
                         Task { @MainActor in
-                            await coachViewModel.regenerateLastMessagePreferringCloud(
-                                isPro: coachViewModel.isPro)
+                            await coach.regenerateLastMessagePreferringCloud(isPro: coach.isPro)
                         }
                     },
                     onFeedback: { messageID, score in
-                        coachViewModel.submitFeedback(for: messageID, score: score)
+                        coach.submitFeedback(for: messageID, score: score)
                     }
                 )
             }
@@ -411,7 +350,10 @@ struct CoachConversationView: View {
                 chatColumnWidth = clampedWidth
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                inputBarView
+                inputBarView(
+                    coach: coach,
+                    showComposerLimitBanner: showComposerLimitBanner
+                )
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -433,267 +375,87 @@ struct CoachConversationView: View {
         .task {
             OnDeviceCoachEngine.prewarmNarrowCoachIfAvailable()
             OnDeviceCoachEngine.prewarmPCCCoachIfAvailable()
-            await coachViewModel.loadPersistedMessagesIfNeeded()
+            await coach.warmCoachContextCache()
+            await coach.loadPersistedMessagesIfNeeded()
         }
-        .task(id: "\(coachViewModel.currentSessionID?.uuidString ?? "none")") {
-            await coachViewModel.refreshStarterContentIfNeeded()
+        .task(id: starterTaskID) {
+            await coach.refreshStarterContentIfNeeded()
         }
-        .onChange(of: coachViewModel.isLoading) { _, loading in
+        .onChange(of: coach.isLoading) { _, loading in
             if !loading {
                 sentChipKey = nil
             }
         }
-        .onChange(of: coachViewModel.error) { _, error in
-            if error != nil, !coachViewModel.isLoading {
+        .onChange(of: coach.error) { _, error in
+            if error != nil, !coach.isLoading {
                 sentChipKey = nil
             }
         }
-        .onChange(of: coachViewModel.currentSessionID) { _, _ in
+        .onChange(of: coach.currentSessionID) { _, _ in
             contextBannerDismissed = false
         }
     }
 
-    // MARK: Top chrome
-
-    private var topChrome: some View {
-        ZStack {
-            HStack(spacing: 0) {
-                Button {
-                    chatSheetPresented = false
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(AppColor.fg2)
-                        .frame(width: 42, height: 42)
-                        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(A11yL10n.closeChat)
-
-                Spacer(minLength: 0)
-
-                HStack(spacing: 8) {
-                    Button {
-                        showConversationsList = true
-                    } label: {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 17, weight: .medium))
-                            .frame(width: 40, height: 40)
-                            .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(AppColor.fg2)
-                    .accessibilityLabel(A11yL10n.conversations)
-
-                    Button {
-                        coachViewModel.createNewSession()
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                            .font(.system(size: 17, weight: .medium))
-                            .frame(width: 40, height: 40)
-                            .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(AppColor.fg2)
-                    .accessibilityLabel(A11yL10n.newConversation)
-                    .disabled(coachViewModel.isLoading)
-                }
-            }
-            .padding(.horizontal, 8)
-
-            VStack(spacing: 2) {
-                Text("COACH")
-                    .mangoxFont(.label)
-                    .foregroundStyle(AppColor.mango)
-                    .tracking(1.4)
-                Text(greetingText)
-                    .font(MangoxFont.caption.value)
-                    .foregroundStyle(AppColor.fg2)
-            }
-                .accessibilityAddTraits(.isHeader)
-                .allowsHitTesting(false)
-        }
-        .padding(.top, 4)
-        .padding(.bottom, 8)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(AppColor.hair)
-                .frame(height: 1)
-        }
-    }
-
-    // MARK: Background
-
-    private var coachBackground: some View {
-        ZStack {
-            AppColor.bg
-            RadialGradient(
-                colors: [AppColor.mango.opacity(0.07), Color.clear],
-                center: .topTrailing,
-                startRadius: 20,
-                endRadius: 420
-            )
-            RadialGradient(
-                colors: [Color.blue.opacity(0.06), Color.clear],
-                center: .bottomLeading,
-                startRadius: 10,
-                endRadius: 380
-            )
-        }
-        .ignoresSafeArea()
-        .mangoxGridBackground(opacity: 0.35)
-    }
-
-    // MARK: Metrics
-
-    private var metricsStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                metricCapsule(
-                    icon: "bolt.fill", label: "FTP", value: "\(PowerZone.ftp)W",
-                    color: AppColor.yellow)
-                metricCapsule(
-                    icon: "heart.fill", label: "Max HR", value: "\(HeartRateZone.maxHR)",
-                    color: AppColor.heartRate)
-                if !coachViewModel.isPro {
-                    if coachViewModel.bypassesDailyLimit {
-                        metricCapsule(
-                            icon: "person.fill.checkmark",
-                            label: "Coach",
-                            value: "Staff",
-                            color: AppColor.mango.opacity(0.85)
-                        )
-                    } else {
-                        let left = coachViewModel.remainingFreeMessages(isPro: coachViewModel.isPro)
-                        metricCapsule(
-                            icon: "cloud.fill",
-                            label: "Cloud",
-                            value: left > 0 ? "\(left) left" : "limit",
-                            color: left > 0 ? AppColor.fg2 : AppColor.red
-                        )
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-        }
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(AppColor.hair)
-                .frame(height: 1)
-        }
-    }
-
-    private func metricCapsule(icon: String, label: String, value: String, color: Color)
-        -> some View
-    {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(color)
-            Text(label.uppercased())
-                .mangoxFont(.micro)
-                .foregroundStyle(AppColor.fg3)
-                .tracking(0.6)
-            Text(value)
-                .font(MangoxFont.caption.value)
-                .foregroundStyle(AppColor.fg1)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
-    }
-
-    // MARK: Context banner (sticky below metrics)
-
-    @ViewBuilder
-    private var contextBanner: some View {
-        if coachViewModel.suggestsFreshConversation,
-            !coachViewModel.isLoading,
-            !contextBannerDismissed
-        {
-            CoachContextWindowBanner(
-                currentCount: coachViewModel.currentContextCount,
-                windowSize: coachViewModel.contextWindowSize,
-                onStartFresh: {
-                    coachViewModel.createNewSession()
-                    contextBannerDismissed = false
-                },
-                onDismiss: { contextBannerDismissed = true }
-            )
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .transition(
-                accessibilityReduceMotion
-                    ? .opacity
-                    : .move(edge: .top).combined(with: .opacity)
-            )
-        }
-    }
-
-    // MARK: Input
-
-    private var showComposerLimitBanner: Bool {
-        coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) && !coachViewModel.messages.isEmpty
-    }
-
-    private var coachPlanSheetActive: Bool {
-        coachViewModel.planConfirmationDraft != nil
-            || coachViewModel.planSaveCelebration != nil
-            || coachViewModel.workoutConfirmationDraft != nil
-            || coachViewModel.workoutSaveCelebration != nil
-    }
-
     /// Extra lift so the last coach bubble clears the plan card; smaller spacer when the inset is tall.
-    private var coachTranscriptBottomSpacerHeight: CGFloat {
+    private func coachTranscriptBottomSpacerHeight(for coach: CoachViewModel) -> CGFloat {
+        let coachPlanSheetActive =
+            coach.planConfirmationDraft != nil
+            || coach.planSaveCelebration != nil
+            || coach.workoutConfirmationDraft != nil
+            || coach.workoutSaveCelebration != nil
         if coachPlanSheetActive { return 44 }
         return 28
     }
 
     // MARK: - Actions
 
-    private func send(_ text: String, forcePlanIntake: Bool = false, image: CoachUserImageAttachment? = nil) {
+    @discardableResult
+    private func send(
+        _ text: String,
+        forcePlanIntake: Bool = false,
+        image: CoachUserImageAttachment? = nil,
+        coach: CoachViewModel
+    ) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || image != nil else { return }
+        guard !trimmed.isEmpty || image != nil else { return false }
         let planIntake = forcePlanIntake || AIService.shouldForcePlanIntake(for: trimmed)
-        guard coachViewModel.canSendCoachMessage(
+        guard coach.canSendCoachMessage(
             trimmed,
-            isPro: coachViewModel.isPro,
+            isPro: coach.isPro,
             forcePlanIntake: planIntake,
             hasImage: image != nil
         ) else {
             auxiliarySheet = .paywall
-            return
+            return false
         }
-        guard coachViewModel.prepareOutgoingMessage(
-            trimmed,
-            isPro: coachViewModel.isPro,
-            forcePlanIntake: planIntake,
-            hasImage: image != nil
-        ) else {
-            return
-        }
+        // Keep isLoading checks synchronous so we don't schedule a second turn while
+        // one is already in flight. The user message is committed inside sendMessage
+        // before its first await, which keeps the empty state on screen until the
+        // outgoing bubble actually exists (fixing the blank flash after starter taps).
+        guard !coach.isLoading else { return false }
         HapticManager.shared.coachMessageSent()
         Task { @MainActor in
-            await coachViewModel.sendMessage(
+            await coach.sendMessage(
                 trimmed,
-                isPro: coachViewModel.isPro,
-                forcePlanIntake: forcePlanIntake || AIService.shouldForcePlanIntake(for: trimmed),
+                isPro: coach.isPro,
+                forcePlanIntake: planIntake,
                 image: image
             )
         }
+        return true
     }
 
     /// Taps on model-provided `suggestedActions` chips (same JSON contract as the Mangox Cloud coach).
-    private func handleSuggestedAction(from messageID: UUID, _ action: SuggestedAction) {
-        guard !coachViewModel.isLoading else { return }
+    private func handleSuggestedAction(
+        from messageID: UUID,
+        _ action: SuggestedAction,
+        coach: CoachViewModel
+    ) {
+        guard !coach.isLoading else { return }
         let kind = action.type.lowercased()
-        guard coachViewModel.canSendCoachMessage(
+        guard coach.canSendCoachMessage(
             action.label,
-            isPro: coachViewModel.isPro,
+            isPro: coach.isPro,
             forcePlanIntake: AIService.shouldForcePlanIntake(for: action.label)
         ) else {
             auxiliarySheet = .paywall
@@ -703,12 +465,12 @@ struct CoachConversationView: View {
         switch kind {
         case "retry":
             Task { @MainActor in
-                await coachViewModel.retryLastUserMessage(isPro: coachViewModel.isPro)
+                await coach.retryLastUserMessage(isPro: coach.isPro)
             }
             return
         case "escalate_cloud":
             Task { @MainActor in
-                await coachViewModel.regenerateLastMessagePreferringCloud(isPro: coachViewModel.isPro)
+                await coach.regenerateLastMessagePreferringCloud(isPro: coach.isPro)
             }
             return
         case "navigate_to_plan":
@@ -718,14 +480,14 @@ struct CoachConversationView: View {
         case "navigate_to_my_workouts", "open_my_workouts":
             auxiliarySheet = .workouts
         case "start_workout":
-            guard let celebration = coachViewModel.workoutSaveCelebration else { return }
+            guard let celebration = coach.workoutSaveCelebration else { return }
             navigationPath.append(AppRoute.customWorkoutRide(templateID: celebration.templateID))
-            coachViewModel.clearWorkoutSaveCelebration()
+            coach.clearWorkoutSaveCelebration()
             chatSheetPresented = false
         default:
             sentChipKey = CoachChipSentState.key(messageID: messageID, action: action)
             let outgoing = CoachChipPresentation.outgoingText(for: action)
-            send(outgoing, forcePlanIntake: AIService.shouldForcePlanIntake(for: outgoing))
+            send(outgoing, forcePlanIntake: AIService.shouldForcePlanIntake(for: outgoing), coach: coach)
         }
     }
 }
@@ -737,16 +499,18 @@ struct CoachStreamingSection: View {
     var bubbleMaxWidth: CGFloat = .infinity
 
     var body: some View {
-        if coachViewModel.isLoading {
+        @Bindable var coach = coachViewModel
+
+        if coach.isLoading {
             CoachPendingReplyBubble(
-                streamingText: coachViewModel.streamDraftText,
+                streamingText: coach.streamDraftText,
                 bubbleMaxWidth: bubbleMaxWidth,
-                delivery: coachViewModel.streamDelivery,
-                partialTags: coachViewModel.streamPartialTags,
-                isSearchingWeb: coachViewModel.streamIsSearchingWeb,
-                isThinking: coachViewModel.streamIsThinking,
-                statusText: coachViewModel.streamStatusText,
-                routeStatus: coachViewModel.streamRouteStatus
+                delivery: coach.streamDelivery,
+                partialTags: coach.streamPartialTags,
+                isSearchingWeb: coach.streamIsSearchingWeb,
+                isThinking: coach.streamIsThinking,
+                statusText: coach.streamStatusText,
+                routeStatus: coach.streamRouteStatus
             )
             .id("pending-bubble")
         }
@@ -759,10 +523,8 @@ struct CoachInputBarWrapper: View {
     @Binding var auxiliarySheet: CoachAuxiliarySheet?
     let showComposerLimitBanner: Bool
     let onPlanBuilder: () -> Void
-    let sendAction: (String, CoachUserImageAttachment?) -> Void
+    let sendAction: (String, CoachUserImageAttachment?) -> Bool
     let onFocusChanged: (Bool) -> Void
-
-    @Environment(CoachViewModel.self) private var coachViewModel
 
     @State private var inputText = ""
     @State private var attachedImage: CoachUserImageAttachment?
@@ -785,7 +547,8 @@ struct CoachInputBarWrapper: View {
             sendAction: { text in
                 let wasFocused = inputFocused
                 let image = attachedImage
-                sendAction(text, image)
+                let accepted = sendAction(text, image)
+                guard accepted else { return false }
                 inputText = ""
                 attachedImage = nil
                 photoPickerItem = nil
@@ -793,6 +556,7 @@ struct CoachInputBarWrapper: View {
                 if wasFocused {
                     inputFocused = true
                 }
+                return true
             }
         )
         // Removed `ToolbarItemGroup(placement: .keyboard)`. The system toolbar adds
@@ -820,21 +584,49 @@ struct InputBarView: View {
     @FocusState var inputFocused: Bool
     let showComposerLimitBanner: Bool
     let onPlanBuilder: () -> Void
-    let sendAction: (String) -> Void
+    let sendAction: (String) -> Bool
 
     var body: some View {
+        @Bindable var coach = coachViewModel
+
+        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let canSend =
+            (!trimmed.isEmpty || hasAttachedPhoto)
+            && !coach.isLoading
+            && coach.canSendCoachMessage(
+                trimmed,
+                isPro: coach.isPro,
+                hasImage: hasAttachedPhoto
+            )
+        let sendButtonHint: String = {
+            if !coach.canSendCoachMessage(
+                trimmed,
+                isPro: coach.isPro,
+                hasImage: hasAttachedPhoto
+            ) {
+                return "Cloud coach limit reached. Upgrade for live web search, or keep using on-device stats and Private Cloud."
+            }
+            if coach.isLoading {
+                return "Coach is replying. Wait for the response to finish."
+            }
+            if trimmed.isEmpty {
+                return "Type a message to enable send."
+            }
+            return ""
+        }()
+
         VStack(spacing: 0) {
-            if let draft = coachViewModel.planConfirmationDraft {
+            if let draft = coach.planConfirmationDraft {
                 CoachPlanConfirmBanner(draft: draft, navigationPath: $navigationPath)
                     .padding(.horizontal, 14)
                     .padding(.top, 8)
                     .padding(.bottom, 6)
-            } else if let draft = coachViewModel.workoutConfirmationDraft {
+            } else if let draft = coach.workoutConfirmationDraft {
                 CoachWorkoutConfirmBanner(draft: draft)
                     .padding(.horizontal, 14)
                     .padding(.top, 8)
                     .padding(.bottom, 6)
-            } else if let celeb = coachViewModel.planSaveCelebration {
+            } else if let celeb = coach.planSaveCelebration {
                 CoachPlanSuccessBanner(
                     celebration: celeb,
                     navigationPath: $navigationPath,
@@ -843,7 +635,7 @@ struct InputBarView: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 8)
                 .padding(.bottom, 6)
-            } else if let celeb = coachViewModel.workoutSaveCelebration {
+            } else if let celeb = coach.workoutSaveCelebration {
                 CoachWorkoutSuccessBanner(
                     celebration: celeb,
                     navigationPath: $navigationPath,
@@ -888,12 +680,12 @@ struct InputBarView: View {
                 )
             }
 
-            if let errorMessage = coachViewModel.error, !errorMessage.isEmpty {
+            if let errorMessage = coach.error, !errorMessage.isEmpty {
                 MangoxErrorBanner(
                     message: errorMessage,
                     severity: .error,
                     layout: .inlineStrip,
-                    onDismiss: { coachViewModel.dismissError() }
+                    onDismiss: { coach.dismissError() }
                 )
                 .transition(
                     accessibilityReduceMotion
@@ -936,7 +728,7 @@ struct InputBarView: View {
                     Image(systemName: "calendar.badge.plus")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(AppColor.mango.opacity(0.9))
-                        .frame(width: 40, height: 44)
+                        .frame(width: 44, height: 44)
                         .background(AppColor.bg2)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay(
@@ -946,19 +738,19 @@ struct InputBarView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(A11yL10n.planBuilder)
-                .disabled(coachViewModel.isLoading)
+                .disabled(coach.isLoading)
 
                 CoachAttachPhotoPicker(
                     photoPickerItem: $photoPickerItem,
                     attachedImage: $attachedImage,
                     hasAttachedPhoto: $hasAttachedPhoto,
-                    isDisabled: coachViewModel.isLoading
+                    isDisabled: coach.isLoading
                 )
 
                 TextField(
                     "Message",
                     text: $inputText,
-                    prompt: Text("Message").foregroundColor(AppColor.fg3),
+                    prompt: Text("Message").foregroundStyle(AppColor.fg3),
                     axis: .vertical
                 )
                 .font(.body)
@@ -983,9 +775,30 @@ struct InputBarView: View {
                 .focused($inputFocused)
                 .submitLabel(.send)
                 .accessibilityLabel(A11yL10n.messageInput)
-                .onSubmit { sendAction(inputText) }
+                .onSubmit { _ = sendAction(inputText) }
 
-                sendButton
+                Button {
+                    _ = sendAction(inputText)
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(canSend ? AppColor.bg0 : AppColor.fg3)
+                        .frame(width: 44, height: 44)
+                        .background(canSend ? AppColor.mango : AppColor.bg2)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(canSend ? AppColor.mango.opacity(0.45) : AppColor.hair2, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(MangoxPressStyle())
+                .disabled(!canSend)
+                .accessibilityLabel(coach.isLoading ? "Sending message" : "Send message")
+                .accessibilityHintIf(sendButtonHint)
+                .animation(
+                    accessibilityReduceMotion ? .easeInOut(duration: 0.12) : .smooth(duration: 0.22),
+                    value: canSend
+                )
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -997,70 +810,17 @@ struct InputBarView: View {
             }
         }
     }
-
-    private var sendButtonHint: String {
-        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !coachViewModel.canSendCoachMessage(
-            trimmed,
-            isPro: coachViewModel.isPro,
-            hasImage: hasAttachedPhoto
-        ) {
-            return "Cloud coach limit reached. Upgrade for live web search, or keep using on-device stats and Private Cloud."
-        }
-        if coachViewModel.isLoading {
-            return "Coach is replying. Wait for the response to finish."
-        }
-        if trimmed.isEmpty {
-            return "Type a message to enable send."
-        }
-        return ""
-    }
-
-    private var sendButton: some View {
-        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let canSend =
-            (!trimmed.isEmpty || hasAttachedPhoto)
-            && !coachViewModel.isLoading
-            && coachViewModel.canSendCoachMessage(
-                trimmed,
-                isPro: coachViewModel.isPro,
-                hasImage: hasAttachedPhoto
-            )
-
-        return Button {
-            sendAction(inputText)
-        } label: {
-            Image(systemName: "arrow.up")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(canSend ? AppColor.bg0 : AppColor.fg3)
-                .frame(width: 44, height: 44)
-                .background(canSend ? AppColor.mango : AppColor.bg2)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(canSend ? AppColor.mango.opacity(0.45) : AppColor.hair2, lineWidth: 1)
-                )
-        }
-        .buttonStyle(MangoxPressStyle())
-        .disabled(!canSend)
-        .accessibilityLabel(coachViewModel.isLoading ? "Sending message" : "Send message")
-        .accessibilityHintIf(sendButtonHint)
-        .animation(
-            accessibilityReduceMotion ? .easeInOut(duration: 0.12) : .smooth(duration: 0.22),
-            value: canSend
-        )
-    }
 }
 
 private struct CoachPhotoPickerLabel: View {
     let hasAttachedPhoto: Bool
 
     var body: some View {
-        Image(systemName: "photo.on.rectangle")
-            .font(.system(size: 16, weight: .medium))
-            .foregroundStyle(AppColor.mango.opacity(hasAttachedPhoto ? 1 : 0.9))
-            .frame(width: 40, height: 44)
-            .background(AppColor.bg2)
+            Image(systemName: "photo.on.rectangle")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(AppColor.mango.opacity(hasAttachedPhoto ? 1 : 0.9))
+                .frame(width: 44, height: 44)
+                .background(AppColor.bg2)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -1090,15 +850,33 @@ private struct CoachAttachPhotoPicker: View {
         .onChange(of: photoPickerItem) { _, item in
             guard let item else { return }
             Task {
-                guard let data = try? await item.loadTransferable(type: Data.self),
-                    let uiImage = UIImage(data: data),
-                    let attachment = CoachUserImageAttachment.fromUIImage(uiImage)
-                else { return }
-                await MainActor.run {
-                    attachedImage = attachment
-                    hasAttachedPhoto = true
+                do {
+                    guard let data = try await item.loadTransferable(type: Data.self) else {
+                        throw PhotoPickerError.noData
+                    }
+                    guard let uiImage = UIImage(data: data) else {
+                        throw PhotoPickerError.invalidImage
+                    }
+                    guard let attachment = CoachUserImageAttachment.fromUIImage(uiImage) else {
+                        throw PhotoPickerError.unsupportedFormat
+                    }
+                    await MainActor.run {
+                        attachedImage = attachment
+                        hasAttachedPhoto = true
+                    }
+                } catch {
+                    await MainActor.run {
+                        photoPickerItem = nil
+                        hasAttachedPhoto = false
+                    }
                 }
             }
         }
     }
+}
+
+private enum PhotoPickerError: Error {
+    case noData
+    case invalidImage
+    case unsupportedFormat
 }

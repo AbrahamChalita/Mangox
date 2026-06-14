@@ -26,6 +26,9 @@ enum A11yL10n {
     static var onDeviceAnswer: String { String(localized: "coach.a11y.on_device_answer") }
     static var webSourcesAnswer: String { String(localized: "coach.a11y.web_sources_answer") }
     static var coach: String { String(localized: "coach.a11y.coach") }
+    static func coachReplyFormat(_ category: String, _ delivery: String) -> String {
+        String(format: String(localized: "coach.a11y.coach_reply_format"), category, delivery)
+    }
     static func coachStatusFormat(_ text: String) -> String {
         String(format: String(localized: "coach.a11y.coach_status_format"), text)
     }

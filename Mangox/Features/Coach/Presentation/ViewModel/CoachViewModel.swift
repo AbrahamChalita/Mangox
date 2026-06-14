@@ -31,7 +31,6 @@ final class CoachViewModel {
     var currentSessionID: UUID? { coach.currentSessionID }
     var lastFailedDeliveryPath: CoachDeliveryPath? { coach.lastFailedDeliveryPath }
     var suggestsFreshConversation: Bool { coach.suggestsFreshConversation }
-    var hasReachedLimit: Bool = false
     var starterContent: CoachEmptyStartersContent?
 
     // MARK: - Purchase state
@@ -42,10 +41,6 @@ final class CoachViewModel {
     init(coach: AIServiceProtocol, purchasesService: PurchasesServiceProtocol) {
         self.coach = coach
         self.purchasesService = purchasesService
-    }
-
-    func refreshLimitState(isPro: Bool) {
-        hasReachedLimit = coach.hasReachedFreeLimit(isPro: isPro)
     }
 
     func hasReachedFreeLimit(isPro: Bool) -> Bool {
@@ -75,6 +70,10 @@ final class CoachViewModel {
         didRequestPersistedLoad = true
         await Task.yield()
         await coach.loadPersistedMessages()
+    }
+
+    func warmCoachContextCache() async {
+        await coach.warmCoachContextCache()
     }
 
     func refreshStarterContentIfNeeded() async {
@@ -118,16 +117,6 @@ final class CoachViewModel {
         await coach.sendMessage(text, isPro: isPro, forcePlanIntake: forcePlanIntake, image: image)
     }
 
-    @discardableResult
-    func prepareOutgoingMessage(
-        _ text: String,
-        isPro: Bool,
-        forcePlanIntake: Bool = false,
-        hasImage: Bool = false
-    ) -> Bool {
-        coach.prepareOutgoingMessage(text, isPro: isPro, forcePlanIntake: forcePlanIntake, hasImage: hasImage)
-    }
-
     func cancelActiveChatTurn() {
         coach.cancelActiveChatTurn()
     }
@@ -158,19 +147,9 @@ final class CoachViewModel {
 
     func retryLastUserMessage(isPro: Bool) async {
         guard let lastUser = messages.last(where: { $0.role == .user }) else { return }
-        let image: CoachUserImageAttachment?
-        if let jpeg = lastUser.imageJPEG {
-            image = CoachUserImageAttachment(jpegData: jpeg, pixelWidth: 0, pixelHeight: 0)
-        } else {
-            image = nil
-        }
-        guard !lastUser.content.isEmpty || image != nil else { return }
-        await coach.sendMessage(
-            lastUser.content,
-            isPro: isPro,
-            forcePlanIntake: false,
-            image: image
-        )
+        guard !lastUser.content.isEmpty || lastUser.imageJPEG != nil else { return }
+        // Re-run the turn for the existing last user message without appending a duplicate.
+        await coach.regenerateLastMessage(isPro: isPro)
     }
 
     func submitFeedback(for messageID: UUID, score: Int) {

@@ -27,33 +27,26 @@ struct CoachChatTranscriptView: View {
 
     private static let bottomAnchorID = "coach-transcript-bottom"
 
-    private var showEmptyState: Bool {
-        coachViewModel.messages.isEmpty && !coachViewModel.isLoading
-    }
-
-    private var startersLoading: Bool {
-        showEmptyState && coachViewModel.starterContent == nil
-    }
-
-    private var latestAssistantMessageID: UUID? {
-        coachViewModel.messages.last { $0.role == .assistant }?.id
-    }
-
     var body: some View {
+        @Bindable var coach = coachViewModel
+
+        let showEmptyState = coach.messages.isEmpty && !coach.isLoading
+        let startersLoading = showEmptyState && coach.starterContent == nil
+        let latestAssistantMessageID = coach.messages.last { $0.role == .assistant }?.id
+        let messages = coach.messages
+        let showTimestampByID = timestampVisibility(for: messages)
+
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 2) {
                 if showEmptyState {
-                    emptyState
+                    emptyState(
+                        coach: coach,
+                        startersLoading: startersLoading
+                    )
                         .frame(maxWidth: .infinity)
-                        .transition(
-                            .asymmetric(
-                                insertion: .opacity,
-                                removal: .move(edge: .bottom).combined(with: .opacity)
-                            )
-                        )
+                        .transition(emptyStateTransition)
                 }
 
-                let messages = coachViewModel.messages
                 let latestAssistantID = latestAssistantMessageID
                 ForEach(messages) { message in
                     CoachMessageRowEquatableContainer(
@@ -62,13 +55,10 @@ struct CoachChatTranscriptView: View {
                             && message.id == latestAssistantID,
                         bubbleMaxWidth: bubbleMaxWidth,
                         suggestionsInteractive: message.id == latestAssistantID
-                            ? !coachViewModel.isLoading
+                            ? !coach.isLoading
                             : true,
                         sentChipKey: sentChipKey,
-                        showTimestamp: CoachMessageTimestampFormatting.shouldShow(
-                            previousTimestamp: previousTimestamp(for: message, in: messages),
-                            current: message.timestamp
-                        ),
+                        showTimestamp: showTimestampByID[message.id] ?? false,
                         onRetry: onRetry,
                         onRetryCloud: onRetryCloud,
                         onFeedback: { onFeedback(message.id, $0) },
@@ -91,7 +81,7 @@ struct CoachChatTranscriptView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
-            .padding(.top, showEmptyState ? 0 : 12)
+            .padding(.top, 12)
             .padding(.bottom, 16)
             .scrollTargetLayout()
         }
@@ -104,25 +94,25 @@ struct CoachChatTranscriptView: View {
         .scrollIndicators(.hidden)
         .scrollPosition($scrollPosition)
         .onAppear {
-            if !coachViewModel.messages.isEmpty || coachViewModel.isLoading {
+            if !coach.messages.isEmpty || coach.isLoading {
                 schedulePinToBottom(animated: false)
             }
         }
-        .onChange(of: coachViewModel.messages.count) { oldCount, newCount in
+        .onChange(of: coach.messages.count) { oldCount, newCount in
             guard newCount > oldCount else { return }
             schedulePinToBottom(animated: false)
         }
-        .onChange(of: coachViewModel.planSaveCelebration?.planID) { _, _ in
+        .onChange(of: coach.planSaveCelebration?.planID) { _, _ in
             schedulePinToBottom(animated: true)
         }
-        .onChange(of: coachViewModel.workoutConfirmationDraft?.id) { _, _ in
+        .onChange(of: coach.workoutConfirmationDraft?.id) { _, _ in
             schedulePinToBottom(animated: true)
         }
-        .onChange(of: coachViewModel.workoutSaveCelebration?.id) { _, _ in
+        .onChange(of: coach.workoutSaveCelebration?.id) { _, _ in
             schedulePinToBottom(animated: true)
         }
         .onChange(of: composerFocusScrollNonce) { _, _ in
-            guard !coachViewModel.messages.isEmpty else { return }
+            guard !coach.messages.isEmpty else { return }
             schedulePinToBottom(animated: true)
         }
         .animation(
@@ -131,24 +121,46 @@ struct CoachChatTranscriptView: View {
         )
     }
 
-    private func previousTimestamp(for message: ChatMessage, in messages: [ChatMessage]) -> Date? {
-        guard let index = messages.firstIndex(where: { $0.id == message.id }), index > 0 else {
-            return nil
+    /// Computes timestamp visibility once per render instead of scanning the array
+    /// for every message (was O(n²) for long transcripts).
+    private func timestampVisibility(for messages: [ChatMessage]) -> [UUID: Bool] {
+        var result: [UUID: Bool] = [:]
+        result.reserveCapacity(messages.count)
+        for index in messages.indices {
+            let message = messages[index]
+            let previousTimestamp = index > 0 ? messages[index - 1].timestamp : nil
+            result[message.id] = CoachMessageTimestampFormatting.shouldShow(
+                previousTimestamp: previousTimestamp,
+                current: message.timestamp
+            )
         }
-        return messages[index - 1].timestamp
+        return result
+    }
+
+    private var emptyStateTransition: AnyTransition {
+        if accessibilityReduceMotion {
+            return .opacity
+        }
+        return .asymmetric(
+            insertion: .opacity,
+            removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading))
+        )
     }
 
     // MARK: - Empty state
 
     @ViewBuilder
-    private var emptyState: some View {
+    private func emptyState(
+        coach: CoachViewModel,
+        startersLoading: Bool
+    ) -> some View {
         if startersLoading {
             starterLoadingState
         } else {
             let content =
-                coachViewModel.starterContent
+                coach.starterContent
                 ?? CoachEmptyStartersContent(
-                    prompts: coachViewModel.contextualQuickPrompts(),
+                    prompts: coach.contextualQuickPrompts(),
                     topicTags: []
                 )
 
@@ -163,7 +175,7 @@ struct CoachChatTranscriptView: View {
                             "Ask about training, recovery, or build a plan. Starters only appear when Mangox has data to support them.",
                         topicTags: content.topicTags,
                         prompts: content.prompts,
-                        startersEnabled: !coachViewModel.isLoading,
+                        startersEnabled: !coach.isLoading,
                         onPlanBuilder: onPlanBuilder,
                         onPrompt: { onSend($0.text) }
                     )
@@ -171,7 +183,7 @@ struct CoachChatTranscriptView: View {
                     Spacer(minLength: 0)
                 }
 
-                if coachViewModel.hasReachedFreeLimit(isPro: coachViewModel.isPro) {
+                if coach.hasReachedFreeLimit(isPro: coach.isPro) {
                     dailyLimitCard
                         .padding(.top, 22)
                         .frame(maxWidth: bubbleMaxWidth)
@@ -262,9 +274,11 @@ private struct CoachPlanGenerationStatusSection: View {
     @Environment(CoachViewModel.self) private var coachViewModel
 
     var body: some View {
-        if coachViewModel.generatingPlan && !coachViewModel.isLoading {
+        @Bindable var coach = coachViewModel
+
+        if coach.generatingPlan && !coach.isLoading {
             CoachStreamStatusRow(
-                text: coachViewModel.planProgress?.message ?? "Building your plan…",
+                text: coach.planProgress?.message ?? "Building your plan…",
                 style: .cloud
             )
             .id("planGen")
@@ -347,16 +361,16 @@ struct CoachContextWindowBanner: View {
 
             Spacer(minLength: 0)
 
-            if let onDismiss {
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.35))
-                        .frame(width: 28, height: 28)
+                if let onDismiss {
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.35))
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Dismiss")
-            }
         }
         .padding(12)
         .mangoxSurface(
