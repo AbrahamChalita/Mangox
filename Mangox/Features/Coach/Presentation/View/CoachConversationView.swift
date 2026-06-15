@@ -590,20 +590,17 @@ struct InputBarView: View {
         @Bindable var coach = coachViewModel
 
         let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let passesCoachLimit = coach.canSendCoachMessage(
+            trimmed,
+            isPro: coach.isPro,
+            hasImage: hasAttachedPhoto
+        )
         let canSend =
             (!trimmed.isEmpty || hasAttachedPhoto)
             && !coach.isLoading
-            && coach.canSendCoachMessage(
-                trimmed,
-                isPro: coach.isPro,
-                hasImage: hasAttachedPhoto
-            )
+            && passesCoachLimit
         let sendButtonHint: String = {
-            if !coach.canSendCoachMessage(
-                trimmed,
-                isPro: coach.isPro,
-                hasImage: hasAttachedPhoto
-            ) {
+            if !passesCoachLimit {
                 return "Cloud coach limit reached. Upgrade for live web search, or keep using on-device stats and Private Cloud."
             }
             if coach.isLoading {

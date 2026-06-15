@@ -25,6 +25,7 @@ struct CoachChatTranscriptView: View {
     @State private var scrollPosition = ScrollPosition()
     @State private var pinTask: Task<Void, Never>?
     @State private var isScrolledAwayFromBottom = false
+    @State private var isDailyLimitCardDismissed = false
 
     private static let bottomAnchorID = "coach-transcript-bottom"
     private static let bottomScrollThreshold: CGFloat = 80
@@ -131,6 +132,11 @@ struct CoachChatTranscriptView: View {
             guard !coach.messages.isEmpty else { return }
             schedulePinToBottom(animated: true)
         }
+        .onChange(of: showEmptyState) { _, isEmpty in
+            if isEmpty {
+                isDailyLimitCardDismissed = false
+            }
+        }
         .animation(
             CoachChatMotionSupport.animation(reduceMotion: accessibilityReduceMotion, MangoxMotion.smooth),
             value: showEmptyState
@@ -224,8 +230,8 @@ struct CoachChatTranscriptView: View {
                     Spacer(minLength: 0)
                 }
 
-                if coach.hasReachedFreeLimit(isPro: coach.isPro) {
-                    dailyLimitCard
+                if coach.hasReachedFreeLimit(isPro: coach.isPro), !isDailyLimitCardDismissed {
+                    dailyLimitCard { isDailyLimitCardDismissed = true }
                         .padding(.top, 22)
                         .frame(maxWidth: bubbleMaxWidth)
                         .frame(maxWidth: .infinity)
@@ -255,8 +261,20 @@ struct CoachChatTranscriptView: View {
         .padding(.vertical, 16)
     }
 
-    private var dailyLimitCard: some View {
+    private func dailyLimitCard(onDismiss: @escaping () -> Void) -> some View {
         VStack(spacing: 12) {
+            HStack {
+                Spacer(minLength: 0)
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.35))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss limit notice")
+            }
+
             Text("Daily limit reached")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.9))
@@ -275,7 +293,8 @@ struct CoachChatTranscriptView: View {
             }
             .buttonStyle(MangoxPressStyle())
         }
-        .padding(18)
+        .padding(.horizontal, 18)
+        .padding(.bottom, 18)
         .background(Color.white.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(

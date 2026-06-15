@@ -313,6 +313,8 @@ struct CoachUserBubble: View {
             if !text.isEmpty {
                 Button {
                     UIPasteboard.general.string = text
+                    HapticManager.shared.coachQuickReplyTapped()
+                    UIAccessibility.post(notification: .announcement, argument: "Copied")
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
@@ -570,6 +572,8 @@ struct CoachAssistantBubble: View {
         .contextMenu {
             Button {
                 UIPasteboard.general.string = message.content
+                HapticManager.shared.coachQuickReplyTapped()
+                UIAccessibility.post(notification: .announcement, argument: "Copied")
             } label: {
                 Label("Copy", systemImage: "doc.on.doc")
             }
