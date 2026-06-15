@@ -117,6 +117,8 @@ struct CoachHubView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task {
             OnDeviceCoachEngine.prewarmNarrowCoachIfAvailable()
+            OnDeviceCoachEngine.prewarmPCCCoachIfAvailable()
+            await coachViewModel.warmCoachContextCache()
         }
     }
 

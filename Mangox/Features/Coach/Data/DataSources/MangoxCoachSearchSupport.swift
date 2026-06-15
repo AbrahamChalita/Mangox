@@ -70,6 +70,11 @@ enum MangoxCoachSpotlightToolFactory {
     static func makeSpotlightSearchTool() -> any Tool {
         MangoxSpotlightSearchTool()
     }
+
+    /// System-backed OCR tool — extracts structured text from images (gym screens, paper plans,
+    /// race results). Gated on a compile-time flag until Apple ships the type in a stable SDK beta.
+    /// To enable: set `sdkExposesOCRTool = true` and resolve the `OCRTool` import when available.
+    nonisolated static let sdkExposesOCRTool = false
 }
 
 // MARK: - Transcript helpers

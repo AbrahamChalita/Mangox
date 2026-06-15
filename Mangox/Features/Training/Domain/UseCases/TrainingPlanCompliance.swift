@@ -78,7 +78,7 @@ struct TrainingPlanCompliance {
     }
 
     /// Calendar week (Mon–Sun) containing `referenceDate`, aligned with `FitnessTracker` week logic.
-    static func currentWeekRange(referenceDate: Date = .now) -> (start: Date, end: Date) {
+    nonisolated static func currentWeekRange(referenceDate: Date = .now) -> (start: Date, end: Date) {
         var cal = Calendar.current
         cal.firstWeekday = 2 // Monday (1 is Sunday, 2 is Monday)
         guard let weekStart = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: referenceDate)) else {

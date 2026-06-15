@@ -33,26 +33,26 @@ struct FTPTestResult: Codable, Identifiable {
 // MARK: - Persistence
 
 enum FTPTestHistory {
-    private static let storageKey = "ftp_test_history"
+    nonisolated private static let storageKey = "ftp_test_history"
 
-    static func load() -> [FTPTestResult] {
+    nonisolated static func load() -> [FTPTestResult] {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else { return [] }
         return (try? JSONDecoder().decode([FTPTestResult].self, from: data)) ?? []
     }
 
-    static func save(_ results: [FTPTestResult]) {
+    nonisolated static func save(_ results: [FTPTestResult]) {
         if let data = try? JSONEncoder().encode(results) {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
     }
 
-    static func append(_ result: FTPTestResult) {
+    nonisolated static func append(_ result: FTPTestResult) {
         var history = load()
         history.append(result)
         save(history)
     }
 
-    static func markApplied(id: UUID) {
+    nonisolated static func markApplied(id: UUID) {
         var history = load()
         if let idx = history.firstIndex(where: { $0.id == id }) {
             history[idx].applied = true

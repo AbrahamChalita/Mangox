@@ -32,6 +32,10 @@ final class Workout {
     var rpe: Int = 0
     var originRaw: String = WorkoutOrigin.recorded.rawValue
     var importFormatRaw: String?
+    /// Source service when `origin == .imported` from Strava/WHOOP sync (e.g. `strava`, `whoop`).
+    var externalSourceRaw: String?
+    /// Stable id from the external service — used for import deduplication.
+    var externalID: String?
 
     /// Outdoor route label at save time (GPX name or Apple Maps destination).
     var savedRouteName: String?
@@ -102,6 +106,13 @@ enum WorkoutOrigin: String, Codable {
 enum WorkoutImportFormat: String, Codable {
     case tcx
     case fit
+    case strava
+    case whoop
+}
+
+enum ExternalWorkoutSource: String, Codable, Sendable {
+    case strava
+    case whoop
 }
 
 /// Persisted outdoor route source for saved workouts.
@@ -124,6 +135,11 @@ extension Workout {
 
     var isImported: Bool {
         origin == .imported
+    }
+
+    var externalSource: ExternalWorkoutSource? {
+        get { externalSourceRaw.flatMap { ExternalWorkoutSource(rawValue: $0) } }
+        set { externalSourceRaw = newValue?.rawValue }
     }
 
     var savedRouteKind: SavedRouteKind? {

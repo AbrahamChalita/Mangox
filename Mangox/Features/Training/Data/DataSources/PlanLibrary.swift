@@ -6,7 +6,7 @@ import SwiftData
 
 enum PlanLibrary {
     /// Resolves an AI-generated `TrainingPlan` by ID when a `ModelContext` is provided.
-    static func resolvePlan(planID: String?, modelContext: ModelContext? = nil) -> TrainingPlan? {
+    nonisolated static func resolvePlan(planID: String?, modelContext: ModelContext? = nil) -> TrainingPlan? {
         guard let planID else { return nil }
         if let ctx = modelContext {
             let descriptor = FetchDescriptor<AIGeneratedPlan>(
@@ -19,7 +19,7 @@ enum PlanLibrary {
         return nil
     }
 
-    static func resolveDay(planID: String?, dayID: String?, modelContext: ModelContext? = nil) -> PlanDay? {
+    nonisolated static func resolveDay(planID: String?, dayID: String?, modelContext: ModelContext? = nil) -> PlanDay? {
         guard let dayID, let plan = resolvePlan(planID: planID, modelContext: modelContext) else { return nil }
         return plan.day(id: dayID)
     }

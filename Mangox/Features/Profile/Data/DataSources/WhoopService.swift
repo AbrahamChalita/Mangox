@@ -114,6 +114,24 @@ final class WhoopService: WhoopServiceProtocol {
         let maxHeartRate: Int?
     }
 
+    /// `GET /v2/activity/sleep?limit=1` — latest sleep activity.
+    private struct SleepCollectionDTO: Decodable {
+        struct Record: Decodable {
+            struct Score: Decodable {
+                struct StageSummary: Decodable {
+                    let totalInBedTimeMilli: Int?
+                }
+                let stageSummary: StageSummary?
+                let sleepPerformancePercentage: Double?
+                let respiratoryRate: Double?
+            }
+            let nap: Bool?
+            let scoreState: String?
+            let score: Score?
+        }
+        let records: [Record]?
+    }
+
     /// UserDefaults key — when true (default), WHOOP max & resting HR update `HeartRateZone` after each refresh (unless manual overrides are set).
     static let syncHeartBaselinesDefaultsKey = "whoop_sync_hr_baselines"
 
@@ -129,6 +147,12 @@ final class WhoopService: WhoopServiceProtocol {
     private(set) var lastSuccessfulRefreshAt: Date?
     /// Max HR from WHOOP body-measurement endpoint (not workout peak).
     private(set) var latestMaxHeartRateFromProfile: Int?
+    /// Sleep performance percentage (0–100) from the latest scored non-nap sleep.
+    private(set) var latestSleepPerformancePercent: Double?
+    /// Total time in bed for the latest scored non-nap sleep, in hours.
+    private(set) var latestSleepHours: Double?
+    /// Respiratory rate in breaths/min from the latest scored non-nap sleep.
+    private(set) var latestRespiratoryRate: Double?
 
     var isConfigured: Bool {
         !clientID.isEmpty && !redirectURIString.isEmpty && OAuthTokenExchangeClient.isAvailable
@@ -264,6 +288,7 @@ final class WhoopService: WhoopServiceProtocol {
 
         await loadLatestRecoveryMetrics(accessToken: token)
         await loadBodyMeasurements(accessToken: token)
+        await loadLatestSleepMetrics(accessToken: token)
 
         applyHeartBaselinesFromLatestWhoopData()
 
@@ -290,8 +315,56 @@ final class WhoopService: WhoopServiceProtocol {
         }
     }
 
+    private func loadLatestSleepMetrics(accessToken: String) async {
+        var components = URLComponents(
+            url: Self.apiBase.appendingPathComponent("v2/activity/sleep"),
+            resolvingAgainstBaseURL: true
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "limit", value: "1"),
+        ]
+        guard let url = components?.url else {
+            clearSleepMetrics()
+            return
+        }
+        do {
+            let collection: SleepCollectionDTO = try await getJSON(
+                url: url, token: accessToken, context: "WHOOP sleep")
+            guard let record = collection.records?.first(where: { $0.nap != true }),
+                  record.scoreState == "SCORED",
+                  let score = record.score
+            else {
+                clearSleepMetrics()
+                return
+            }
+            latestSleepPerformancePercent = score.sleepPerformancePercentage
+            latestRespiratoryRate = score.respiratoryRate
+            if let ms = score.stageSummary?.totalInBedTimeMilli, ms > 0 {
+                latestSleepHours = Double(ms) / 3_600_000.0
+            } else {
+                latestSleepHours = nil
+            }
+        } catch {
+            whoopLogger.warning("WHOOP sleep metrics failed (non-fatal): \(error.localizedDescription)")
+            clearSleepMetrics()
+        }
+    }
+
+    private func clearSleepMetrics() {
+        latestSleepPerformancePercent = nil
+        latestSleepHours = nil
+        latestRespiratoryRate = nil
+    }
+
+    /// Triggers an immediate data refresh. Called by the Supabase webhook relay when WHOOP
+    /// pushes a recovery/sleep/workout update — the 24h poll acts as a fallback.
+    func handleWebhookSignal() async {
+        await refreshLinkedDataIgnoringErrors()
+    }
+
     /// Refreshes from WHOOP when connected and cached data is older than `maximumAge`, or never refreshed.
-    func refreshLinkedDataIfStale(maximumAge: TimeInterval = 4 * 60 * 60) async {
+    /// Default is 24h — treat as a safety-net fallback; real-time updates come via `handleWebhookSignal()`.
+    func refreshLinkedDataIfStale(maximumAge: TimeInterval = 24 * 60 * 60) async {
         guard isConnected, isConfigured else { return }
         if isBusy { return }
         if let last = lastSuccessfulRefreshAt, Date().timeIntervalSince(last) < maximumAge {
@@ -376,6 +449,7 @@ final class WhoopService: WhoopServiceProtocol {
         session = nil
         memberDisplayName = nil
         clearRecoveryMetrics()
+        clearSleepMetrics()
         latestMaxHeartRateFromProfile = nil
         isConnected = false
         lastError = nil
@@ -523,7 +597,7 @@ final class WhoopService: WhoopServiceProtocol {
                 grantType: grantType,
                 code: code,
                 refreshToken: refreshToken,
-                redirectURI: code != nil ? redirectURIString : nil
+                redirectURI: redirectURIString
             )
         } catch let error as OAuthTokenExchangeClient.ExchangeError {
             switch error {

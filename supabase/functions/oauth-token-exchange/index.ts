@@ -67,8 +67,11 @@ function validateRequest(req: ExchangeRequest): void {
       throw new Error("invalid_redirect_uri");
     }
   }
-  if (req.grant_type === "refresh_token" && !req.refresh_token?.trim()) {
-    throw new Error("missing_refresh_token");
+  if (req.grant_type === "refresh_token") {
+    if (!req.refresh_token?.trim()) throw new Error("missing_refresh_token");
+    if (req.redirect_uri?.trim() && !allowedRedirectURIs().has(req.redirect_uri.trim())) {
+      throw new Error("invalid_redirect_uri");
+    }
   }
 }
 
@@ -84,7 +87,11 @@ function buildUpstreamBody(req: ExchangeRequest): URLSearchParams {
       params.set("redirect_uri", req.redirect_uri!.trim());
     } else {
       params.set("refresh_token", req.refresh_token!.trim());
-      params.set("scope", "offline");
+      // WHOOP's OAuth implementation requires redirect_uri even on refresh_token grants
+      // (non-standard but documented in their error responses). Use the provided URI or
+      // fall back to the registered default.
+      const redirectUri = req.redirect_uri?.trim() || DEFAULT_REDIRECTS[0];
+      params.set("redirect_uri", redirectUri);
     }
     return params;
   }

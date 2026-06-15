@@ -13,6 +13,7 @@ final class HomeViewModel {
     private let whoopService: WhoopServiceProtocol
     private let aiService: AIServiceProtocol
     let trainingPlanLookupService: TrainingPlanLookupServiceProtocol
+    private let syncExternalCyclingWorkouts: SyncExternalCyclingWorkoutsUseCase
 
     private let trainingAggregator:
         @Sendable ([HomeWorkoutMetricSlice], Date, TimeZone, Locale) -> HomeTrainingCacheDTO
@@ -61,6 +62,7 @@ final class HomeViewModel {
         whoopService: WhoopServiceProtocol,
         aiService: AIServiceProtocol,
         trainingPlanLookupService: TrainingPlanLookupServiceProtocol,
+        syncExternalCyclingWorkouts: SyncExternalCyclingWorkoutsUseCase,
         trainingAggregator: @escaping @Sendable (
             [HomeWorkoutMetricSlice], Date, TimeZone, Locale
         ) -> HomeTrainingCacheDTO = HomeTrainingAggregateMath.compute
@@ -71,6 +73,7 @@ final class HomeViewModel {
         self.whoopService = whoopService
         self.aiService = aiService
         self.trainingPlanLookupService = trainingPlanLookupService
+        self.syncExternalCyclingWorkouts = syncExternalCyclingWorkouts
         self.trainingAggregator = trainingAggregator
     }
 
@@ -85,6 +88,11 @@ final class HomeViewModel {
     /// Refreshes WHOOP data if stale (4-hour threshold matching the concrete default).
     func refreshWhoopIfStale() async {
         await whoopService.refreshLinkedDataIfStale(maximumAge: 4 * 60 * 60)
+    }
+
+    /// Pulls Strava/WHOOP cycling rides into the calendar and auto-completes matching plan days.
+    func refreshExternalCyclingIfStale() async {
+        await syncExternalCyclingWorkouts.refreshIfStale()
     }
 
     /// Generates an on-device AI training insight label using the fact sheet from aiService.

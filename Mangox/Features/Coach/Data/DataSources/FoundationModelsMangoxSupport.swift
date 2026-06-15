@@ -20,17 +20,17 @@ enum MangoxFoundationModelsError: Error, LocalizedError {
 /// Centralized Foundation Models helpers: locale, guardrails model, token estimates, transcript logging, generation errors.
 enum MangoxFoundationModelsSupport {
     /// Log each `Transcript.Entry` after sessions when `true`.
-    static let coachTranscriptDebugKey = "MangoxCoachFMTranscriptDebug"
+    nonisolated static let coachTranscriptDebugKey = "MangoxCoachFMTranscriptDebug"
     /// Log instruction + prompt + tool token estimates when `true`. In DEBUG, defaults to on unless explicitly set false.
-    static let tokenBudgetLogKey = "MangoxCoachFMTokenLog"
+    nonisolated static let tokenBudgetLogKey = "MangoxCoachFMTokenLog"
 
-    private static let logger = Logger(subsystem: "com.abchalita.Mangox", category: "FoundationModels")
+    nonisolated private static let logger = Logger(subsystem: "com.abchalita.Mangox", category: "FoundationModels")
 
     static var transcriptDebugEnabled: Bool {
         UserDefaults.standard.bool(forKey: coachTranscriptDebugKey)
     }
 
-    static var tokenBudgetLoggingEnabled: Bool {
+    nonisolated static var tokenBudgetLoggingEnabled: Bool {
         #if DEBUG
         if UserDefaults.standard.object(forKey: tokenBudgetLogKey) == nil { return true }
         #endif
@@ -138,7 +138,47 @@ enum MangoxFoundationModelsSupport {
         }
     }
 
-    static func logSnapshotSelection(fullChosen: Bool, tokenEstimate: Int) {
+    /// Logs actual token usage from a completed FM response (iOS 27).
+    /// Cached tokens are relevant for third-party providers billing on prompt tokens;
+    /// reasoning tokens indicate PCC deep-reasoning spend.
+    static func logResponseUsage(
+        inputTotal: Int, inputCached: Int, outputTotal: Int, outputReasoning: Int, label: String
+    ) {
+        guard tokenBudgetLoggingEnabled else { return }
+        logger.info(
+            """
+            FM usage [\(label, privacy: .public)] \
+            in=\(inputTotal) cached=\(inputCached) \
+            out=\(outputTotal) reasoning=\(outputReasoning)
+            """
+        )
+    }
+
+    /// `true` once `LanguageModelSession.Response.usage` ships in the public SDK.
+    /// Absent from Xcode 27.0 beta-1 — re-check each Xcode beta and flip when available.
+    nonisolated static let sdkExposesResponseUsage = false
+
+    /// Wraps `session.respond` and logs `response.usage` when `sdkExposesResponseUsage` is true.
+    /// Call this everywhere instead of `session.respond` directly so usage logging is enabled by
+    /// flipping one flag once the property ships in the SDK.
+    static func respond<T: Generable & Sendable>(
+        session: LanguageModelSession,
+        to prompt: String,
+        generating type: T.Type,
+        options: GenerationOptions,
+        label: String
+    ) async throws -> LanguageModelSession.Response<T> {
+        let response = try await session.respond(to: prompt, generating: type, options: options)
+        // When sdkExposesResponseUsage is true, add:
+        // logResponseUsage(inputTotal: response.usage.input.totalTokenCount,
+        //                  inputCached: response.usage.input.cachedTokenCount,
+        //                  outputTotal: response.usage.output.totalTokenCount,
+        //                  outputReasoning: response.usage.output.reasoningTokenCount,
+        //                  label: label)
+        return response
+    }
+
+    nonisolated static func logSnapshotSelection(fullChosen: Bool, tokenEstimate: Int) {
         guard tokenBudgetLoggingEnabled else { return }
         logger.info(
             "FM coach snapshot \(fullChosen ? "full" : "compact", privacy: .public) ~tokens=\(tokenEstimate)"

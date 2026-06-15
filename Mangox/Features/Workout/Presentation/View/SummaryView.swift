@@ -53,6 +53,7 @@ struct SummaryView: View {
         var stravaIncludeCaloriesInDescription = true
     @AppStorage("stravaUploadPreferredGearID") private var stravaPreferredGearID = ""
     @State private var heroAppeared = false
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Environment(\.horizontalSizeClass) private var hSizeClass
     private var isWide: Bool { hSizeClass != .compact }
 
@@ -297,7 +298,7 @@ struct SummaryView: View {
                 return
             }
             await prepareSummaryData(force: true)
-            withAnimation(MangoxMotion.smooth) {
+            withAnimation(accessibilityReduceMotion ? .easeOut(duration: 0.15) : MangoxMotion.entrance) {
                 heroAppeared = true
             }
         }
@@ -319,13 +320,35 @@ struct SummaryView: View {
     // MARK: - Loading / Not Found
 
     private var loadingPlaceholder: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous)
+                    .fill(AppColor.bg2)
+                    .frame(height: 28)
+                RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous)
+                    .fill(AppColor.bg1)
+                    .frame(height: 72)
+                HStack(spacing: 8) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous)
+                            .fill(AppColor.bg1)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 52)
+                    }
+                }
+            }
+            .padding(14)
+            .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
+            .redacted(reason: .placeholder)
+            .padding(.horizontal, isWide ? 40 : 20)
+
             ProgressView()
                 .tint(.white.opacity(0.4))
             Text("Pulling up your data")
                 .font(.system(size: 13))
                 .foregroundStyle(.white.opacity(0.3))
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var workoutNotFound: some View {
@@ -685,6 +708,7 @@ private struct SummaryContentView: View {
 
     @State private var rpeRating: Int
     @State private var isAnalysisExpanded = false
+    @State private var isAnalysisContentMounted = false
     @State private var onDeviceInsightFailed = false
 
     init(
@@ -855,6 +879,7 @@ private struct SummaryContentView: View {
 
                 SummaryAnalysisDisclosure(
                     isExpanded: $isAnalysisExpanded,
+                    isContentMounted: $isAnalysisContentMounted,
                     contentPadding: isWide ? 20 : 14
                 ) {
                     if let plan = linkedPlanDay {
@@ -871,9 +896,17 @@ private struct SummaryContentView: View {
             .frame(maxWidth: isWide ? 1100 : .infinity)
             .frame(maxWidth: .infinity)
         }
+        .onChange(of: heroAppeared) { _, appeared in
+            guard appeared, !isAnalysisContentMounted else { return }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(200))
+                isAnalysisContentMounted = true
+            }
+        }
         .onChange(of: workout.id) { _, _ in
             onDeviceInsightFailed = false
             isAnalysisExpanded = false
+            isAnalysisContentMounted = false
         }
     }
 
@@ -1021,12 +1054,14 @@ private struct SummaryContentView: View {
                 Text(rpeDescriptor)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.6))
+                    .animation(MangoxMotion.snappy, value: rpeRating)
                 Spacer()
                 HStack(spacing: 2) {
                     Text("\(rpeRating)")
                         .contentTransition(.numericText(value: Double(rpeRating)))
                         .font(.system(.subheadline, design: .monospaced, weight: .bold))
                         .foregroundStyle(.white)
+                        .animation(MangoxMotion.snappy, value: rpeRating)
                     Text("/ 10")
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.45))
@@ -1039,7 +1074,6 @@ private struct SummaryContentView: View {
             shape: .rounded(MangoxRadius.sharp.rawValue)
         )
         .sensoryFeedback(.selection, trigger: rpeRating)
-        .animation(MangoxMotion.snappy, value: rpeRating)
         .onChange(of: rpeRating) { _, newValue in
             guard workout.rpe != newValue else { return }
             workout.rpe = newValue
@@ -1166,11 +1200,16 @@ private struct SummaryOverviewPanel: View {
     var heroAppeared: Bool = true
 
     @Environment(\.isWideSummary) private var isWide
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     private var durationMetric: SummaryLayoutModel.Metric? { layout.metric(id: "duration") }
     private var distanceMetric: SummaryLayoutModel.Metric? { layout.metric(id: "distance") }
     private var avgPowerMetric: SummaryLayoutModel.Metric? { layout.metric(id: "avg_power") }
     private var tssMetric: SummaryLayoutModel.Metric? { layout.metric(id: "tss") }
+
+    private var heroAnimation: Animation {
+        accessibilityReduceMotion ? .easeOut(duration: 0.15) : MangoxMotion.entrance
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: isWide ? 16 : 13) {
@@ -1185,69 +1224,70 @@ private struct SummaryOverviewPanel: View {
                     .foregroundStyle(.white.opacity(0.38))
             }
 
-            if let durationMetric {
-                SummaryOverviewMetric(
-                    metric: durationMetric,
-                    style: .hero,
-                    accent: accent
-                )
-                .contentTransition(.numericText())
-                .opacity(heroAppeared ? 1 : 0)
-                .scaleEffect(heroAppeared ? 1 : 0.96, anchor: .leading)
-                .blur(radius: heroAppeared ? 0 : 6)
-            }
+            VStack(alignment: .leading, spacing: isWide ? 16 : 13) {
+                if let durationMetric {
+                    SummaryOverviewMetric(
+                        metric: durationMetric,
+                        style: .hero,
+                        accent: accent
+                    )
+                }
 
-            if !layout.badges.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(layout.badges) { badge in
-                            HStack(spacing: 6) {
-                                Image(systemName: badge.icon)
-                                    .font(.system(size: isWide ? 11 : 10))
-                                Text(badge.text)
-                                    .font(.system(size: isWide ? 12 : 11, weight: .semibold))
-                                    .lineLimit(1)
+                if !layout.badges.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(layout.badges) { badge in
+                                HStack(spacing: 6) {
+                                    Image(systemName: badge.icon)
+                                        .font(.system(size: isWide ? 11 : 10))
+                                    Text(badge.text)
+                                        .font(.system(size: isWide ? 12 : 11, weight: .semibold))
+                                        .lineLimit(1)
+                                }
+                                .foregroundStyle(badge.color)
+                                .padding(.horizontal, isWide ? 12 : 10)
+                                .padding(.vertical, isWide ? 6 : 5)
+                                .mangoxSurface(
+                                    .flatCustom(fill: AppColor.bg1, border: badge.color.opacity(0.35)),
+                                    shape: .rounded(MangoxRadius.sharp.rawValue)
+                                )
                             }
-                            .foregroundStyle(badge.color)
-                            .padding(.horizontal, isWide ? 12 : 10)
-                            .padding(.vertical, isWide ? 6 : 5)
-                            .mangoxSurface(
-                                .flatCustom(fill: AppColor.bg1, border: badge.color.opacity(0.35)),
-                                shape: .rounded(MangoxRadius.sharp.rawValue)
-                            )
                         }
                     }
                 }
-            }
 
-            HStack(spacing: isWide ? 10 : 8) {
-                if let distanceMetric {
-                    SummaryOverviewMetric(
-                        metric: distanceMetric,
-                        style: .compact,
-                        accent: AppColor.blue
-                    )
+                HStack(spacing: isWide ? 10 : 8) {
+                    if let distanceMetric {
+                        SummaryOverviewMetric(
+                            metric: distanceMetric,
+                            style: .compact,
+                            accent: AppColor.blue
+                        )
+                    }
+                    if let avgPowerMetric {
+                        SummaryOverviewMetric(
+                            metric: avgPowerMetric,
+                            style: .compact,
+                            accent: AppColor.orange
+                        )
+                    }
+                    if let tssMetric {
+                        SummaryOverviewMetric(
+                            metric: tssMetric,
+                            style: .compact,
+                            accent: AppColor.yellow
+                        )
+                    }
                 }
-                if let avgPowerMetric {
-                    SummaryOverviewMetric(
-                        metric: avgPowerMetric,
-                        style: .compact,
-                        accent: AppColor.orange
-                    )
-                }
-                if let tssMetric {
-                    SummaryOverviewMetric(
-                        metric: tssMetric,
-                        style: .compact,
-                        accent: AppColor.yellow
-                    )
-                }
-            }
 
-            Text(layout.vibeLine)
-                .font(.system(size: isWide ? 13 : 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-                .fixedSize(horizontal: false, vertical: true)
+                Text(layout.vibeLine)
+                    .font(.system(size: isWide ? 13 : 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .opacity(heroAppeared ? 1 : 0)
+            .offset(y: heroAppeared ? 0 : (isWide ? 12 : 10))
+            .animation(heroAnimation, value: heroAppeared)
         }
         .padding(isWide ? 20 : 14)
         .mangoxSurface(
@@ -1329,15 +1369,38 @@ private struct SummaryOverviewMetric: View {
     }
 }
 
+private struct SummaryDisclosureHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 private struct SummaryAnalysisDisclosure<Content: View>: View {
     @Binding var isExpanded: Bool
+    @Binding var isContentMounted: Bool
     let contentPadding: CGFloat
     @ViewBuilder let content: Content
+
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @State private var contentHeight: CGFloat = 0
+
+    private var expansionAnimation: Animation {
+        accessibilityReduceMotion ? .easeInOut(duration: 0.2) : MangoxMotion.expansive
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.snappy) {
+                if !isContentMounted {
+                    isContentMounted = true
+                    withAnimation(expansionAnimation) {
+                        isExpanded = true
+                    }
+                    return
+                }
+                withAnimation(expansionAnimation) {
                     isExpanded.toggle()
                 }
             } label: {
@@ -1349,31 +1412,52 @@ private struct SummaryAnalysisDisclosure<Content: View>: View {
                         .font(.system(size: 12, weight: .heavy))
                         .foregroundStyle(.white.opacity(0.82))
                         .tracking(1.2)
-                        .contentTransition(.opacity)
+                        .animation(nil, value: isExpanded)
                     Spacer()
                     Image(systemName: "chevron.down")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white.opacity(0.5))
                         .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                        .animation(expansionAnimation, value: isExpanded)
                 }
                 .padding(contentPadding)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("summary.analysis.button")
+            .background {
+                RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue, style: .continuous)
+                    .fill(AppColor.mango.opacity(isExpanded ? 0.05 : 0))
+            }
+            .animation(expansionAnimation, value: isExpanded)
 
-            if isExpanded {
-                Divider()
-                    .overlay(AppColor.hair)
+            if isContentMounted {
+                VStack(alignment: .leading, spacing: 0) {
+                    Divider()
+                        .overlay(AppColor.hair)
+                        .padding(.horizontal, contentPadding)
+                        .padding(.bottom, 12)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        content
+                    }
                     .padding(.horizontal, contentPadding)
-                    .padding(.bottom, 12)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    content
+                    .padding(.bottom, contentPadding)
                 }
-                .padding(.horizontal, contentPadding)
-                .padding(.bottom, contentPadding)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .background {
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: SummaryDisclosureHeightKey.self,
+                            value: geo.size.height
+                        )
+                    }
+                }
+                .onPreferenceChange(SummaryDisclosureHeightKey.self) { contentHeight = $0 }
+                .frame(height: isExpanded ? contentHeight : 0, alignment: .top)
+                .clipped()
+                .allowsHitTesting(isExpanded)
+                .accessibilityHidden(!isExpanded)
+                .animation(expansionAnimation, value: isExpanded)
             }
         }
         .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
@@ -1779,14 +1863,13 @@ private struct ZoneRowView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
 
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.white.opacity(0.04))
-                    Capsule()
-                        .fill(color)
-                        .frame(width: max(2, geo.size.width * percent))
-                }
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.04))
+                Capsule()
+                    .fill(color)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .scaleEffect(x: max(percent, 0.02), y: 1, anchor: .leading)
             }
             .frame(height: isWide ? 14 : 10)
 
@@ -1896,8 +1979,10 @@ private struct SummaryLapTable: View {
 
             headerRow
 
-            ForEach(laps) { lap in
-                lapRow(lap)
+            LazyVStack(spacing: 0) {
+                ForEach(laps) { lap in
+                    lapRow(lap)
+                }
             }
         }
         .padding(isWide ? 20 : 14)
@@ -2504,6 +2589,15 @@ private final class _SummaryPreviewPersistenceRepository: WorkoutPersistenceRepo
     func saveImportedWorkout(_ payload: ImportedWorkoutPayload) throws -> Workout {
         Workout(startDate: payload.startDate)
     }
+    func saveExternalWorkout(_ payload: ExternalWorkoutPayload) throws -> Workout {
+        Workout(startDate: payload.startDate)
+    }
+    func mostRecentExternalWorkoutDate(source: ExternalWorkoutSource) throws -> Date? { nil }
+    func fetchExternalWorkout(source: ExternalWorkoutSource, externalID: String) throws -> Workout? { nil }
+    func fetchOverlappingWorkout(startDate: Date, durationSeconds: Int, windowSeconds: Int) throws -> Workout? {
+        nil
+    }
+    func occupiedPlanDayIDs(planID: String) throws -> Set<String> { [] }
     func fetchCustomWorkoutTemplate(id: UUID) throws -> PlanDay? { nil }
     func fetchSortedSamples(forWorkoutID id: PersistentIdentifier) async -> [WorkoutSampleData] { [] }
 }

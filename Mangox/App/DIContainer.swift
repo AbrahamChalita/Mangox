@@ -56,6 +56,7 @@ final class DIContainer {
     let workoutPersistenceRepository: WorkoutPersistenceRepositoryProtocol
     let trainingPlanPersistenceRepository: TrainingPlanPersistenceRepositoryProtocol
     let loggedActivityRepository: LoggedActivityRepository
+    let syncExternalCyclingWorkouts: SyncExternalCyclingWorkoutsUseCase
 
     // MARK: - Cloud sync (Supabase)
 
@@ -80,7 +81,8 @@ final class DIContainer {
             locationService: locationManager,
             whoopService: whoopServiceProtocol,
             aiService: aiService,
-            trainingPlanLookupService: trainingPlanLookupService
+            trainingPlanLookupService: trainingPlanLookupService,
+            syncExternalCyclingWorkouts: syncExternalCyclingWorkouts
         )
     }
 
@@ -159,6 +161,7 @@ final class DIContainer {
                 stravaService: stravaService,
                 repository: loggedActivityRepository
             ),
+            syncExternalCycling: syncExternalCyclingWorkouts,
             whoopConnected: { [weak self] in self?.whoopService.isConnected ?? false },
             stravaConnected: { [weak self] in self?.stravaService.isConnected ?? false },
             lockedDate: lockedDate
@@ -280,5 +283,14 @@ final class DIContainer {
                 syncCoordinator?.notifyLocalChange()
             }
         }
+
+        syncExternalCyclingWorkouts = SyncExternalCyclingWorkoutsUseCase(
+            stravaService: strava,
+            whoopService: whoop,
+            workoutRepository: workoutPersistenceRepository,
+            trainingPlanLookupService: trainingPlanLookupService,
+            trainingPlanPersistenceRepository: trainingPlanPersistenceRepository,
+            modelContext: PersistenceContainer.shared.mainContext
+        )
     }
 }

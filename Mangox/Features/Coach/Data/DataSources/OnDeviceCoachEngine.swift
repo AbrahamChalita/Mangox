@@ -435,11 +435,9 @@ enum OnDeviceCoachEngine {
             tools: []
         )
         do {
-            let decision = try await session.respond(
-                to: prompt,
-                generating: CoachRouteDecision.self,
-                options: MangoxFoundationModelsSupport.greedyGenerationOptions
-            )
+            let decision = try await MangoxFoundationModelsSupport.respond(
+                session: session, to: prompt, generating: CoachRouteDecision.self,
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions, label: "route")
             logTranscript(session, label: "route")
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "route")
             return decision.content.route
@@ -712,11 +710,9 @@ enum OnDeviceCoachEngine {
             tools: []
         )
         do {
-            let pack = try await session.respond(
-                to: prompt,
-                generating: QuickPromptPack.self,
-                options: MangoxFoundationModelsSupport.greedyGenerationOptions
-            )
+            let pack = try await MangoxFoundationModelsSupport.respond(
+                session: session, to: prompt, generating: QuickPromptPack.self,
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions, label: "quick_prompts")
             logTranscript(session, label: "quick_prompts")
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "quick_prompts")
             return pack.content
@@ -746,11 +742,9 @@ enum OnDeviceCoachEngine {
             tools: []
         )
         do {
-            let response = try await session.respond(
-                to: factSheet,
-                generating: CoachStarterContentTags.self,
-                options: MangoxFoundationModelsSupport.greedyGenerationOptions
-            )
+            let response = try await MangoxFoundationModelsSupport.respond(
+                session: session, to: factSheet, generating: CoachStarterContentTags.self,
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions, label: "content_tagging")
             logTranscript(session, label: "content_tagging")
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "content_tagging")
             var seen = Set<String>()
@@ -840,11 +834,9 @@ enum OnDeviceCoachEngine {
         let model = MangoxFoundationModelsSupport.coachSystemLanguageModel()
         let session = LanguageModelSession(model: model, instructions: Instructions(instructions))
         do {
-            let response = try await session.respond(
-                to: facts.joined(separator: "\n"),
-                generating: RideBriefingGenerated.self,
-                options: MangoxFoundationModelsSupport.greedyGenerationOptions
-            )
+            let response = try await MangoxFoundationModelsSupport.respond(
+                session: session, to: facts.joined(separator: "\n"), generating: RideBriefingGenerated.self,
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions, label: "ride_briefing")
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "ride_briefing")
             let text = response.content.briefing.trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? nil : text
@@ -891,11 +883,9 @@ enum OnDeviceCoachEngine {
         let model = MangoxFoundationModelsSupport.coachSystemLanguageModel()
         let session = LanguageModelSession(model: model, instructions: Instructions(instructions))
         do {
-            let response = try await session.respond(
-                to: facts.joined(separator: "\n"),
-                generating: InstagramCaptionGenerated.self,
-                options: MangoxFoundationModelsSupport.creativeGenerationOptions
-            )
+            let response = try await MangoxFoundationModelsSupport.respond(
+                session: session, to: facts.joined(separator: "\n"), generating: InstagramCaptionGenerated.self,
+                options: MangoxFoundationModelsSupport.creativeGenerationOptions, label: "ig_caption")
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "ig_caption")
             let caption = response.content.caption.trimmingCharacters(in: .whitespacesAndNewlines)
             return caption.isEmpty ? nil : caption
@@ -950,11 +940,9 @@ enum OnDeviceCoachEngine {
         let model = MangoxFoundationModelsSupport.coachSystemLanguageModel()
         let session = LanguageModelSession(model: model, instructions: Instructions(instructions))
         do {
-            let response = try await session.respond(
-                to: facts.joined(separator: "\n"),
-                generating: StoryCardTitleGenerated.self,
-                options: MangoxFoundationModelsSupport.creativeGenerationOptions
-            )
+            let response = try await MangoxFoundationModelsSupport.respond(
+                session: session, to: facts.joined(separator: "\n"), generating: StoryCardTitleGenerated.self,
+                options: MangoxFoundationModelsSupport.creativeGenerationOptions, label: "ig_card_title")
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "ig_card_title")
             let title = Self.clampInstagramStoryHeadline(
                 response.content.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -989,11 +977,9 @@ enum OnDeviceCoachEngine {
             Coach: \(firstAssistantReply.prefix(600))
             """
         do {
-            let response = try await session.respond(
-                to: prompt,
-                generating: ChatSessionTitleGenerated.self,
-                options: MangoxFoundationModelsSupport.creativeGenerationOptions
-            )
+            let response = try await MangoxFoundationModelsSupport.respond(
+                session: session, to: prompt, generating: ChatSessionTitleGenerated.self,
+                options: MangoxFoundationModelsSupport.creativeGenerationOptions, label: "session_title")
             let title = response.content.title.trimmingCharacters(in: .whitespacesAndNewlines)
             return title.isEmpty ? nil : title
         } catch {
@@ -1020,11 +1006,9 @@ enum OnDeviceCoachEngine {
         let model = MangoxFoundationModelsSupport.coachSystemLanguageModel()
         let session = LanguageModelSession(model: model, instructions: Instructions(instructions))
 
-        let response = try await session.respond(
-            to: "Rider metrics:\n\(factSheet)",
-            generating: HomeTrainingInsightGenerated.self,
-            options: MangoxFoundationModelsSupport.greedyGenerationOptions
-        )
+        let response = try await MangoxFoundationModelsSupport.respond(
+            session: session, to: "Rider metrics:\n\(factSheet)", generating: HomeTrainingInsightGenerated.self,
+            options: MangoxFoundationModelsSupport.greedyGenerationOptions, label: "home_insight")
         let raw = response.content.statusLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         let label = sanitizeHomeStatusLabel(raw)
         guard !label.isEmpty else { return "" }
@@ -1230,35 +1214,31 @@ extension AIService {
     }
 
     /// Chooses full vs compact snapshot using token budget (on-device ~1900, PCC ~8000).
+    /// The heavy `UserContext` build now runs off the main actor via ``CoachContextBuilder``.
     func coachTrainingSnapshotForCoachTurn(
         modelContext: ModelContext,
         usePrivateCloudCompute: Bool
     ) async -> String {
-        let full = coachFactSheetText(modelContext: modelContext)
-        let compact = coachFactSheetTextCompact(modelContext: modelContext)
-        let snapshotTokenBudget = MangoxPCCSupport.snapshotTokenBudget(
+        let ctx: UserContext
+        if let cached = cachedUserContextEntry {
+            ctx = cached
+        } else {
+            let snapshot = coachContextScalarSnapshot()
+            ctx = await Task.detached(priority: .userInitiated) {
+                let backgroundContext = ModelContext(PersistenceContainer.shared)
+                return CoachContextBuilder.buildUserContext(
+                    snapshot: snapshot,
+                    modelContext: backgroundContext
+                )
+            }.value
+            cachedUserContextEntry = ctx
+            cachedFactSheetFull = CoachContextBuilder.factSheetTextFull(userContext: ctx)
+            cachedFactSheetCompact = CoachContextBuilder.factSheetTextCompact(userContext: ctx)
+        }
+        return await CoachContextBuilder.trainingSnapshot(
+            userContext: ctx,
             usePrivateCloudCompute: usePrivateCloudCompute
         )
-        if #available(iOS 26.4, macOS 26.4, visionOS 26.4, *) {
-            let model = SystemLanguageModel.default
-            do {
-                let fullTok = try await model.tokenCount(for: full)
-                if fullTok <= snapshotTokenBudget {
-                    MangoxFoundationModelsSupport.logSnapshotSelection(
-                        fullChosen: true, tokenEstimate: fullTok)
-                    return full
-                }
-                let compactTok = try await model.tokenCount(for: compact)
-                MangoxFoundationModelsSupport.logSnapshotSelection(
-                    fullChosen: false, tokenEstimate: compactTok)
-                return compact
-            } catch {
-                let charBudget = usePrivateCloudCompute ? 10_000 : 2400
-                return full.count > charBudget ? compact : full
-            }
-        }
-        let charBudget = usePrivateCloudCompute ? 10_000 : 2400
-        return full.count > charBudget ? compact : full
     }
 
     /// Chooses full vs compact snapshot using `SystemLanguageModel.tokenCount` (budget ~1900 tokens for snapshot text alone).
@@ -1420,6 +1400,12 @@ extension AIService {
         }
         if let maxHR = ctx.whoopMaxHeartRate {
             lines.append("Profile max HR: \(maxHR) bpm")
+        }
+        if let sleepPct = ctx.whoopSleepPerformancePercent {
+            lines.append("Sleep performance: \(Int(sleepPct))%")
+        }
+        if let sleepHrs = ctx.whoopSleepHours {
+            lines.append(String(format: "Sleep duration: %.1f h", sleepHrs))
         }
         return lines.joined(separator: "\n")
     }
@@ -1739,11 +1725,9 @@ extension AIService {
             \(userMessage)
             """
 
-        let response = try await session.respond(
-            to: prompt,
-            generating: OnDeviceGeneratedWorkout.self,
-            options: MangoxFoundationModelsSupport.greedyGenerationOptions
-        )
+        let response = try await MangoxFoundationModelsSupport.respond(
+            session: session, to: prompt, generating: OnDeviceGeneratedWorkout.self,
+            options: MangoxFoundationModelsSupport.greedyGenerationOptions, label: "workout_gen")
         let generated = response.content
         let intervals = generated.intervals.enumerated().map { index, item in
             IntervalSegment(

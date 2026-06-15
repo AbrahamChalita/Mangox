@@ -118,6 +118,7 @@ struct HomeView: View {
         }
         .task {
             await viewModel.refreshWhoopIfStale()
+            await viewModel.refreshExternalCyclingIfStale()
         }
         .task(id: "\(viewModel.trainingStatusRequestID)-\(launchOverlayVisible)") {
             guard !launchOverlayVisible else { return }
@@ -672,7 +673,15 @@ extension Date {
             locationService: LocationManager(),
             whoopService: WhoopService(),
             aiService: AIService(),
-            trainingPlanLookupService: TrainingPlanLookupService()
+            trainingPlanLookupService: TrainingPlanLookupService(),
+            syncExternalCyclingWorkouts: SyncExternalCyclingWorkoutsUseCase(
+                stravaService: StravaService(),
+                whoopService: WhoopService(),
+                workoutRepository: WorkoutPersistenceRepository(),
+                trainingPlanLookupService: TrainingPlanLookupService(),
+                trainingPlanPersistenceRepository: TrainingPlanPersistenceRepository(),
+                modelContext: PersistenceContainer.shared.mainContext
+            )
         )
     )
         .modelContainer(for: [Workout.self, WorkoutRAGChunk.self, TrainingPlanProgress.self])

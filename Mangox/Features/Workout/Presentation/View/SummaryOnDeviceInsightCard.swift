@@ -183,7 +183,12 @@ struct SummaryOnDeviceInsightCard: View {
     @State private var insight: WorkoutSummaryOnDeviceInsight?
     /// True when ``insight`` was built from ``OnDeviceModelFallbackCopy`` (no on-device language model or model returned nothing).
     @State private var insightIsStatsFallback = false
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     private var isCompact: Bool { displayMode == .compact }
+
+    private var insightRevealAnimation: Animation {
+        accessibilityReduceMotion ? .easeOut(duration: 0.15) : MangoxMotion.entranceQuick
+    }
 
     var body: some View {
         Group {
@@ -268,10 +273,12 @@ struct SummaryOnDeviceInsightCard: View {
                 }
                 .padding(isCompact ? 12 : 14)
                 .cardStyle(cornerRadius: 16)
+                .transition(.opacity.combined(with: .offset(y: 8)))
             } else {
                 VStack(alignment: .leading, spacing: isCompact ? 8 : 12) {
                     HStack(spacing: 10) {
                         ProgressView()
+                            .controlSize(.small)
                             .tint(AppColor.mango)
                         Text(isCompact ? "Generating coaching insight…" : "Generating on-device insight…")
                             .font(.system(size: isCompact ? 12 : 13))
@@ -289,8 +296,10 @@ struct SummaryOnDeviceInsightCard: View {
                 }
                 .padding(isCompact ? 12 : 14)
                 .cardStyle(cornerRadius: 16)
+                .transition(.opacity)
             }
         }
+        .animation(insightRevealAnimation, value: insight != nil)
         .task(id: workout.id) { @MainActor in
             onDeviceInsightFailed = false
             insightIsStatsFallback = false
@@ -329,6 +338,7 @@ struct SummaryOnDeviceInsightCard: View {
             }
 
             insight = nil
+            try? await Task.sleep(for: .milliseconds(450))
             let result = await WorkoutSummaryOnDeviceInsight.generate(
                 workout: workout,
                 powerZoneLine: powerZoneLine,

@@ -33,6 +33,7 @@ final class LoggedActivitiesViewModel {
     private let repository: LoggedActivityRepository
     private let importWhoop: ImportWhoopWorkoutsUseCase
     private let importStrava: ImportStravaActivitiesUseCase
+    private let syncExternalCycling: SyncExternalCyclingWorkoutsUseCase
     private let whoopConnectedProvider: () -> Bool
     private let stravaConnectedProvider: () -> Bool
 
@@ -91,6 +92,7 @@ final class LoggedActivitiesViewModel {
         repository: LoggedActivityRepository,
         importWhoop: ImportWhoopWorkoutsUseCase,
         importStrava: ImportStravaActivitiesUseCase,
+        syncExternalCycling: SyncExternalCyclingWorkoutsUseCase,
         whoopConnected: @escaping () -> Bool,
         stravaConnected: @escaping () -> Bool,
         lockedDate: Date? = nil
@@ -98,6 +100,7 @@ final class LoggedActivitiesViewModel {
         self.repository = repository
         self.importWhoop = importWhoop
         self.importStrava = importStrava
+        self.syncExternalCycling = syncExternalCycling
         self.whoopConnectedProvider = whoopConnected
         self.stravaConnectedProvider = stravaConnected
         self.lockedDate = lockedDate
@@ -133,11 +136,21 @@ final class LoggedActivitiesViewModel {
 
         async let whoopResult = runWhoopImport()
         async let stravaResult = runStravaImport()
-        let (w, s) = await (whoopResult, stravaResult)
+        async let cyclingResult = runExternalCyclingImport()
+        let (w, s, c) = await (whoopResult, stravaResult, cyclingResult)
 
-        let total = (w?.imported ?? 0) + (s?.imported ?? 0)
+        let crossTrain = (w?.imported ?? 0) + (s?.imported ?? 0)
+        let rides = c?.imported ?? 0
+        let total = crossTrain + rides
         if total > 0 {
-            importSummary = "\(total) new activit\(total == 1 ? "y" : "ies") imported"
+            if rides > 0, crossTrain > 0 {
+                importSummary =
+                    "Imported \(rides) cycling ride\(rides == 1 ? "" : "s") and \(crossTrain) cross-training activit\(crossTrain == 1 ? "y" : "ies")"
+            } else if rides > 0 {
+                importSummary = "\(rides) cycling ride\(rides == 1 ? "" : "s") imported"
+            } else {
+                importSummary = "\(crossTrain) new activit\(crossTrain == 1 ? "y" : "ies") imported"
+            }
         } else {
             importSummary = "Already up to date"
         }
@@ -156,9 +169,10 @@ final class LoggedActivitiesViewModel {
 
         async let stravaResult = runStravaTodayImport()
         async let whoopResult = runWhoopImport()
-        let (s, w) = await (stravaResult, whoopResult)
+        async let cyclingResult = runExternalCyclingImportDay(Date())
+        let (s, w, c) = await (stravaResult, whoopResult, cyclingResult)
 
-        let total = (s?.imported ?? 0) + (w?.imported ?? 0)
+        let total = (s?.imported ?? 0) + (w?.imported ?? 0) + (c?.imported ?? 0)
         importSummary = total > 0
             ? "\(total) new activit\(total == 1 ? "y" : "ies") for today"
             : "No new activities today"
@@ -188,9 +202,10 @@ final class LoggedActivitiesViewModel {
 
         async let stravaResult = runStravaImportForDay(lockedDate)
         async let whoopResult = runWhoopImport()
-        let (s, w) = await (stravaResult, whoopResult)
+        async let cyclingResult = runExternalCyclingImportDay(lockedDate)
+        let (s, w, c) = await (stravaResult, whoopResult, cyclingResult)
 
-        let total = (s?.imported ?? 0) + (w?.imported ?? 0)
+        let total = (s?.imported ?? 0) + (w?.imported ?? 0) + (c?.imported ?? 0)
         importSummary = total > 0
             ? "\(total) new activit\(total == 1 ? "y" : "ies") imported"
             : "Already up to date for this day"
@@ -210,8 +225,33 @@ final class LoggedActivitiesViewModel {
 
     func refreshIfStale() async {
         let last = UserDefaults.standard.object(forKey: Self.staleKey) as? Date ?? .distantPast
-        guard Date().timeIntervalSince(last) > Self.staleDuration else { return }
+        guard Date().timeIntervalSince(last) > Self.staleDuration else {
+            await syncExternalCycling.refreshIfStale()
+            return
+        }
         await runImportAll()
+    }
+
+    @discardableResult
+    private func runExternalCyclingImportDay(_ date: Date) async -> SyncExternalCyclingWorkoutsUseCase.Result? {
+        guard whoopConnected || stravaConnected else { return nil }
+        do {
+            return try await syncExternalCycling.importDay(date)
+        } catch {
+            errorMessage = "Cycling import failed: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    @discardableResult
+    private func runExternalCyclingImport() async -> SyncExternalCyclingWorkoutsUseCase.Result? {
+        guard whoopConnected || stravaConnected else { return nil }
+        do {
+            return try await syncExternalCycling()
+        } catch {
+            errorMessage = "Cycling import failed: \(error.localizedDescription)"
+            return nil
+        }
     }
 
     // MARK: - Private

@@ -204,7 +204,7 @@ enum MangoxPCCSupport {
     // MARK: - Context size (32K on PCC)
 
     /// Token budget for inlined training snapshot text (not the full context window).
-    static func snapshotTokenBudget(usePrivateCloudCompute: Bool) -> Int {
+    nonisolated static func snapshotTokenBudget(usePrivateCloudCompute: Bool) -> Int {
         usePrivateCloudCompute ? 8_000 : 1_900
     }
 

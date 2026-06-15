@@ -7,7 +7,9 @@ import SwiftData
 enum PersistenceContainer {
 
     /// Production container. Crashes at launch if the schema is invalid (fatal misconfiguration).
-    static let shared: ModelContainer = {
+    /// `nonisolated` so background tasks can create their own `ModelContext` without
+    /// forcing every context build onto the main actor.
+    nonisolated static let shared: ModelContainer = {
         do {
             return try makeContainer(inMemory: false)
         } catch {
@@ -16,7 +18,7 @@ enum PersistenceContainer {
     }()
 
     /// Creates a container optionally in-memory (for previews and tests).
-    static func makeContainer(inMemory: Bool = false) throws -> ModelContainer {
+    nonisolated static func makeContainer(inMemory: Bool = false) throws -> ModelContainer {
         let schema = Schema([
             Workout.self,
             WorkoutSample.self,

@@ -26,7 +26,7 @@ struct WorkoutMetricsSnapshot: Sendable {
     }
 
     /// Full snapshot including sorted power stream — only use for power-curve work (cap how many you build).
-    init(from workout: Workout) {
+    nonisolated init(from workout: Workout) {
         self.startDate = workout.startDate
         self.tss = workout.tss
         self.sampleCount = workout.sampleCount
@@ -44,7 +44,7 @@ struct WorkoutMetricsSnapshot: Sendable {
     }
 
     /// Up to `limit` recent rides in the window that qualify for the power curve (each pays a sample sort).
-    static func powerCurveCandidates(
+    nonisolated static func powerCurveCandidates(
         from workouts: [Workout],
         rangeDays: Int,
         limit: Int = 80

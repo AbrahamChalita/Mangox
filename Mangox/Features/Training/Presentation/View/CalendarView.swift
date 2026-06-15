@@ -118,6 +118,7 @@ struct CalendarView: View {
     /// O(1) day lookup for logged-activity TSS (estimated). Mirrors `workoutsByDayStart`.
     @State private var loggedActivityTSSByDayStart: [Date: Double] = [:]
     @State private var calendarRegroupTask: Task<Void, Never>?
+    @State private var externalSyncTask: Task<Void, Never>?
     @State private var showWorkoutImporter = false
     @State private var workoutImportError: String?
     @State private var showWorkoutImportErrorOverlay = false
@@ -217,6 +218,10 @@ struct CalendarView: View {
             if screenMode == .monthGrid, selectedDay == nil {
                 selectedDay = Date()
                 currentMonth = Date()
+            }
+            externalSyncTask?.cancel()
+            externalSyncTask = Task {
+                await di.syncExternalCyclingWorkouts.refreshIfStale()
             }
         }
         .onChange(of: allWorkouts, initial: true) { _, workouts in

@@ -406,7 +406,7 @@ struct PlanWeek: Codable, Identifiable, Sendable {
         case tssTargetLower, tssTargetUpper
     }
 
-    init(weekNumber: Int, phase: String, title: String, totalHoursLow: Double, totalHoursHigh: Double, tssTarget: ClosedRange<Int>, focus: String, days: [PlanDay]) {
+    nonisolated init(weekNumber: Int, phase: String, title: String, totalHoursLow: Double, totalHoursHigh: Double, tssTarget: ClosedRange<Int>, focus: String, days: [PlanDay]) {
         self.weekNumber = weekNumber
         self.phase = phase
         self.title = title
@@ -417,7 +417,7 @@ struct PlanWeek: Codable, Identifiable, Sendable {
         self.days = days
     }
 
-    init(from decoder: Decoder) throws {
+    nonisolated init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         weekNumber = try c.decodeIfPresent(Int.self, forKey: .weekNumber) ?? 1
         phase = try c.decodeIfPresent(String.self, forKey: .phase) ?? ""
@@ -440,7 +440,7 @@ struct PlanWeek: Codable, Identifiable, Sendable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    nonisolated func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(weekNumber, forKey: .weekNumber)
         try c.encode(phase, forKey: .phase)
@@ -470,7 +470,7 @@ struct TrainingPlan: Codable, Identifiable, Sendable {
         case id, name, eventName, eventDate, distance, elevation, location, description, weeks
     }
 
-    init(
+    nonisolated init(
         id: String,
         name: String,
         eventName: String,
@@ -519,13 +519,13 @@ struct TrainingPlan: Codable, Identifiable, Sendable {
         try c.encode(weeks, forKey: .weeks)
     }
 
-    var totalWeeks: Int { weeks.count }
+    nonisolated var totalWeeks: Int { weeks.count }
 
-    var allDays: [PlanDay] {
+    nonisolated var allDays: [PlanDay] {
         weeks.flatMap(\.days)
     }
 
-    func day(id: String) -> PlanDay? {
+    nonisolated func day(id: String) -> PlanDay? {
         allDays.first { $0.id == id }
     }
 
@@ -535,7 +535,7 @@ struct TrainingPlan: Codable, Identifiable, Sendable {
     }
 
     /// Returns a copy with `days` replaced for the given `weekNumber` (e.g. after `/api/regenerate-plan-week`).
-    func replacingDays(forWeekNumber weekNumber: Int, days: [PlanDay]) -> TrainingPlan {
+    nonisolated func replacingDays(forWeekNumber weekNumber: Int, days: [PlanDay]) -> TrainingPlan {
         let newWeeks = weeks.map { week in
             guard week.weekNumber == weekNumber else { return week }
             return PlanWeek(

@@ -296,7 +296,7 @@ enum CoachMessagePresentation {
             let q = (message.followUpBlocks.first?.question ?? message.followUpQuestion ?? "").lowercased()
             let body = message.content.lowercased()
             return body.contains("plan intake")
-                || body.contains("build your plan")
+                || body.contains("build your")
                 || body.contains("collect the key details")
                 || q.contains("weekly hour")
                 || q.contains("experience level")

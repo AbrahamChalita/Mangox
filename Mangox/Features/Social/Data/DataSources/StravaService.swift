@@ -272,9 +272,12 @@ final class StravaService: StravaServiceProtocol {
 
     private static let tokenURL = URL(string: "https://www.strava.com/oauth/token")!
     private static let authorizeURL = URL(string: "https://www.strava.com/oauth/authorize")!
-    private static let uploadURL = URL(string: "https://www.strava.com/api/v3/uploads")!
-    private static let athleteURL = URL(string: "https://www.strava.com/api/v3/athlete")!
-    static let athleteActivitiesURL = URL(string: "https://www.strava.com/api/v3/athlete/activities")!
+    /// New Strava API v3 base host (required from 2027-06-01; adopting early). OAuth endpoints
+    /// stay on www.strava.com — only REST resources move here.
+    private static let apiBase = URL(string: "https://www.api-v3.strava.com")!
+    private static let uploadURL = apiBase.appending(path: "uploads")
+    private static let athleteURL = apiBase.appending(path: "athlete")
+    static let athleteActivitiesURL = apiBase.appending(path: "athlete/activities")
     private static let keychainAccount = "strava.session.v1"
     private static let localSavedAtKey = "mangox.linked_oauth.strava.saved_at"
 
@@ -429,7 +432,7 @@ final class StravaService: StravaServiceProtocol {
         let token = try await validAccessToken()
 
         let boundary = "Boundary-\(UUID().uuidString)"
-        let url = URL(string: "https://www.strava.com/api/v3/activities/\(activityID)/photos")!
+        let url = Self.apiBase.appending(path: "activities/\(activityID)/photos")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -521,7 +524,7 @@ final class StravaService: StravaServiceProtocol {
         guard isConfigured else { throw StravaError.notConfigured }
 
         let token = try await validAccessToken()
-        let url = URL(string: "https://www.strava.com/api/v3/activities/\(activityID)")!
+        let url = Self.apiBase.appending(path: "activities/\(activityID)")
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -963,7 +966,7 @@ final class StravaService: StravaServiceProtocol {
     }
 
     private func fetchUpload(accessToken: String, uploadID: Int) async throws -> UploadResponse {
-        var request = URLRequest(url: URL(string: "https://www.strava.com/api/v3/uploads/\(uploadID)")!)
+        var request = URLRequest(url: Self.apiBase.appending(path: "uploads/\(uploadID)"))
         request.httpMethod = "GET"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")

@@ -14,6 +14,12 @@ protocol WhoopServiceProtocol: AnyObject {
     var latestRecoveryRestingHR: Int? { get }
     var latestRecoveryHRV: Int? { get }
     var latestMaxHeartRateFromProfile: Int? { get }
+    /// Latest sleep performance percentage (0–100) from WHOOP, when scored and not a nap.
+    var latestSleepPerformancePercent: Double? { get }
+    /// Total time in bed for the latest sleep in hours, when scored and not a nap.
+    var latestSleepHours: Double? { get }
+    /// Respiratory rate in breaths/min from the latest scored sleep.
+    var latestRespiratoryRate: Double? { get }
     var isBusy: Bool { get }
     var lastError: String? { get }
     var isConfigured: Bool { get }
@@ -26,6 +32,9 @@ protocol WhoopServiceProtocol: AnyObject {
     func refreshLinkedData() async throws
     func refreshLinkedDataIfStale(maximumAge: TimeInterval) async
     func applyHeartBaselinesFromLatestWhoopData()
+    /// Triggers an immediate data refresh. Called by the Supabase webhook relay when WHOOP
+    /// pushes a recovery/sleep/workout update — the 24h poll is the fallback when webhooks fail.
+    func handleWebhookSignal() async
 
     func fetchRecentWorkouts(since: Date, until: Date) async throws -> [WhoopWorkoutDTO]
 }

@@ -3,6 +3,10 @@ import Foundation
 /// Golden fixtures and output validators for AFM prompt regression (Evaluations-framework-style harness).
 enum FoundationModelsCoachEvaluation {
 
+    /// Set to `true` once the iOS 27 Evaluations framework ships a stable public API.
+    /// Absent from Xcode 27.0 beta-1 — flip when available and migrate fixtures below into it.
+    nonisolated static let sdkExposesEvaluationsFramework = false
+
     // MARK: - Fixtures
 
     struct RoutingFixture: Sendable {
@@ -45,8 +49,8 @@ enum FoundationModelsCoachEvaluation {
         RoutingFixture(
             name: "intervals_today",
             message: "Should I do intervals today?",
-            expectOnDevice: false,
-            expectPCC: true,
+            expectOnDevice: true,
+            expectPCC: false,
             expectCloudBackend: false
         ),
         RoutingFixture(

@@ -23,6 +23,27 @@ struct ImportedWorkoutPayload {
     let samples: [ImportedWorkoutSamplePayload]
 }
 
+/// Payload for cycling rides imported from Strava or WHOOP into the calendar lane.
+struct ExternalWorkoutPayload {
+    let source: ExternalWorkoutSource
+    let externalID: String
+    let title: String?
+    let format: WorkoutImportFormat
+    let startDate: Date
+    let durationSeconds: Int
+    let distanceMeters: Double
+    let elevationGainMeters: Double
+    let avgPower: Double
+    let maxPower: Int
+    let avgHR: Double
+    let maxHR: Int
+    let avgCadence: Double
+    let normalizedPower: Double
+    let intensityFactor: Double
+    let tss: Double
+    let samples: [ImportedWorkoutSamplePayload]
+}
+
 /// Data-layer contract for Workout-related SwiftData mutations.
 /// This seam keeps direct `ModelContext` writes out of Presentation/ViewModel code.
 @MainActor
@@ -45,6 +66,26 @@ protocol WorkoutPersistenceRepositoryProtocol: AnyObject {
     /// Inserts a completed imported workout and saves. Posts the aggregate-change notification.
     @discardableResult
     func saveImportedWorkout(_ payload: ImportedWorkoutPayload) throws -> Workout
+
+    /// Inserts a Strava/WHOOP cycling ride. Skips callers that already deduped by external id or overlap.
+    @discardableResult
+    func saveExternalWorkout(_ payload: ExternalWorkoutPayload) throws -> Workout
+
+    /// Most recent imported external ride for cursor-based sync windows.
+    func mostRecentExternalWorkoutDate(source: ExternalWorkoutSource) throws -> Date?
+
+    /// Returns a workout already linked to the given external source id, if any.
+    func fetchExternalWorkout(source: ExternalWorkoutSource, externalID: String) throws -> Workout?
+
+    /// Returns a completed workout overlapping the given start time (±window) and duration (±120s).
+    func fetchOverlappingWorkout(
+        startDate: Date,
+        durationSeconds: Int,
+        windowSeconds: Int
+    ) throws -> Workout?
+
+    /// Plan day ids that already have a completed linked ride for the given plan.
+    func occupiedPlanDayIDs(planID: String) throws -> Set<String>
 
     /// Fetches a `CustomWorkoutTemplate` by id and converts it to a `PlanDay`. Returns nil if not found.
     /// Used by `IndoorViewModel.prepareWorkoutSession` to load custom workout templates without a direct
