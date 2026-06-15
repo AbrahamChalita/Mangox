@@ -24,8 +24,10 @@ struct CoachChatTranscriptView: View {
 
     @State private var scrollPosition = ScrollPosition()
     @State private var pinTask: Task<Void, Never>?
+    @State private var isScrolledAwayFromBottom = false
 
     private static let bottomAnchorID = "coach-transcript-bottom"
+    private static let bottomScrollThreshold: CGFloat = 80
 
     var body: some View {
         @Bindable var coach = coachViewModel
@@ -93,6 +95,16 @@ struct CoachChatTranscriptView: View {
         .scrollDismissesKeyboard(.interactively)
         .scrollIndicators(.hidden)
         .scrollPosition($scrollPosition)
+        .onScrollGeometryChange(for: CGFloat.self) { geo in
+            // Distance from the bottom edge of the visible rect to the bottom of the content.
+            let bottomEdge = geo.contentOffset.y + geo.visibleRect.height
+            return max(0, geo.contentSize.height - bottomEdge)
+        } action: { _, distanceToBottom in
+            let away = distanceToBottom > Self.bottomScrollThreshold
+            if away != isScrolledAwayFromBottom {
+                isScrolledAwayFromBottom = away
+            }
+        }
         .onAppear {
             if !coach.messages.isEmpty || coach.isLoading {
                 schedulePinToBottom(animated: false)
@@ -123,6 +135,31 @@ struct CoachChatTranscriptView: View {
             CoachChatMotionSupport.animation(reduceMotion: accessibilityReduceMotion, MangoxMotion.smooth),
             value: showEmptyState
         )
+        .overlay(alignment: .bottomTrailing) {
+            if isScrolledAwayFromBottom {
+                Button {
+                    HapticManager.shared.coachQuickReplyTapped()
+                    schedulePinToBottom(animated: true)
+                } label: {
+                    Image(systemName: "arrow.down")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(AppColor.mango)
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Scroll to latest message")
+                .padding(.trailing, 20)
+                .padding(.bottom, 12)
+                .transition(
+                    accessibilityReduceMotion
+                        ? .opacity
+                        : .move(edge: .bottom).combined(with: .opacity)
+                )
+            }
+        }
     }
 
     /// Computes timestamp visibility once per render instead of scanning the array
@@ -252,6 +289,7 @@ struct CoachChatTranscriptView: View {
     /// One-shot scroll-to-bottom for discrete events (send, appear, plan banners). Yields once so
     /// layout finishes before anchoring (fixes first-message stuck-at-top).
     private func schedulePinToBottom(animated: Bool = false) {
+        isScrolledAwayFromBottom = false
         pinTask?.cancel()
         pinTask = Task { @MainActor in
             await Task.yield()
