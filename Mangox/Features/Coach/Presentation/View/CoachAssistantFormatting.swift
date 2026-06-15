@@ -54,6 +54,22 @@ enum CoachAssistantFormatting {
         plainFallback(normalizeLeadingAsteriskBullets(sanitizePartialMarkdown(raw)))
     }
 
+    /// Memoized variant for the pending reply bubble so each token is normalized once
+    /// even if the view body is evaluated multiple times during streaming.
+    static func cachedPlainTextForStreaming(_ raw: String) -> String {
+        let key = raw as NSString
+        if let hit = streamingPlainTextCache.object(forKey: key) { return hit as String }
+        let value = plainTextForStreaming(raw)
+        streamingPlainTextCache.setObject(value as NSString, forKey: key)
+        return value
+    }
+
+    private static let streamingPlainTextCache: NSCache<NSString, NSString> = {
+        let cache = NSCache<NSString, NSString>()
+        cache.countLimit = 256
+        return cache
+    }()
+
     // MARK: - Private
 
     /// Models often emit `* item` lists; `inlineOnly` Markdown ignored those. Map to `- item` for full Markdown lists.

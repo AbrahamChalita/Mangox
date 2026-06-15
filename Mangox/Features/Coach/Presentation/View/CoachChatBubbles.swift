@@ -136,7 +136,9 @@ struct CoachMessageRow: View {
                         text: message.content,
                         imageJPEG: message.imageJPEG,
                         imageCacheKey: message.id,
-                        bubbleMaxWidth: bubbleMaxWidth
+                        bubbleMaxWidth: bubbleMaxWidth,
+                        timestamp: message.timestamp,
+                        showTimestamp: showTimestamp
                     )
                 }
             } else {
@@ -164,7 +166,8 @@ struct CoachMessageRow: View {
                                 )
                                 : nil,
                             showsFeedback: isLatestAssistant,
-                            onFeedback: isLatestAssistant ? { onFeedback($0) } : nil
+                            onFeedback: isLatestAssistant ? { onFeedback($0) } : nil,
+                            showTimestamp: showTimestamp
                         )
                     }
 
@@ -246,6 +249,21 @@ struct CoachUserBubble: View {
     let imageJPEG: Data?
     var imageCacheKey: UUID? = nil
     let bubbleMaxWidth: CGFloat
+    var timestamp: Date? = nil
+    var showTimestamp: Bool = false
+
+    private var accessibilityValueText: String {
+        var parts: [String] = []
+        if text.isEmpty {
+            parts.append("Photo message")
+        } else {
+            parts.append(text)
+        }
+        if showTimestamp, let timestamp {
+            parts.append(CoachMessageTimestampFormatting.label(for: timestamp))
+        }
+        return parts.joined(separator: ", ")
+    }
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 8) {
@@ -290,7 +308,7 @@ struct CoachUserBubble: View {
         .frame(maxWidth: bubbleMaxWidth, alignment: .trailing)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(A11yL10n.yourMessage)
-        .accessibilityValue(text.isEmpty ? "Photo message" : text)
+        .accessibilityValue(accessibilityValueText)
         .contextMenu {
             if !text.isEmpty {
                 Button {
@@ -311,6 +329,7 @@ struct CoachAssistantBubble: View {
     var inlineFollowUp: CoachInlineFollowUpModel? = nil
     var showsFeedback: Bool = false
     var onFeedback: ((Int) -> Void)? = nil
+    var showTimestamp: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var expandedLongBody = false
@@ -339,6 +358,14 @@ struct CoachAssistantBubble: View {
 
     private var categoryAccent: Color {
         responseAppearance.accent
+    }
+
+    private var accessibilityValueText: String {
+        var parts: [String] = [message.content]
+        if showTimestamp {
+            parts.append(CoachMessageTimestampFormatting.label(for: message.timestamp))
+        }
+        return parts.joined(separator: ", ")
     }
 
     private var stripGradient: LinearGradient {
@@ -537,7 +564,7 @@ struct CoachAssistantBubble: View {
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(A11yL10n.coachReplyFormat(categoryLabel, responseAppearance.label))
-        .accessibilityValue(message.content)
+        .accessibilityValue(accessibilityValueText)
         .onAppear { beginMetadataReveal() }
         .onChange(of: message.id) { _, _ in beginMetadataReveal() }
         .contextMenu {
@@ -1019,7 +1046,7 @@ struct CoachPendingReplyBubble: View {
     }
 
     private var streamPlainText: String {
-        CoachAssistantFormatting.plainTextForStreaming(streamingText)
+        CoachAssistantFormatting.cachedPlainTextForStreaming(streamingText)
     }
 
     var body: some View {
