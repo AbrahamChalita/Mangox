@@ -334,11 +334,13 @@ extension View {
 
 /// Press-to-scale feedback for tappable buttons. Applies subtle scale + opacity.
 struct MangoxPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .scaleEffect(accessibilityReduceMotion ? 1.0 : (configuration.isPressed ? 0.97 : 1.0))
             .opacity(configuration.isPressed ? 0.85 : 1.0)
-            .animation(MangoxMotion.press, value: configuration.isPressed)
+            .animation(MangoxMotion.respectingReduceMotion(accessibilityReduceMotion, preferred: MangoxMotion.press), value: configuration.isPressed)
     }
 }
 

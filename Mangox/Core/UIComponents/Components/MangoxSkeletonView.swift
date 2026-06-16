@@ -6,6 +6,7 @@ struct MangoxSkeletonView: View {
     var height: CGFloat = 12
     var cornerRadius: CGFloat = MangoxRadius.badge.rawValue
 
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var phase: CGFloat = -1
 
     var body: some View {
@@ -39,8 +40,12 @@ struct MangoxSkeletonView: View {
             )
             .frame(width: width, height: height)
             .onAppear {
-                withAnimation(MangoxMotion.banner.repeatForever(autoreverses: false)) {
+                if accessibilityReduceMotion {
                     phase = 2
+                } else {
+                    withAnimation(MangoxMotion.banner.repeatForever(autoreverses: false)) {
+                        phase = 2
+                    }
                 }
             }
             .accessibilityHidden(true)

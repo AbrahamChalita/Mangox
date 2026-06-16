@@ -580,10 +580,6 @@ struct CoachAssistantBubble: View {
         }
     }
 
-    private func referenceRow(title: String, snippet: String?) -> some View {
-        CoachReferenceRow(title: title, snippet: snippet)
-    }
-
     private func beginMetadataReveal() {
         isMetadataVisible = false
         sourcesExpanded = false

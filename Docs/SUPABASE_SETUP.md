@@ -241,12 +241,14 @@ supabase migration repair --status applied 20260527120000
 ### Linked OAuth (Strava / WHOOP)
 
 Apply migration `supabase/migrations/20260527120000_linked_oauth_accounts.sql` to the project (via `db push` after repair, or SQL editor).
+Apply migration `supabase/migrations/20260616113000_external_webhook_events.sql` when enabling Strava/WHOOP webhooks.
 
 When the user is signed in to cloud backup:
 
 1. Connecting Strava or WHOOP encrypts the session JSON and upserts `linked_oauth_accounts`.
-2. Sign-in / sync **pull** restores tokens into Keychain if the device has no newer local copy.
-3. Disconnect or “Delete all my data” removes the cloud row.
+2. The app stores the provider account id in `provider_user_id` so Strava/WHOOP webhooks can be routed without decrypting OAuth tokens server-side.
+3. Sign-in / sync **pull** restores tokens into Keychain if the device has no newer local copy.
+4. Disconnect or “Delete all my data” removes the cloud row.
 
 Requires `USER_DATA_KEY` in the build (same key as coach context encryption). App Store builds share one key per release; custom `Secrets.xcconfig` overrides break cross-device restore for that dev build.
 
@@ -276,6 +278,28 @@ supabase functions deploy oauth-token-exchange
 Or run `scripts/deploy-oauth-edge-function.sh` after exporting the four env vars above.
 
 `verify_jwt` is **false** for this function so users can link WHOOP/Strava before signing in to cloud backup. The publishable anon key is still required on each request.
+
+## WHOOP / Strava Webhooks
+
+Mangox receives provider webhook callbacks through the Supabase Edge Function `external-webhooks` (`supabase/functions/external-webhooks/`). The function routes provider events to a signed-in Mangox user by matching `linked_oauth_accounts.provider_user_id`; the encrypted OAuth payload is never decrypted in the function.
+
+Deploy after applying `20260616113000_external_webhook_events.sql`:
+
+```bash
+supabase secrets set \
+  SUPABASE_SERVICE_ROLE_KEY='your-service-role-key' \
+  STRAVA_WEBHOOK_VERIFY_TOKEN='your-random-strava-verify-token' \
+  MANGOX_WEBHOOK_SECRET='your-random-shared-webhook-secret'
+
+supabase functions deploy external-webhooks
+```
+
+Register callback URLs:
+
+- Strava: `https://<project-ref>.supabase.co/functions/v1/external-webhooks?provider=strava&secret=<MANGOX_WEBHOOK_SECRET>`
+- WHOOP: `https://<project-ref>.supabase.co/functions/v1/external-webhooks?provider=whoop&secret=<MANGOX_WEBHOOK_SECRET>`
+
+Strava's subscription verification uses `STRAVA_WEBHOOK_VERIFY_TOKEN` and returns the required `hub.challenge`. Runtime event callbacks write to `external_webhook_events` for app-side refresh/processing.
 
 ### Redirect URIs
 

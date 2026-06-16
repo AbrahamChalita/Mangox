@@ -191,8 +191,41 @@ struct LoggedActivitiesView: View {
                 .buttonStyle(.plain)
             }
             Spacer()
+            if viewModel.whoopConnected || viewModel.stravaConnected {
+                compactSyncButton
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var compactSyncButton: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            Task { await runVisibleScopeImport() }
+        } label: {
+            Label(viewModel.isImporting ? "Syncing" : "Sync", systemImage: viewModel.isImporting ? "arrow.trianglehead.2.clockwise" : "arrow.down.circle")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppColor.fg1)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(AppOpacity.cardBg))
+                .clipShape(Capsule())
+                .overlay(Capsule().strokeBorder(AppColor.hair2, lineWidth: 1))
+                .symbolEffect(.rotate, isActive: viewModel.isImporting)
+        }
+        .buttonStyle(MangoxPressStyle())
+        .disabled(viewModel.isImporting)
+        .accessibilityLabel("Sync activities")
+    }
+
+    private func runVisibleScopeImport() async {
+        switch viewModel.dateScope {
+        case .today:
+            await viewModel.runImportToday()
+        case .week, .all:
+            await viewModel.runImportAll()
+        }
     }
 
     // MARK: - Content

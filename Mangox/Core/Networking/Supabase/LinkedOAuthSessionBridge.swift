@@ -53,17 +53,21 @@ final class LinkedOAuthSessionBridge {
     private func push(provider: LinkedOAuthProvider, userId: UUID, client: SupabaseClient) async {
         guard let json = sessionJSON(for: provider) else { return }
         let localSavedAt = localSavedAt(for: provider)
+        let providerUserId = providerUserId(for: provider)
         do {
             if let remote = try await LinkedOAuthCloudStore.fetch(
                 provider: provider,
                 userId: userId,
                 client: client
-            ), let localSavedAt, localSavedAt <= remote.updatedAt {
+            ), let localSavedAt,
+               localSavedAt <= remote.updatedAt,
+               providerUserId == nil || remote.providerUserId == providerUserId {
                 return
             }
             try await LinkedOAuthCloudStore.upsert(
                 provider: provider,
                 sessionJSON: json,
+                providerUserId: providerUserId,
                 userId: userId,
                 client: client
             )
@@ -108,6 +112,13 @@ final class LinkedOAuthSessionBridge {
         switch provider {
         case .strava: strava?.exportSessionJSONForCloudBackup()
         case .whoop: whoop?.exportSessionJSONForCloudBackup()
+        }
+    }
+
+    private func providerUserId(for provider: LinkedOAuthProvider) -> String? {
+        switch provider {
+        case .strava: strava?.linkedOAuthProviderUserID
+        case .whoop: whoop?.linkedOAuthProviderUserID
         }
     }
 }

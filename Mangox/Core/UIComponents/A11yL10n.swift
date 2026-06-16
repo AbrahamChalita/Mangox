@@ -11,6 +11,9 @@ enum A11yL10n {
     static var planBuilder: String { String(localized: "coach.a11y.plan_builder") }
     static var newConversation: String { String(localized: "coach.a11y.new_conversation") }
     static var dismissError: String { String(localized: "coach.a11y.dismiss_error") }
+    static var scrollToLatest: String { String(localized: "coach.a11y.scroll_to_latest") }
+    static var dismissLimitNotice: String { String(localized: "coach.a11y.dismiss_limit_notice") }
+    static var deleteWorkout: String { String(localized: "coach.a11y.delete_workout") }
     static func errorFormat(_ message: String) -> String {
         String(format: String(localized: "coach.a11y.error_format"), message)
     }
@@ -240,6 +243,11 @@ enum A11yL10n {
     static var editActivity: String { String(localized: "activity_log.a11y.edit_activity") }
     static var deleteActivity: String { String(localized: "activity_log.a11y.delete_activity") }
     static var deleteActivityHint: String { String(localized: "activity_log.a11y.delete_activity_hint") }
+
+    // MARK: - Ride FAB
+
+    static var startRide: String { String(localized: "ride_fab.a11y.start_ride") }
+    static var closeRideOptions: String { String(localized: "ride_fab.a11y.close_ride_options") }
 
     // MARK: - Mangox Brand
 

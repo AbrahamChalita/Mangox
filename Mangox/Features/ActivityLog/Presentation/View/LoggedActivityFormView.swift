@@ -36,7 +36,10 @@ struct LoggedActivityFormView: View {
                 .disabled(!viewModel.isValid || viewModel.isSaving)
             }
         }
-        .alert("Error", isPresented: .constant(viewModel.errorMessage != nil)) {
+        .alert("Error", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.dismissError() } }
+        )) {
             Button("OK") { viewModel.dismissError() }
         } message: {
             if let msg = viewModel.errorMessage { Text(msg) }

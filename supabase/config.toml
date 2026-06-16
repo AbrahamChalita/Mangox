@@ -1,6 +1,10 @@
 # Mangox Supabase project (ref: jvhkplgacbeuksiphgyk)
-# Deploy: supabase link && supabase functions deploy oauth-token-exchange
+# Deploy: supabase link && supabase functions deploy oauth-token-exchange external-webhooks
 
 [functions.oauth-token-exchange]
 # WHOOP/Strava linking must work before the user signs in to Mangox cloud backup.
+verify_jwt = false
+
+[functions.external-webhooks]
+# Provider callbacks are not Supabase-authenticated; routing is guarded by provider/shared secrets.
 verify_jwt = false

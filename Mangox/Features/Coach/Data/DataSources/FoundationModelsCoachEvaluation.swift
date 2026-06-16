@@ -139,8 +139,7 @@ enum FoundationModelsCoachEvaluation {
         pccAvailable: Bool
     ) -> CoachDeliveryPath {
         if !planIntake, OnDeviceCoachEngine.heuristicPrefersPCCWebSearch(for: userMessage) {
-            if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *),
-                MangoxPrivateCloudComputeModelFactory.isLiveWebSearchAvailable,
+            if MangoxPrivateCloudComputeModelFactory.isLiveWebSearchAvailable,
                 pccAvailable
             {
                 return .privateCloudCompute

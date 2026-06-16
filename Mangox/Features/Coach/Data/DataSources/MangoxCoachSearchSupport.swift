@@ -72,8 +72,8 @@ enum MangoxCoachSpotlightToolFactory {
     }
 
     /// System-backed OCR tool — extracts structured text from images (gym screens, paper plans,
-    /// race results). Gated on a compile-time flag until Apple ships the type in a stable SDK beta.
-    /// To enable: set `sdkExposesOCRTool = true` and resolve the `OCRTool` import when available.
+    /// race results). The iOS 27 beta SDK exposes `OCRTool` via `_Vision_FoundationModels`; keep
+    /// this off until we decide that underscored module is acceptable for App Store distribution.
     nonisolated static let sdkExposesOCRTool = false
 }
 

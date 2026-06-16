@@ -11,6 +11,14 @@ enum LinkedOAuthCloudStore {
     struct Row: Codable, Sendable {
         let user_id: String
         let provider: String
+        let provider_user_id: String?
+        let encrypted_payload: String
+        let updated_at: String
+    }
+
+    private struct LegacyRow: Codable, Sendable {
+        let user_id: String
+        let provider: String
         let encrypted_payload: String
         let updated_at: String
     }
@@ -32,27 +40,46 @@ enum LinkedOAuthCloudStore {
     static func upsert(
         provider: LinkedOAuthProvider,
         sessionJSON: Data,
+        providerUserId: String?,
         userId: UUID,
         client: SupabaseClient
     ) async throws {
         let encrypted = try UserDataCrypto.encrypt(sessionJSON)
-        let row = Row(
-            user_id: userId.uuidString,
-            provider: provider.rawValue,
-            encrypted_payload: encrypted,
-            updated_at: ISO8601DateFormatter().string(from: Date())
-        )
-        try await client
-            .from("linked_oauth_accounts")
-            .upsert(row, onConflict: "user_id,provider")
-            .execute()
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        do {
+            let row = Row(
+                user_id: userId.uuidString,
+                provider: provider.rawValue,
+                provider_user_id: providerUserId,
+                encrypted_payload: encrypted,
+                updated_at: timestamp
+            )
+            try await client
+                .from("linked_oauth_accounts")
+                .upsert(row, onConflict: "user_id,provider")
+                .execute()
+        } catch {
+            guard providerUserId != nil, error.localizedDescription.contains("provider_user_id") else {
+                throw error
+            }
+            let legacyRow = LegacyRow(
+                user_id: userId.uuidString,
+                provider: provider.rawValue,
+                encrypted_payload: encrypted,
+                updated_at: timestamp
+            )
+            try await client
+                .from("linked_oauth_accounts")
+                .upsert(legacyRow, onConflict: "user_id,provider")
+                .execute()
+        }
     }
 
     static func fetch(
         provider: LinkedOAuthProvider,
         userId: UUID,
         client: SupabaseClient
-    ) async throws -> (sessionJSON: Data, updatedAt: Date)? {
+    ) async throws -> (sessionJSON: Data, updatedAt: Date, providerUserId: String?)? {
         let rows: [Row] = try await client
             .from("linked_oauth_accounts")
             .select()
@@ -67,7 +94,7 @@ enum LinkedOAuthCloudStore {
         guard let updatedAt = parseUpdatedAt(row.updated_at) else {
             throw StoreError.invalidRow
         }
-        return (decrypted, updatedAt)
+        return (decrypted, updatedAt, row.provider_user_id)
     }
 
     static func delete(

@@ -335,6 +335,67 @@ final class OutdoorViewModel {
         mapWaypoints.removeAll()
     }
 
+    // MARK: - Map render data
+
+    var mapRenderData: OutdoorMapRenderData = .empty
+    private let renderBuilder = OutdoorMapRenderBuilder()
+    private var renderUpdateTask: Task<Void, Never>?
+    private var renderDataActive: Bool = true
+
+    func setRenderDataActive(_ active: Bool) {
+        renderDataActive = active
+    }
+
+    func updateMapRenderData(
+        cameraDistance: CLLocationDistance,
+        isRenderingEnabled: Bool,
+        currentCoordinate: CLLocationCoordinate2D?,
+        smoothedRiderCoordinate: CLLocationCoordinate2D,
+        isFollowingUser: Bool,
+        horizontalAccuracy: Double
+    ) {
+        setRenderDataActive(isRenderingEnabled)
+        renderUpdateTask?.cancel()
+
+        let frozenChunks = locationService.frozenBreadcrumbChunks
+        let liveTail = locationService.liveBreadcrumbTail
+        let pauseGaps = locationService.pauseGapCoordinates
+        let completed = navigationService.completedRoutePolylines
+        let remaining = navigationService.remainingRoutePolylines
+        let lookahead = navigationService.lookaheadPolylines
+        let snapBack = navigationService.snapBackPolyline
+        let destination = navigationService.destination.map { item in
+            OutdoorMapRenderData.Destination(
+                name: item.name ?? "Destination",
+                coordinate: item.location.coordinate
+            )
+        }
+        let waypoints = mapWaypoints
+
+        renderUpdateTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let data = await self.renderBuilder.build(
+                isRenderingEnabled: isRenderingEnabled,
+                cameraDistance: cameraDistance,
+                frozenChunks: frozenChunks,
+                liveTail: liveTail,
+                pauseGaps: pauseGaps,
+                completedPolylines: completed,
+                remainingPolylines: remaining,
+                lookaheadPolylines: lookahead,
+                snapBackPolyline: snapBack,
+                destination: destination,
+                waypoints: waypoints,
+                currentCoordinate: currentCoordinate,
+                smoothedRiderCoordinate: smoothedRiderCoordinate,
+                isFollowingUser: isFollowingUser,
+                horizontalAccuracy: horizontalAccuracy
+            )
+            guard !Task.isCancelled else { return }
+            self.mapRenderData = data
+        }
+    }
+
     func resetMapPresentationStateAfterRide() {
         mapWaypoints.removeAll()
         showMapInCompact = true

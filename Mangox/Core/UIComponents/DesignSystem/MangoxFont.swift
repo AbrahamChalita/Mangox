@@ -4,6 +4,7 @@ import UIKit
 #endif
 
 enum MangoxFont {
+    case heroTitle
     case heroValue
     case largeValue
     case value
@@ -18,6 +19,8 @@ enum MangoxFont {
 
     var value: Font {
         switch self {
+        case .heroTitle:
+            return MangoxFontResolver.ui(size: 24, weight: .bold)
         case .heroValue:
             return MangoxFontResolver.mono(size: 52, weight: .light)
         case .largeValue:
@@ -55,6 +58,7 @@ enum MangoxFont {
 
     private var scaledBaseSize: CGFloat {
         switch self {
+        case .heroTitle: return 24
         case .heroValue: return 52
         case .largeValue: return 28
         case .value: return 22
@@ -71,7 +75,7 @@ enum MangoxFont {
 
     private var usesUIFont: Bool {
         switch self {
-        case .title, .bodyBold, .body, .callout:
+        case .heroTitle, .title, .bodyBold, .body, .callout:
             return true
         default:
             return false
@@ -89,6 +93,7 @@ enum MangoxFont {
     /// The text style this font maps to for Dynamic Type scaling.
     var textStyle: Font.TextStyle {
         switch self {
+        case .heroTitle: return .title
         case .heroValue: return .largeTitle
         case .largeValue: return .title
         case .value: return .title2

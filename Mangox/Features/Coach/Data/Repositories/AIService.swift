@@ -557,10 +557,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
     }
 
     private static var isPCCLiveWebSearchAvailable: Bool {
-        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) {
-            return MangoxPrivateCloudComputeModelFactory.isLiveWebSearchAvailable
-        }
-        return false
+        MangoxPrivateCloudComputeModelFactory.isLiveWebSearchAvailable
     }
 
     /// Normalizes user-entered race day for `/api/generate-plan` (yyyy-MM-dd and common variants).
@@ -656,7 +653,6 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
     private func qualifiesForUnbilledPCCCoach(_ text: String, forcePlanIntake: Bool) -> Bool {
         if skipLocalCoachForNextTurn { return false }
-        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return false }
         guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return false }
         guard MangoxFoundationModelsSupport.privateCloudComputeSupportsCurrentLocale() else { return false }
         if OnDeviceCoachEngine.heuristicPrefersPCCWebSearch(for: text),
@@ -1384,9 +1380,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 failedPath: .privateCloudCompute
             )
             resetStreamingState(clearLoading: true)
-            if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) {
-                PrivateCloudComputeLanguageModel().quotaUsage.limitIncreaseSuggestion?.show()
-            }
+            PrivateCloudComputeLanguageModel().quotaUsage.limitIncreaseSuggestion?.show()
             skipLocalCoachForNextTurn = false
             return
         }
@@ -1505,7 +1499,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
             MangoxOnDevicePMCProjectionTool(),
         ]
         tools.append(MangoxCoachSpotlightToolFactory.makeSpotlightSearchTool())
-        // OCRTool not yet shipped in Xcode 27 beta SDK — enable when sdkExposesOCRTool is set true.
+        // OCRTool is present in the beta SDK via _Vision_FoundationModels; enable after distribution review.
         return tools
     }
 
@@ -1593,7 +1587,6 @@ final class AIService: AIServiceProtocol, CoachRepository {
         image: CoachUserImageAttachment? = nil,
         modelContext: ModelContext
     ) async -> Bool {
-        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return false }
         guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return false }
         guard PrivateCloudComputeLanguageModel().supportsLocale(Locale.current) else { return false }
 
@@ -1846,7 +1839,6 @@ final class AIService: AIServiceProtocol, CoachRepository {
         image: CoachUserImageAttachment? = nil,
         modelContext: ModelContext
     ) async -> Bool {
-        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return false }
         guard MangoxCoachLanguageModelProviderSupport.isThirdPartyFallbackConfigured else { return false }
 
         let digests = await preparedOnDeviceToolDigests(modelContext: modelContext)

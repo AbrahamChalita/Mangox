@@ -63,7 +63,7 @@ enum LoggedActivityType: String, Codable, Sendable, CaseIterable, Hashable {
         case .pilates: "figure.pilates"
         case .mobility: "figure.flexibility"
         case .swim: "figure.pool.swim"
-        case .rowing: "figure.rowing"
+        case .rowing: "figure.rower"
         case .climbing: "figure.climbing"
         case .hiit, .crossfit: "figure.highintensity.intervaltraining"
         case .boxing: "figure.boxing"

@@ -1,8 +1,5 @@
 import SwiftUI
 import SwiftData
-import os.log
-
-private let planLogger = Logger(subsystem: "com.abchalita.Mangox", category: "TrainingPlan")
 
 struct TrainingPlanView: View {
     @State private var viewModel: TrainingViewModel

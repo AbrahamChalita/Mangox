@@ -585,7 +585,7 @@ struct OnboardingView: View {
 private struct OnboardingChoosePhotoLabel: View {
     var body: some View {
         Label("Choose photo", systemImage: "photo")
-            .font(.system(size: 13, weight: .medium))
+            .mangoxFontScaled(.callout)
             .foregroundStyle(.black)
             .labelStyle(.titleAndIcon)
             .padding(.horizontal, MangoxSpacing.md.rawValue)
@@ -617,7 +617,7 @@ private extension OnboardingView {
         VStack(alignment: .leading, spacing: MangoxSpacing.md.rawValue) {
             HStack(alignment: .top, spacing: MangoxSpacing.md.rawValue) {
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
+                    .mangoxFontScaled(.callout)
                     .foregroundStyle(accent)
                     .frame(width: 18)
 

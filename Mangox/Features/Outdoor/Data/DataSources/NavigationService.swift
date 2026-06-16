@@ -901,23 +901,6 @@ final class NavigationService {
         return "arrow.up"
     }
 
-    /// Find the nearest distance from a point to a polyline.
-    private func nearestDistance(from point: CLLocationCoordinate2D, to polyline: [CLLocationCoordinate2D]) -> Double {
-        guard polyline.count > 1 else {
-            guard let first = polyline.first else { return .greatestFiniteMagnitude }
-            return point.distanceTo(first)
-        }
-
-        var minDist = Double.greatestFiniteMagnitude
-
-        for i in 1..<polyline.count {
-            let dist = perpendicularDistance(point: point, lineStart: polyline[i - 1], lineEnd: polyline[i])
-            minDist = min(minDist, dist)
-        }
-
-        return minDist
-    }
-
     /// Perpendicular distance from a point to a line segment.
     private func perpendicularDistance(
         point: CLLocationCoordinate2D,

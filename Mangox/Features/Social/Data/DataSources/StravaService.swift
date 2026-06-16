@@ -218,6 +218,7 @@ final class StravaService: StravaServiceProtocol {
         case uploadTimedOut
         case invalidFileType
         case invalidResponse
+        case activityFetchFailed(String)
         case photoUploadFailed(String)
         /// Strava returns 404 for `POST /activities/{id}/photos` for most OAuth apps — attaching photos is not a documented/supported public API flow.
         case photoUploadNotSupportedByAPI
@@ -252,6 +253,8 @@ final class StravaService: StravaServiceProtocol {
                 return "Strava supports FIT, GPX, and TCX files."
             case .invalidResponse:
                 return "Invalid response from Strava."
+            case .activityFetchFailed(let message):
+                return "Strava activity import failed: \(message)"
             case .photoUploadFailed(let message):
                 return "Strava photo upload failed: \(message)"
             case .photoUploadNotSupportedByAPI:
@@ -270,11 +273,9 @@ final class StravaService: StravaServiceProtocol {
         !clientID.isEmpty && !redirectURIString.isEmpty && OAuthTokenExchangeClient.isAvailable
     }
 
-    private static let tokenURL = URL(string: "https://www.strava.com/oauth/token")!
     private static let authorizeURL = URL(string: "https://www.strava.com/oauth/authorize")!
-    /// New Strava API v3 base host (required from 2027-06-01; adopting early). OAuth endpoints
-    /// stay on www.strava.com — only REST resources move here.
-    private static let apiBase = URL(string: "https://www.api-v3.strava.com")!
+    /// Strava API v3 base. OAuth endpoints stay on www.strava.com too.
+    private static let apiBase = URL(string: "https://www.strava.com/api/v3")!
     private static let uploadURL = apiBase.appending(path: "uploads")
     private static let athleteURL = apiBase.appending(path: "athlete")
     static let athleteActivitiesURL = apiBase.appending(path: "athlete/activities")
@@ -286,6 +287,10 @@ final class StravaService: StravaServiceProtocol {
     var linkedAccountLocalSavedAt: Date? {
         let t = UserDefaults.standard.double(forKey: Self.localSavedAtKey)
         return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }
+
+    var linkedOAuthProviderUserID: String? {
+        session?.athleteID.map(String.init)
     }
     private static let requestTimeout: TimeInterval = 20
     private static let uploadTimeout: TimeInterval = 45

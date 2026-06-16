@@ -174,7 +174,7 @@ struct CoachWorkoutsPanel: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Delete workout")
+                .accessibilityLabel(A11yL10n.deleteWorkout)
             }
 
             HStack(spacing: 6) {

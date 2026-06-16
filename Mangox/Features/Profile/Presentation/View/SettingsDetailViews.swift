@@ -77,9 +77,7 @@ struct AICoachSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Text(MangoxPCCSupport.settingsAvailabilityLine)
                         .settingsFootnoteMuted()
-                    if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *),
-                        let quota = MangoxPCCSupport.quotaSnapshot()
-                    {
+                    if let quota = MangoxPCCSupport.quotaSnapshot() {
                         Text(quota.settingsSummary)
                             .settingsFootnoteMuted()
                             .foregroundStyle(quota.isLimitReached ? Color.red : Color.primary.opacity(0.6))
@@ -1344,7 +1342,7 @@ struct OutdoorRideSettingsView: View {
                     .tint(AppColor.mango)
                     HStack {
                         Text("Circumference")
-                            .font(.system(size: 12))
+                            .mangoxFontScaled(.callout)
                             .foregroundStyle(.white.opacity(0.45))
                         Spacer()
                         Text("\(Int(prefs.cscWheelCircumferenceMeters * 1000)) mm")
@@ -2029,7 +2027,7 @@ struct DataPrivacyNotificationsHubView: View {
                             (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") +
                             " (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"))"
                         )
-                        .font(.system(size: 12, design: .monospaced))
+                        .mangoxFontScaled(.caption)
                         .foregroundStyle(.white.opacity(0.35))
                     }
                 }

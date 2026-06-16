@@ -15,6 +15,8 @@ struct LaunchScreenView: View {
     /// Set to false from outside to trigger the exit transition.
     let isVisible: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
     // MARK: - Internal animation state
 
     @State private var wordmarkOpacity: Double = 0
@@ -31,17 +33,17 @@ struct LaunchScreenView: View {
             VStack(spacing: 22) {
                 // Wordmark
                 Text("Mangox")
-                    .font(.system(size: 36, weight: .bold, design: .default))
+                    .font(.largeTitle.bold())
                     .foregroundStyle(.white)
                     .tracking(1.5)
                     .scaleEffect(exitPhase ? 1.06 : wordmarkScale)
                     .opacity(exitPhase ? 0 : wordmarkOpacity)
 
                 // Loading dots — three bouncing circles
-                LoadingDotsView()
+                LoadingDotsView(reduceMotion: accessibilityReduceMotion)
                     .opacity(dotsVisible && !exitPhase ? 1 : 0)
-                    .animation(MangoxMotion.standard, value: dotsVisible)
-                    .animation(MangoxMotion.exit, value: exitPhase)
+                    .animation(accessibilityReduceMotion ? nil : MangoxMotion.standard, value: dotsVisible)
+                    .animation(accessibilityReduceMotion ? nil : MangoxMotion.exit, value: exitPhase)
             }
         }
         // Full view fade handles the very final step so the background
@@ -52,15 +54,20 @@ struct LaunchScreenView: View {
 
         // MARK: - Entry sequence
         .onAppear {
-            // Step 1: wordmark fades + scales up
-            withAnimation(MangoxMotion.sheet) {
+            // Step 1: wordmark fades + scales up (fade-only when Reduce Motion is on)
+            if accessibilityReduceMotion {
                 wordmarkOpacity = 1
                 wordmarkScale = 1.0
+            } else {
+                withAnimation(MangoxMotion.sheet) {
+                    wordmarkOpacity = 1
+                    wordmarkScale = 1.0
+                }
             }
             // Step 2: dots appear after wordmark settles
             dotsRevealTask?.cancel()
             dotsRevealTask = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(450))
+                try? await Task.sleep(for: .milliseconds(accessibilityReduceMotion ? 150 : 450))
                 guard !Task.isCancelled else { return }
                 dotsVisible = true
             }
@@ -89,8 +96,10 @@ struct LaunchScreenView: View {
 
 // MARK: - Loading Dots
 
-/// Three dots that bounce in a staggered wave loop.
+/// Three dots that bounce in a staggered wave loop, or stay static when Reduce Motion is on.
 private struct LoadingDotsView: View {
+    let reduceMotion: Bool
+
     @State private var animate = false
 
     private let dotSize: CGFloat = 6
@@ -103,12 +112,14 @@ private struct LoadingDotsView: View {
                 Circle()
                     .fill(dotColor)
                     .frame(width: dotSize, height: dotSize)
-                    .scaleEffect(animate ? 1.0 : 0.4)
-                    .opacity(animate ? 1.0 : 0.25)
+                    .scaleEffect(reduceMotion ? 1.0 : (animate ? 1.0 : 0.4))
+                    .opacity(reduceMotion ? 1.0 : (animate ? 1.0 : 0.25))
                     .animation(
-                        .easeInOut(duration: 0.5)
-                        .repeatForever(autoreverses: true)
-                        .delay(delays[i]),
+                        reduceMotion
+                            ? nil
+                            : .easeInOut(duration: 0.5)
+                                .repeatForever(autoreverses: true)
+                                .delay(delays[i]),
                         value: animate
                     )
             }

@@ -159,6 +159,13 @@ struct ContentView: View {
                 return
             }
 
+            if isCoachURL(url) {
+                Task { @MainActor in
+                    await navigateToCoach()
+                }
+                return
+            }
+
             guard isRideLiveActivityURL(url) else { return }
             Task { @MainActor in
                 // Never clear `homePath` here: that pops the in-memory indoor stack and builds a new
@@ -196,6 +203,14 @@ struct ContentView: View {
         }
     }
 
+    @MainActor
+    private func navigateToCoach() async {
+        if selectedTab != 2 {
+            selectedTab = 2
+            await Task.yield()
+        }
+    }
+
     private func runSecondaryTabPrewarmTask() async {
         if launchOverlayVisible {
             prewarmSecondaryTabRoots = false
@@ -219,6 +234,11 @@ struct ContentView: View {
     private func isSupabaseAuthCallbackURL(_ url: URL) -> Bool {
         guard url.scheme?.lowercased() == "mangox" else { return false }
         return url.host?.lowercased() == "auth-callback"
+    }
+
+    private func isCoachURL(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "mangox" else { return false }
+        return url.host?.lowercased() == "coach"
     }
 
     private func isOutdoorLiveActivityURL(_ url: URL) -> Bool {

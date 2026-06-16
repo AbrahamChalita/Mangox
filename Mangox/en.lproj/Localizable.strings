@@ -7,7 +7,6 @@
 "indoor.header.status.auto_paused" = "Auto-paused";
 "indoor.header.a11y.session_state" = "Session state";
 "indoor.header.a11y.session_recording" = "Recording";
-"indoor.dashboard.heart_card.title" = "HEART RATE";
 "indoor.dashboard.heart_card.current_zone" = "CURRENT HR ZONE";
 "indoor.dashboard.heart_card.no_zone" = "Z—";
 "indoor.dashboard.heart_card.waiting_short" = "Waiting for HR";
@@ -44,7 +43,6 @@
 "indoor.workout.resume_accessibility" = "Resume workout";
 "indoor.workout.lap_accessibility" = "Record lap";
 "indoor.workout.end_accessibility" = "End workout";
-"indoor.workout.end_accessibility_hint" = "Opens end-workout confirmation.";
 
 "indoor.header.a11y.elapsed" = "Elapsed time";
 "indoor.header.a11y.close_preride" = "Close indoor setup";
@@ -78,7 +76,6 @@
 "indoor.peak_effort.5s_a11y" = "Peak 5 second power %lld watts";
 
 /* Header context */
-"indoor.intent.free_ride" = "Free ride";
 "indoor.intent.route" = "Route ride";
 "indoor.intent.route_named" = "Route · %@";
 "indoor.header.goal_line" = "%@ · %@ / %@ %@";
@@ -235,6 +232,15 @@
 /* Shared banners */
 "a11y.warning_format" = "Warning: %@";
 "a11y.info_format" = "Info: %@";
+
+/* Ride FAB */
+"ride_fab.a11y.start_ride" = "Start a ride";
+"ride_fab.a11y.close_ride_options" = "Close ride options";
+
+/* Coach transcript */
+"coach.a11y.scroll_to_latest" = "Scroll to latest message";
+"coach.a11y.dismiss_limit_notice" = "Dismiss limit notice";
+"coach.a11y.delete_workout" = "Delete workout";
 
 /* Brand */
 "brand.a11y.mangox" = "Mangox";

@@ -40,9 +40,6 @@ enum MangoxPCCSupport {
     }
 
     static var settingsAvailabilityLine: String {
-        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else {
-            return "Private Cloud Compute requires iOS 27 or later."
-        }
         let detail = availabilityDetail()
         if detail.isReady {
             return "Private Cloud Compute is available on this device."
@@ -89,14 +86,12 @@ enum MangoxPCCSupport {
 
     /// Blocks coach PCC turns when quota is exhausted.
     static func coachTurnQuotaBlockMessage() -> String? {
-        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return nil }
         guard let snap = quotaSnapshot(), snap.isLimitReached else { return nil }
         return coachQuotaUserMessage(resetDate: snap.resetDate)
     }
 
     /// Plan generation uses skeleton + one call per week on PCC.
     static func throwIfPlanGenerationQuotaBlocked(estimatedPCCCalls: Int) throws {
-        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return }
         guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return }
         guard let snap = quotaSnapshot(), snap.isLimitReached else { return }
         throw OnDevicePlanGeneratorError.quotaLimitReached(
@@ -118,7 +113,6 @@ enum MangoxPCCSupport {
     // MARK: - Errors
 
     static func isNetworkFailure(_ error: Error) -> Bool {
-        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return false }
         if case .networkFailure = error as? PrivateCloudComputeLanguageModel.Error { return true }
         if let urlErr = error as? URLError {
             switch urlErr.code {
@@ -147,16 +141,14 @@ enum MangoxPCCSupport {
         ]
         if failureMarkers.contains(where: { message.contains($0) }) { return true }
 
-        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) {
-            if error is LanguageModelError { return true }
-            if error is LanguageModelSession.Error { return true }
-            if let pcc = error as? PrivateCloudComputeLanguageModel.Error {
-                switch pcc {
-                case .networkFailure, .quotaLimitReached:
-                    return false
-                default:
-                    return true
-                }
+        if error is LanguageModelError { return true }
+        if error is LanguageModelSession.Error { return true }
+        if let pcc = error as? PrivateCloudComputeLanguageModel.Error {
+            switch pcc {
+            case .networkFailure, .quotaLimitReached:
+                return false
+            default:
+                return true
             }
         }
 
@@ -176,7 +168,6 @@ enum MangoxPCCSupport {
 
     static func isQuotaLimitReached(_ error: Error) -> Bool {
         if let planErr = error as? OnDevicePlanGeneratorError, case .quotaLimitReached = planErr { return true }
-        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return false }
         if case .quotaLimitReached = error as? PrivateCloudComputeLanguageModel.Error { return true }
         return false
     }
@@ -184,13 +175,10 @@ enum MangoxPCCSupport {
     static func userFacingMessage(for error: Error) -> String? {
         if isQuotaLimitReached(error) {
             if let planErr = error as? OnDevicePlanGeneratorError { return planErr.localizedDescription }
-            if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) {
-                if case .quotaLimitReached(let detail) = error as? PrivateCloudComputeLanguageModel.Error {
-                    return coachQuotaUserMessage(resetDate: detail.resetDate)
-                }
-                return coachQuotaUserMessage(resetDate: quotaSnapshot()?.resetDate)
+            if case .quotaLimitReached(let detail) = error as? PrivateCloudComputeLanguageModel.Error {
+                return coachQuotaUserMessage(resetDate: detail.resetDate)
             }
-            return "Private Cloud daily limit reached for today."
+            return coachQuotaUserMessage(resetDate: quotaSnapshot()?.resetDate)
         }
         if isNetworkFailure(error) {
             return "Private Cloud needs a network connection. Replied using on-device Apple Intelligence instead."

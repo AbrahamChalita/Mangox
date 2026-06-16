@@ -63,6 +63,7 @@ final class DIContainer {
     let authState: AuthState
     let linkedOAuthBridge: LinkedOAuthSessionBridge
     let syncCoordinator: SyncCoordinator
+    let externalWebhookSignalService: ExternalWebhookSignalService
 
     // MARK: - ViewModels (lazily vended; each VM owns its own lifecycle)
 
@@ -111,6 +112,7 @@ final class DIContainer {
 
     func makeIndoorViewModel() -> IndoorViewModel {
         if let vm = retainedIndoorViewModel, vm.workoutManager.state.isLiveSessionActive {
+            configureIndoorWorkoutSyncCallback(vm)
             return vm
         }
         let vm = IndoorViewModel(
@@ -122,8 +124,15 @@ final class DIContainer {
             workoutPersistenceRepository: workoutPersistenceRepository,
             trainingPlanPersistenceRepository: trainingPlanPersistenceRepository
         )
+        configureIndoorWorkoutSyncCallback(vm)
         retainedIndoorViewModel = vm
         return vm
+    }
+
+    private func configureIndoorWorkoutSyncCallback(_ vm: IndoorViewModel) {
+        vm.workoutManager.onLocalChange = { [weak syncCoordinator] in
+            syncCoordinator?.notifyLocalChange()
+        }
     }
 
     func persistIndoorRecordingCheckpointNow() {
@@ -284,13 +293,20 @@ final class DIContainer {
             }
         }
 
-        syncExternalCyclingWorkouts = SyncExternalCyclingWorkoutsUseCase(
+        let externalCyclingWorkouts = SyncExternalCyclingWorkoutsUseCase(
             stravaService: strava,
             whoopService: whoop,
             workoutRepository: workoutPersistenceRepository,
             trainingPlanLookupService: trainingPlanLookupService,
             trainingPlanPersistenceRepository: trainingPlanPersistenceRepository,
             modelContext: PersistenceContainer.shared.mainContext
+        )
+        syncExternalCyclingWorkouts = externalCyclingWorkouts
+
+        externalWebhookSignalService = ExternalWebhookSignalService(
+            userId: { [weak auth] in auth?.userId },
+            whoopService: whoop,
+            syncExternalCyclingWorkouts: externalCyclingWorkouts
         )
     }
 }

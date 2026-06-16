@@ -15,31 +15,17 @@ final class AudioCueManager: NSObject, AVSpeechSynthesizerDelegate {
 
     private let synth = AVSpeechSynthesizer()
     private var isEnabled: Bool { RidePreferences.shared.stepAudioCueEnabled }
-    private nonisolated(unsafe) var audioInterruptionObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var audioSessionObservers: [NotificationCenter.ObservationToken] = []
 
     private override init() {
         super.init()
         synth.delegate = self
-        audioInterruptionObserver = NotificationCenter.default.addObserver(
-            forName: AVAudioSession.interruptionNotification,
-            object: AVAudioSession.sharedInstance(),
-            queue: .main
-        ) { [weak self] notification in
-            guard let self else { return }
-            let userInfo = notification.userInfo
-            let typeValue = userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-            let optionsValue = userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
-
-            // Delivered on `.main`; avoid `Task` so non-Sendable notification payloads are not captured in an async hop.
-            MainActor.assumeIsolated {
-                self.handleAudioInterruption(typeValue: typeValue, optionsValue: optionsValue)
-            }
-        }
+        observeAudioSessionNotifications()
     }
 
     deinit {
-        if let audioInterruptionObserver {
-            NotificationCenter.default.removeObserver(audioInterruptionObserver)
+        for token in audioSessionObservers {
+            NotificationCenter.default.removeObserver(token)
         }
     }
 
@@ -125,28 +111,34 @@ final class AudioCueManager: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
-    private func handleAudioInterruption(typeValue: UInt?, optionsValue: UInt?) {
-        guard
-            let typeValue,
-            let type = AVAudioSession.InterruptionType(rawValue: typeValue)
-        else {
-            return
-        }
+    private func observeAudioSessionNotifications() {
+        let session = AVAudioSession.sharedInstance()
+        audioSessionObservers = [
+            NotificationCenter.default.addObserver(
+                of: session,
+                for: AVAudioSession.DidBecomeInactiveMessage.self
+            ) { [weak self] _ in
+                self?.handleAudioSessionDidBecomeInactive()
+            },
+            NotificationCenter.default.addObserver(
+                of: session,
+                for: AVAudioSession.ResumptionRecommendationMessage.self
+            ) { [weak self] _ in
+                self?.handleAudioSessionResumptionRecommendation()
+            },
+        ]
+    }
 
-        switch type {
-        case .began:
-            if synth.isSpeaking {
-                synth.pauseSpeaking(at: .immediate)
-            }
-        case .ended:
+    private func handleAudioSessionDidBecomeInactive() {
+        if synth.isSpeaking {
+            synth.pauseSpeaking(at: .immediate)
+        }
+    }
+
+    private func handleAudioSessionResumptionRecommendation() {
+        if synth.isPaused {
             configureAudioSessionIfNeeded()
-            if let optionsValue,
-               AVAudioSession.InterruptionOptions(rawValue: optionsValue).contains(.shouldResume),
-               synth.isPaused {
-                synth.continueSpeaking()
-            }
-        @unknown default:
-            break
+            synth.continueSpeaking()
         }
     }
 }

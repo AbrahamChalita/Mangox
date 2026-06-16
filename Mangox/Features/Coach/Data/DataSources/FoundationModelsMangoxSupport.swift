@@ -39,10 +39,7 @@ enum MangoxFoundationModelsSupport {
 
     /// On-device context window for token-budget logging (falls back when `contextSize` is unavailable).
     static func contextWindowTokens(for model: SystemLanguageModel) -> Int {
-        if #available(iOS 26.4, macOS 26.4, visionOS 26.4, *) {
-            return model.contextSize
-        }
-        return 4096
+        model.contextSize
     }
 
     /// Deterministic token sampling for coach and insight generation.
@@ -57,19 +54,15 @@ enum MangoxFoundationModelsSupport {
 
     /// Narrow coach guided generation; enforces tool calls on iOS 27+ when `requireTools` on first turn.
     static func narrowGenerationOptions(requireTools: Bool, isFollowUp: Bool) -> GenerationOptions {
-        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) {
-            let mode: GenerationOptions.ToolCallingMode =
-                isFollowUp ? .allowed : (requireTools ? .required : .allowed)
-            return GenerationOptions(samplingMode: .greedy, toolCallingMode: mode)
-        }
-        return greedyGenerationOptions
+        let mode: GenerationOptions.ToolCallingMode =
+            isFollowUp ? .allowed : (requireTools ? .required : .allowed)
+        return GenerationOptions(samplingMode: .greedy, toolCallingMode: mode)
     }
 
     // MARK: - Private Cloud Compute (scaffold — no entitlement required to compile)
 
     /// True when Apple's PCC coach tier is available on this device (typically requires entitlement).
     static var isPrivateCloudComputeCoachAvailable: Bool {
-        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return false }
         switch PrivateCloudComputeLanguageModel().availability {
         case .available: return true
         default: return false
@@ -78,7 +71,6 @@ enum MangoxFoundationModelsSupport {
 
     /// Whether PCC supports the active locale (iOS 27+).
     static func privateCloudComputeSupportsCurrentLocale() -> Bool {
-        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return false }
         return PrivateCloudComputeLanguageModel().supportsLocale(Locale.current)
     }
 
@@ -125,7 +117,6 @@ enum MangoxFoundationModelsSupport {
         tools: [any Tool]
     ) async {
         guard tokenBudgetLoggingEnabled else { return }
-        guard #available(iOS 26.4, macOS 26.4, visionOS 26.4, *) else { return }
         do {
             let iTok = try await model.tokenCount(for: instructions)
             let pTok = try await model.tokenCount(for: prompt)
@@ -154,13 +145,7 @@ enum MangoxFoundationModelsSupport {
         )
     }
 
-    /// `true` once `LanguageModelSession.Response.usage` ships in the public SDK.
-    /// Absent from Xcode 27.0 beta-1 — re-check each Xcode beta and flip when available.
-    nonisolated static let sdkExposesResponseUsage = false
-
-    /// Wraps `session.respond` and logs `response.usage` when `sdkExposesResponseUsage` is true.
-    /// Call this everywhere instead of `session.respond` directly so usage logging is enabled by
-    /// flipping one flag once the property ships in the SDK.
+    /// Wraps `session.respond` and logs actual token usage from the completed response.
     static func respond<T: Generable & Sendable>(
         session: LanguageModelSession,
         to prompt: String,
@@ -169,12 +154,13 @@ enum MangoxFoundationModelsSupport {
         label: String
     ) async throws -> LanguageModelSession.Response<T> {
         let response = try await session.respond(to: prompt, generating: type, options: options)
-        // When sdkExposesResponseUsage is true, add:
-        // logResponseUsage(inputTotal: response.usage.input.totalTokenCount,
-        //                  inputCached: response.usage.input.cachedTokenCount,
-        //                  outputTotal: response.usage.output.totalTokenCount,
-        //                  outputReasoning: response.usage.output.reasoningTokenCount,
-        //                  label: label)
+        logResponseUsage(
+            inputTotal: response.usage.input.totalTokenCount,
+            inputCached: response.usage.input.cachedTokenCount,
+            outputTotal: response.usage.output.totalTokenCount,
+            outputReasoning: response.usage.output.reasoningTokenCount,
+            label: label
+        )
         return response
     }
 
@@ -187,19 +173,17 @@ enum MangoxFoundationModelsSupport {
 
     /// Maps Apple generation errors for logging / user messaging.
     static func logGenerationFailure(_ error: Error, label: String) {
-        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) {
-            if let pcc = error as? PrivateCloudComputeLanguageModel.Error {
-                logger.warning("FM PCC error [\(label, privacy: .public)]: \(pcc.localizedDescription, privacy: .public)")
-                return
-            }
-            if let modelErr = error as? LanguageModelError {
-                logger.warning("FM LanguageModelError [\(label)]: \(String(describing: modelErr), privacy: .public)")
-                return
-            }
-            if let sessionErr = error as? LanguageModelSession.Error {
-                logger.warning("FM session error [\(label)]: \(String(describing: sessionErr), privacy: .public)")
-                return
-            }
+        if let pcc = error as? PrivateCloudComputeLanguageModel.Error {
+            logger.warning("FM PCC error [\(label, privacy: .public)]: \(pcc.localizedDescription, privacy: .public)")
+            return
+        }
+        if let modelErr = error as? LanguageModelError {
+            logLanguageModelError(modelErr, label: label)
+            return
+        }
+        if let sessionErr = error as? LanguageModelSession.Error {
+            logger.warning("FM session error [\(label)]: \(String(describing: sessionErr), privacy: .public)")
+            return
         }
         if let toolErr = error as? LanguageModelSession.ToolCallError {
             logger.warning(
@@ -207,22 +191,42 @@ enum MangoxFoundationModelsSupport {
             )
             return
         }
-        if let gen = error as? LanguageModelSession.GenerationError {
-            switch gen {
-            case .exceededContextWindowSize(let ctx):
-                logger.warning("FM exceededContextWindow [\(label)]: \(ctx.debugDescription, privacy: .public)")
-            case .unsupportedLanguageOrLocale(let ctx):
-                logger.warning("FM unsupportedLocale [\(label)]: \(ctx.debugDescription, privacy: .public)")
-            case .guardrailViolation(let ctx):
-                logger.warning("FM guardrailViolation [\(label)]: \(ctx.debugDescription, privacy: .public)")
-            case .refusal(_, let ctx):
-                logger.warning("FM refusal [\(label)]: \(ctx.debugDescription, privacy: .public)")
-            default:
-                logger.warning("FM GenerationError [\(label)]: \(String(describing: gen), privacy: .public)")
-            }
-            return
-        }
         logger.warning("FM error [\(label, privacy: .public)]: \(error.localizedDescription, privacy: .public)")
+    }
+
+    private static func logLanguageModelError(_ error: LanguageModelError, label: String) {
+        switch error {
+        case .contextSizeExceeded(let context):
+            logger.warning(
+                "FM contextSizeExceeded [\(label, privacy: .public)]: tokens=\(context.tokenCount) contextSize=\(context.contextSize) \(context.debugDescription, privacy: .public)"
+            )
+        case .rateLimited(let context):
+            logger.warning(
+                "FM rateLimited [\(label, privacy: .public)]: reset=\(String(describing: context.resetDate), privacy: .public) \(context.debugDescription, privacy: .public)"
+            )
+        case .guardrailViolation(let context):
+            logger.warning("FM guardrailViolation [\(label, privacy: .public)]: \(context.debugDescription, privacy: .public)")
+        case .refusal(let context):
+            logger.warning("FM refusal [\(label, privacy: .public)]: \(context.debugDescription, privacy: .public)")
+        case .unsupportedCapability(let context):
+            logger.warning(
+                "FM unsupportedCapability [\(label, privacy: .public)]: \(String(describing: context.capability), privacy: .public) \(context.debugDescription, privacy: .public)"
+            )
+        case .unsupportedTranscriptContent(let context):
+            logger.warning("FM unsupportedTranscriptContent [\(label, privacy: .public)]: \(context.debugDescription, privacy: .public)")
+        case .unsupportedGenerationGuide(let context):
+            logger.warning(
+                "FM unsupportedGenerationGuide [\(label, privacy: .public)]: schema=\(String(describing: context.schemaName), privacy: .public) \(context.debugDescription, privacy: .public)"
+            )
+        case .unsupportedLanguageOrLocale(let context):
+            logger.warning(
+                "FM unsupportedLanguageOrLocale [\(label, privacy: .public)]: language=\(String(describing: context.languageCode), privacy: .public) \(context.debugDescription, privacy: .public)"
+            )
+        case .timeout(let context):
+            logger.warning("FM timeout [\(label, privacy: .public)]: \(context.debugDescription, privacy: .public)")
+        @unknown default:
+            logger.warning("FM LanguageModelError [\(label, privacy: .public)]: \(String(describing: error), privacy: .public)")
+        }
     }
 
     // MARK: - Feedback Assistant (evaluation harness)

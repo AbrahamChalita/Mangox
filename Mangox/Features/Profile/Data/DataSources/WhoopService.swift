@@ -62,6 +62,7 @@ final class WhoopService: WhoopServiceProtocol {
         var accessToken: String
         var refreshToken: String
         var expiresAt: Int
+        var memberID: Int?
         var memberFirstName: String?
         var memberLastName: String?
 
@@ -83,6 +84,8 @@ final class WhoopService: WhoopServiceProtocol {
     }
 
     private struct ProfileDTO: Decodable {
+        let userId: Int?
+        let email: String?
         let firstName: String
         let lastName: String
     }
@@ -159,7 +162,6 @@ final class WhoopService: WhoopServiceProtocol {
     }
 
     private static let authorizeURL = URL(string: "https://api.prod.whoop.com/oauth/oauth2/auth")!
-    private static let tokenURL = URL(string: "https://api.prod.whoop.com/oauth/oauth2/token")!
     /// REST resources live under `/developer` (OAuth endpoints do not).
     private static let apiBase = URL(string: "https://api.prod.whoop.com/developer")!
     private static let keychainAccount = "whoop.session.v1"
@@ -170,6 +172,10 @@ final class WhoopService: WhoopServiceProtocol {
     var linkedAccountLocalSavedAt: Date? {
         let t = UserDefaults.standard.double(forKey: Self.localSavedAtKey)
         return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }
+
+    var linkedOAuthProviderUserID: String? {
+        session?.memberID.map(String.init)
     }
     private static let requestTimeout: TimeInterval = 25
     private static let resourceTimeout: TimeInterval = 60
@@ -280,6 +286,7 @@ final class WhoopService: WhoopServiceProtocol {
         let profileURL = Self.apiBase.appendingPathComponent("v2/user/profile/basic")
         let profile: ProfileDTO = try await getJSON(url: profileURL, token: token, context: "WHOOP profile")
         if var current = session {
+            current.memberID = profile.userId
             current.memberFirstName = profile.firstName
             current.memberLastName = profile.lastName
             try persistSession(current)
@@ -666,6 +673,7 @@ final class WhoopService: WhoopServiceProtocol {
             accessToken: response.access_token,
             refreshToken: refreshToken,
             expiresAt: expiresAt,
+            memberID: previous?.memberID,
             memberFirstName: previous?.memberFirstName,
             memberLastName: previous?.memberLastName
         )

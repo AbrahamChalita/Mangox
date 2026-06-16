@@ -50,13 +50,13 @@ struct FitnessZonesProfileCard: View {
                     .font(.system(size: 13))
                     .foregroundStyle(AppColor.heartRate)
                 Text("Heart rate & power")
-                    .font(.system(size: 11, weight: .semibold))
+                    .mangoxFontScaled(.caption)
                     .foregroundStyle(.white.opacity(0.45))
                 Spacer()
                 if viewModel.healthKitIsAuthorized {
                     HStack(spacing: 4) {
                         Text("Health")
-                            .font(.system(size: 9))
+                            .mangoxFontScaled(.micro)
                             .foregroundStyle(.white.opacity(0.3))
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 11))
@@ -64,7 +64,7 @@ struct FitnessZonesProfileCard: View {
                     }
                 } else {
                     Text("Defaults")
-                        .font(.system(size: 9))
+                        .mangoxFontScaled(.micro)
                         .foregroundStyle(.white.opacity(0.25))
                 }
 
@@ -123,23 +123,23 @@ struct FitnessZonesProfileCard: View {
                 Text(
                     "WHOOP’s API doesn’t include VO₂ max. Enable Apple Health above to pull VO₂ from Apple Watch or other apps."
                 )
-                .font(.system(size: 9))
+                .mangoxFontScaled(.micro)
                 .foregroundStyle(.white.opacity(0.22))
                 .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("FTP")
-                    .font(.system(size: 9, weight: .bold))
+                    .mangoxFontScaled(.micro)
                     .foregroundStyle(.white.opacity(0.35))
                     .tracking(1.2)
                 HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(ftpDraft) W")
-                            .font(.system(size: 20, weight: .bold, design: .monospaced))
+                            .mangoxFontScaled(.compactValue)
                             .foregroundStyle(.white)
                         Text("Saved: \(PowerZone.ftp) W for power zones")
-                            .font(.system(size: 10))
+                            .mangoxFontScaled(.label)
                             .foregroundStyle(.white.opacity(0.28))
                     }
                     Spacer(minLength: 8)
@@ -153,7 +153,7 @@ struct FitnessZonesProfileCard: View {
                         PowerZone.setFTP(ftpDraft)
                     } label: {
                         Text("Apply")
-                            .font(.system(size: 12, weight: .semibold))
+                            .mangoxFontScaled(.callout)
                             .foregroundStyle(.black)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
@@ -171,7 +171,7 @@ struct FitnessZonesProfileCard: View {
                                 .font(.system(size: 11))
                             Text("Take Test")
                         }
-                        .font(.system(size: 12, weight: .semibold))
+                        .mangoxFontScaled(.callout)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
@@ -187,7 +187,7 @@ struct FitnessZonesProfileCard: View {
                             Image(systemName: "clock.arrow.circlepath")
                                 .font(.system(size: 11))
                             Text("History")
-                                .font(.system(size: 12, weight: .semibold))
+                                .mangoxFontScaled(.callout)
                         }
                         .foregroundStyle(.white.opacity(0.75))
                         .padding(.horizontal, 12)
@@ -203,27 +203,28 @@ struct FitnessZonesProfileCard: View {
 
             if HeartRateZone.hasRestingHR {
                 Text("HR zones use Karvonen (heart rate reserve) method")
-                    .font(.system(size: 10))
+                    .mangoxFontScaled(.label)
                     .foregroundStyle(.white.opacity(0.25))
             }
 
             if isEditingHealthData {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("MANUAL HR OVERRIDES")
-                        .font(.system(size: 9, weight: .bold))
+                        .mangoxFontScaled(.micro)
                         .foregroundStyle(.white.opacity(0.35))
                         .tracking(1.2)
 
                     HStack(spacing: 8) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Max HR")
-                                .font(.system(size: 10))
+                                .mangoxFontScaled(.label)
                                 .foregroundStyle(.white.opacity(0.35))
                             TextField("100-240", text: $manualMaxHRInput)
                                 .keyboardType(.numberPad)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
-                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .mangoxFontScaled(.callout)
+                                .monospacedDigit()
                                 .foregroundStyle(.white.opacity(0.9))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
@@ -233,13 +234,14 @@ struct FitnessZonesProfileCard: View {
                         }
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Resting HR")
-                                .font(.system(size: 10))
+                                .mangoxFontScaled(.label)
                                 .foregroundStyle(.white.opacity(0.35))
                             TextField("30-120", text: $manualRestingHRInput)
                                 .keyboardType(.numberPad)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
-                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .mangoxFontScaled(.callout)
+                                .monospacedDigit()
                                 .foregroundStyle(.white.opacity(0.9))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
@@ -254,7 +256,7 @@ struct FitnessZonesProfileCard: View {
                             applyManualOverrides()
                         } label: {
                             Text("Apply")
-                                .font(.system(size: 12, weight: .semibold))
+                                .mangoxFontScaled(.callout)
                                 .foregroundStyle(.black)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 7)
@@ -269,7 +271,7 @@ struct FitnessZonesProfileCard: View {
                             clearManualOverrides()
                         } label: {
                             Text("Use HealthKit/Defaults")
-                                .font(.system(size: 12, weight: .semibold))
+                                .mangoxFontScaled(.callout)
                                 .foregroundStyle(.white.opacity(0.75))
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 7)
@@ -280,7 +282,7 @@ struct FitnessZonesProfileCard: View {
 
                     if let manualOverrideStatus {
                         Text(manualOverrideStatus)
-                            .font(.system(size: 10))
+                            .mangoxFontScaled(.label)
                             .foregroundStyle(.white.opacity(0.35))
                     }
                 }
@@ -292,19 +294,19 @@ struct FitnessZonesProfileCard: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 6) {
                         Image(systemName: "info.circle")
-                            .font(.system(size: 10))
+                            .mangoxFontScaled(.label)
                             .foregroundStyle(.white.opacity(0.3))
                         Text(
                             "Enable HealthKit for accurate HR zones from Apple Watch or Health-synced devices."
                         )
-                        .font(.system(size: 10))
+                        .mangoxFontScaled(.label)
                         .foregroundStyle(.white.opacity(0.25))
                     }
                     Button {
                         Task { await viewModel.requestHealthKitAuthorization() }
                     } label: {
                         Text("Enable HealthKit")
-                            .font(.system(size: 12, weight: .semibold))
+                            .mangoxFontScaled(.callout)
                             .foregroundStyle(AppColor.success)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
@@ -348,21 +350,21 @@ struct FitnessZonesProfileCard: View {
     {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 9, weight: .regular))
+                .mangoxFontScaled(.micro)
                 .foregroundStyle(.white.opacity(0.35))
                 .tracking(1)
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(value)
-                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .mangoxFontScaled(.compactValue)
                     .foregroundStyle(.white)
                 if !unit.isEmpty {
                     Text(unit)
-                        .font(.system(size: 10))
+                        .mangoxFontScaled(.label)
                         .foregroundStyle(.white.opacity(0.3))
                 }
             }
             Text(source)
-                .font(.system(size: 8))
+                .mangoxFontScaled(.micro)
                 .foregroundStyle(.white.opacity(0.2))
         }
         .accessibilityElement(children: .ignore)
@@ -430,21 +432,21 @@ struct StravaConnectionCard: View {
                     .font(.system(size: 13))
                     .foregroundStyle(AppColor.discord)
                 Text("Strava")
-                    .font(.system(size: 11, weight: .semibold))
+                    .mangoxFontScaled(.caption)
                     .foregroundStyle(.white.opacity(0.45))
                 Spacer()
                 Circle()
                     .fill(viewModel.stravaConnected ? AppColor.success : AppColor.discord)
                     .frame(width: 8, height: 8)
                 Text(viewModel.stravaConnected ? "Connected" : "Not connected")
-                    .font(.system(size: 9))
+                    .mangoxFontScaled(.micro)
                     .foregroundStyle(
                         viewModel.stravaConnected ? AppColor.success : AppColor.discord)
             }
 
             if !viewModel.stravaIsConfigured {
                 Text("Strava linking requires the oauth-token-exchange Supabase function and STRAVA_CLIENT_SECRET in project secrets.")
-                    .font(.system(size: 11))
+                    .mangoxFontScaled(.caption)
                     .foregroundStyle(.white.opacity(0.32))
             } else {
                 Button {
@@ -457,7 +459,7 @@ struct StravaConnectionCard: View {
                         )
                         .font(.system(size: 12, weight: .semibold))
                         Text(viewModel.stravaConnected ? "Disconnect Strava" : "Connect Strava")
-                            .font(.system(size: 12, weight: .semibold))
+                            .mangoxFontScaled(.callout)
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)
@@ -471,18 +473,18 @@ struct StravaConnectionCard: View {
                 .accessibilityLabel(viewModel.stravaConnected ? "Disconnect Strava" : "Connect Strava")
 
                 Text("Account-level setting: ride summaries handle upload details.")
-                    .font(.system(size: 10))
+                    .mangoxFontScaled(.label)
                     .foregroundStyle(.white.opacity(0.3))
             }
 
             if let stravaStatus {
                 Text(stravaStatus)
-                    .font(.system(size: 10))
+                    .mangoxFontScaled(.label)
                     .foregroundStyle(.white.opacity(0.35))
             }
             if let serviceError = viewModel.stravaLastError, !serviceError.isEmpty {
                 Text(serviceError)
-                    .font(.system(size: 10))
+                    .mangoxFontScaled(.label)
                     .foregroundStyle(Color.orange.opacity(0.8))
             }
         }

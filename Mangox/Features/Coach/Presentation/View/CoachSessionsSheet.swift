@@ -244,12 +244,6 @@ struct CoachSessionsSheet: View {
         coachViewModel.deleteSessions(ids)
     }
 
-    private func deleteSessionsAtOffsets(_ offsets: IndexSet) {
-        guard !isSelecting else { return }
-        let ids = offsets.compactMap { sessions.indices.contains($0) ? sessions[$0].id : nil }
-        removeSessions(ids: Set(ids))
-    }
-
     private func formatRelativeDate(_ date: Date) -> String {
         let now = Date()
         let components = Calendar.current.dateComponents([.minute, .hour, .day, .weekOfYear], from: date, to: now)

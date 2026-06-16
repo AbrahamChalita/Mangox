@@ -150,40 +150,6 @@ struct PowerArcView: View {
     }
 }
 
-private struct MiniStatCard: View {
-    let label: String
-    let value: String
-    let unit: String
-    var valueColor: Color = .white
-    var compact: Bool = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 3 : 5) {
-            Text(label)
-                .mangoxFont(.micro)
-                .foregroundStyle(AppColor.fg3)
-                .tracking(1.5)
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value)
-                    .font(PowerArcFontToken.mono(size: compact ? 17 : 22, weight: .bold))
-                    .foregroundStyle(valueColor)
-                Text(unit)
-                    .mangoxFont(compact ? .micro : .label)
-                    .foregroundStyle(AppColor.fg3)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, compact ? 10 : 14)
-        .padding(.vertical, compact ? 8 : 12)
-        .background(AppColor.bg2)
-        .clipShape(RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue))
-        .overlay(
-            RoundedRectangle(cornerRadius: MangoxRadius.sharp.rawValue)
-                .strokeBorder(AppColor.hair2, lineWidth: 1)
-        )
-    }
-}
-
 private struct ArcShape: Shape, Sendable {
     let startAngle: Double
     let sweepAngle: Double

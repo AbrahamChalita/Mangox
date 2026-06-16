@@ -118,7 +118,10 @@ private struct NotificationLifecycleHook: View {
                     TrainingNotificationsScheduler.rescheduleFTPReminder()
                     WorkoutRAGIndex.scheduleBackgroundSync()
                     if di.authState.isSignedIn {
-                        Task { await di.syncCoordinator.syncNow() }
+                        Task {
+                            await di.syncCoordinator.syncNow()
+                            await di.externalWebhookSignalService.consumePendingSignals()
+                        }
                     }
                 case .background:
                     di.locationService.persistRecordingCheckpointNow()

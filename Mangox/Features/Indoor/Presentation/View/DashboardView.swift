@@ -97,11 +97,6 @@ struct DashboardView: View {
     @AppStorage("indoorMilestoneSoundEnabled") private var indoorMilestoneSoundEnabled = false
     @State private var isScreenLocked = false
 
-    /// Distance goal is surfaced in ``goalProgressSection`` — omit the duplicate distance tile from the grid.
-    private var hasActiveDistanceGoal: Bool {
-        prefs.activeGoals.contains { $0.kind == .distance }
-    }
-
     /// Hides NP/kJ row + zone strip until effort registers — keeps the first minute glance-first.
     private var showExtendedRideSecondaryUI: Bool {
         if workoutManager.state != .recording { return true }
@@ -174,8 +169,6 @@ struct DashboardView: View {
         dynamicTypeSize.isAccessibilitySize ? 96 : 82
     }
 
-    /// Whole-km toast + haptic when crossing each multiple (e.g. 5 → 5 km, 10 km, …).
-    private static let indoorDistanceMilestoneIntervalKm = 5
     private static let goalValue0Formatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.locale = .current
@@ -1251,28 +1244,6 @@ struct DashboardView: View {
         .accessibilityLabel(String(localized: "indoor.dashboard.session.menu.a11y"))
     }
 
-    /// Elapsed · work done · intensity — always-visible on the Session page while the clock is running.
-    /// Complements the header clock — load, intensity, and average power for the Session tab.
-    private func compactSessionSnapshotRow() -> some View {
-        HStack(spacing: 8) {
-            compactHeroChip(
-                label: String(localized: "indoor.dashboard.snapshot.kj"),
-                value: workoutManager.formattedEnergyKJ,
-                tint: AppColor.yellow
-            )
-            compactHeroChip(
-                label: String(localized: "indoor.dashboard.snapshot.np"),
-                value: workoutManager.formattedLiveNP,
-                tint: AppColor.mango
-            )
-            compactHeroChip(
-                label: String(localized: "indoor.dashboard.snapshot.avg"),
-                value: workoutManager.formattedAvgPower,
-                tint: AppColor.fg0
-            )
-        }
-    }
-
     private func compactSessionPagePlaceholder(hasTrainerFTMS: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(String(localized: "indoor.dashboard.session.placeholder_title"))
@@ -1859,34 +1830,6 @@ struct DashboardView: View {
             guidedStatusText: guided.status,
             guidedStatusColor: guided.statusColor
         )
-    }
-
-    private var phoneMetricsGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 0), GridItem(.flexible(), spacing: 0)], spacing: 0) {
-            phoneMetricCell(
-                label: "SPEED",
-                value: workoutManager.formattedSpeed,
-                unit: speedUnitLabel
-            )
-            phoneMetricCell(
-                label: "CADENCE",
-                value: workoutManager.formattedCadence,
-                unit: "rpm",
-                color: AppColor.blue
-            )
-            phoneMetricCell(
-                label: "DISTANCE",
-                value: workoutManager.formattedDistanceKm,
-                unit: "km"
-            )
-            phoneMetricCell(
-                label: "ENERGY",
-                value: workoutManager.formattedEnergyKJ,
-                unit: "kJ",
-                color: AppColor.yellow
-            )
-        }
-        .cardStyle(cornerRadius: MangoxRadius.sharp.rawValue)
     }
 
     private func sensorLostBanner(message: String, dense: Bool) -> some View {

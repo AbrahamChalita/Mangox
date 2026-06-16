@@ -27,4 +27,9 @@ enum MangoxMotion {
     static let pulse = Animation.easeInOut(duration: 0.6).repeatForever(autoreverses: true)
     /// Slow breathing scale used on onboarding permission cards.
     static let onboardingPulse = Animation.easeInOut(duration: 2.4).repeatForever(autoreverses: true)
+
+    /// Returns `preferred` when Reduce Motion is off, otherwise a near-instant or nil animation.
+    static func respectingReduceMotion(_ reduceMotion: Bool, preferred: Animation) -> Animation {
+        reduceMotion ? .easeInOut(duration: 0.001) : preferred
+    }
 }

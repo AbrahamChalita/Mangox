@@ -32,11 +32,31 @@ private let foundationModelsSignpostLog = OSLog(
 
 // MARK: - Guided generation: routing
 
-@Generable
-enum CoachRouteKind: String, Equatable {
+nonisolated enum CoachRouteKind: String, Equatable {
     case localNarrowReply
     case pccCoach
     case cloudCoach
+}
+
+extension CoachRouteKind: Generable {
+    nonisolated static var generationSchema: GenerationSchema {
+        GenerationSchema(type: Self.self, anyOf: [localNarrowReply, pccCoach, cloudCoach].map(\.rawValue))
+    }
+
+    nonisolated init(_ content: GeneratedContent) throws {
+        let rawValue = try content.value(String.self)
+        guard let value = Self(rawValue: rawValue) else {
+            throw GeneratedContent.ParsingError(
+                rawContent: content.jsonString,
+                debugDescription: "Unexpected rawValue \"\(rawValue)\" for \(Self.self)"
+            )
+        }
+        self = value
+    }
+
+    nonisolated var generatedContent: GeneratedContent {
+        GeneratedContent(rawValue)
+    }
 }
 
 @Generable
@@ -375,7 +395,6 @@ enum OnDeviceCoachEngine {
 
     /// Prewarms the default PCC coach profile so the first deep-coaching turn is faster.
     static func prewarmPCCCoachIfAvailable() {
-        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return }
         guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return }
         guard PrivateCloudComputeLanguageModel().supportsLocale(Locale.current) else { return }
         Task.detached(priority: .utility) { @MainActor in
@@ -470,15 +489,7 @@ enum OnDeviceCoachEngine {
     /// Caller should store this in AIService and reuse across turns; reset on createNewSession/switchToSession.
     /// Tools are bound at session creation — data is snapshotted at that moment.
     static func makeNarrowSession(tools: [any Tool]) -> LanguageModelSession {
-        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) {
-            return CoachDynamicProfiles.makeSession(mode: .statsNarrow, tools: tools)
-        }
-        let model = MangoxFoundationModelsSupport.coachSystemLanguageModel()
-        return LanguageModelSession(
-            model: model,
-            tools: tools,
-            instructions: Instructions(narrowInstructionsText)
-        )
+        CoachDynamicProfiles.makeSession(mode: .statsNarrow, tools: tools)
     }
 
     @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
@@ -596,7 +607,7 @@ enum OnDeviceCoachEngine {
             trainingSnapshot: trainingSnapshot
         )
         let stream: LanguageModelSession.ResponseStream<NarrowCoachReply>
-        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *), image != nil {
+        if image != nil {
             stream = session.streamResponse(
                 generating: NarrowCoachReply.self,
                 includeSchemaInPrompt: false,

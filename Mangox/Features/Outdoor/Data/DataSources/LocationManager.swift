@@ -381,7 +381,6 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
 
     // Grade computation — ring buffer of (altitude, totalDistance) pairs
     private var altitudeSamples = FixedBuffer<(alt: Double, dist: Double)>(capacity: 10)
-    private let gradeSampleWindow = 10  // ≈ 50 m at 5-m breadcrumb spacing
 
     // Climb detection
     private var climbStartDist: Double = 0

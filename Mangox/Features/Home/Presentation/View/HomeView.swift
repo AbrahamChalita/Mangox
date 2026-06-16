@@ -339,7 +339,7 @@ struct HomeView: View {
                 .background(AppColor.hair)
             HStack(alignment: .center, spacing: 6) {
                 Image(systemName: "waveform.path.ecg")
-                    .font(.system(size: 11, weight: .semibold))
+                    .mangoxFontScaled(.label)
                     .foregroundStyle(AppColor.whoop)
                 Text("WHOOP")
                     .mangoxFont(.label)
@@ -348,31 +348,31 @@ struct HomeView: View {
 
                 if let pct = viewModel.whoopRecoveryScore {
                     Text(String(format: "%.0f%%", pct))
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .mangoxFontScaled(.bodyBold)
                         .foregroundStyle(whoopReadinessAccentColor)
                     Text("recovery")
-                        .font(.system(size: 9, weight: .medium))
+                        .mangoxFontScaled(.micro)
                         .foregroundStyle(textTertiary)
                 } else {
                     Text("—")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .mangoxFontScaled(.callout)
                         .foregroundStyle(textTertiary)
                 }
 
                 if let rhr = viewModel.whoopRestingHR {
                     Text("·")
-                        .font(.system(size: 9))
+                        .mangoxFontScaled(.micro)
                         .foregroundStyle(textTertiary.opacity(0.35))
                     Text("RHR \(rhr)")
-                        .font(.system(size: 10, weight: .medium))
+                        .mangoxFontScaled(.label)
                         .foregroundStyle(textTertiary)
                 }
                 if let hrv = viewModel.whoopHRV {
                     Text("·")
-                        .font(.system(size: 9))
+                        .mangoxFontScaled(.micro)
                         .foregroundStyle(textTertiary.opacity(0.35))
                     Text("HRV \(hrv)")
-                        .font(.system(size: 10, weight: .medium))
+                        .mangoxFontScaled(.label)
                         .foregroundStyle(textTertiary)
                 }
 
@@ -429,7 +429,7 @@ struct HomeView: View {
                             Spacer(minLength: 6)
 
                             Image(systemName: "arrow.up.right")
-                                .font(.system(size: 11, weight: .semibold))
+                                .mangoxFontScaled(.label)
                                 .foregroundStyle(AppColor.fg2)
                         }
 
@@ -567,7 +567,7 @@ struct HomeView: View {
                         .mangoxFont(.caption)
                         .foregroundStyle(AppColor.orange)
                     Image(systemName: "arrow.right")
-                        .font(.system(size: 12, weight: .semibold))
+                        .mangoxFontScaled(.callout)
                         .foregroundStyle(AppColor.fg2)
                 }
             }

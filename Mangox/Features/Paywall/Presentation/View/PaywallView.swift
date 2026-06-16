@@ -68,15 +68,15 @@ struct PaywallView: View {
     private var subscriberHeroSection: some View {
         VStack(spacing: 12) {
             Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 48))
+                .font(.largeTitle)
                 .foregroundStyle(success)
 
             Text("You're on Mangox Pro")
-                .font(.system(size: 24, weight: .bold))
+                .mangoxFontScaled(.heroTitle)
                 .foregroundStyle(.white)
 
             Text(subscriberHeroSubtitle)
-                .font(.system(size: 14))
+                .mangoxFontScaled(.body)
                 .foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)
@@ -104,7 +104,7 @@ struct PaywallView: View {
             openURL(url)
         } label: {
             Text("Manage Subscription")
-                .font(.system(size: 16, weight: .bold))
+                .mangoxFontScaled(.title)
                 .foregroundStyle(.black)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
@@ -116,7 +116,7 @@ struct PaywallView: View {
 
     private var devUnlockNotice: some View {
         Text("Billing and renewals are managed separately for App Store subscribers. This unlock applies only to debug builds.")
-            .font(.system(size: 11))
+            .mangoxFontScaled(.caption)
             .foregroundStyle(.white.opacity(0.35))
             .multilineTextAlignment(.center)
             .padding(.horizontal, 8)
@@ -127,17 +127,17 @@ struct PaywallView: View {
     private var heroSection: some View {
         VStack(spacing: 12) {
             Image(systemName: "bolt.circle.fill")
-                .font(.system(size: 48))
+                .font(.largeTitle)
                 .foregroundStyle(mango)
 
             Text("Upgrade to Mangox Pro")
-                .font(.system(size: 24, weight: .bold))
+                .mangoxFontScaled(.heroTitle)
                 .foregroundStyle(.white)
 
             Text(
                 "Structured training, on-device fitness charts (PMC), and an AI coach to discuss rides and build custom plans."
             )
-                .font(.system(size: 14))
+                .mangoxFontScaled(.body)
                 .foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)
@@ -181,10 +181,10 @@ struct PaywallView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .mangoxFontScaled(.bodyBold)
                     .foregroundStyle(.white.opacity(0.9))
                 Text(subtitle)
-                    .font(.system(size: 11))
+                    .mangoxFontScaled(.caption)
                     .foregroundStyle(.white.opacity(0.4))
             }
 
@@ -195,16 +195,16 @@ struct PaywallView: View {
     private func featureRow(icon: String, title: String, subtitle: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 16))
+                .mangoxFontScaled(.title)
                 .foregroundStyle(success)
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .mangoxFontScaled(.bodyBold)
                     .foregroundStyle(.white.opacity(0.9))
                 Text(subtitle)
-                    .font(.system(size: 11))
+                    .mangoxFontScaled(.caption)
                     .foregroundStyle(.white.opacity(0.4))
             }
 
@@ -217,7 +217,7 @@ struct PaywallView: View {
     private var packageSelector: some View {
         VStack(spacing: 12) {
             Text("Choose your plan")
-                .font(.system(size: 13, weight: .semibold))
+                .mangoxFontScaled(.callout)
                 .foregroundStyle(.white.opacity(0.5))
 
             HStack(spacing: 12) {
@@ -237,7 +237,7 @@ struct PaywallView: View {
             VStack(spacing: 8) {
                 if option.isYearly {
                     Text("BEST VALUE")
-                        .font(.system(size: 8, weight: .bold))
+                        .mangoxFontScaled(.label)
                         .foregroundStyle(.black)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
@@ -246,16 +246,16 @@ struct PaywallView: View {
                 }
 
                 Text(option.title)
-                    .font(.system(size: 16, weight: .bold))
+                    .mangoxFontScaled(.title)
                     .foregroundStyle(.white)
 
                 Text(option.localizedPrice)
-                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .mangoxFontScaled(.value)
                     .foregroundStyle(mango)
 
                 if option.isYearly {
                     Text("Save 50%")
-                        .font(.system(size: 10, weight: .bold))
+                        .mangoxFontScaled(.label)
                         .foregroundStyle(success)
                 }
             }
@@ -289,7 +289,7 @@ struct PaywallView: View {
                 }
                 Text(viewModel.selectedOption?.localizedPrice ?? "Select a plan")
             }
-            .font(.system(size: 16, weight: .bold))
+            .mangoxFontScaled(.title)
             .foregroundStyle(.black)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
@@ -305,14 +305,14 @@ struct PaywallView: View {
             Task { await viewModel.restorePurchases() }
         } label: {
             Text("Restore Purchases")
-                .font(.system(size: 13))
+                .mangoxFontScaled(.callout)
                 .foregroundStyle(.white.opacity(0.4))
         }
     }
 
     private var footerText: some View {
         Text("Subscriptions auto-renew. Manage in Settings > Apple ID. AI plan generation limited to 8 per month for Pro subscribers.")
-            .font(.system(size: 10))
+            .mangoxFontScaled(.caption)
             .foregroundStyle(.white.opacity(0.25))
             .multilineTextAlignment(.center)
             .padding(.horizontal, 12)
@@ -328,17 +328,17 @@ struct PaywallView: View {
                 HStack(spacing: 20) {
                     if let privacy {
                         Button("Privacy Policy") { openURL(privacy) }
-                            .font(.system(size: 12, weight: .semibold))
+                            .mangoxFontScaled(.caption)
                             .foregroundStyle(mango.opacity(0.95))
                     }
                     if let terms {
                         Button("Terms of Use") { openURL(terms) }
-                            .font(.system(size: 12, weight: .semibold))
+                            .mangoxFontScaled(.caption)
                             .foregroundStyle(mango.opacity(0.95))
                     }
                 }
                 Text("Subscriptions are billed through your Apple ID. Tap above for our policies.")
-                    .font(.system(size: 9))
+                    .mangoxFontScaled(.label)
                     .foregroundStyle(.white.opacity(0.28))
                     .multilineTextAlignment(.center)
             }

@@ -68,7 +68,7 @@ struct HomeRecentRideRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             Text(iconGlyph)
-                .font(.system(size: 16, weight: .medium))
+                .mangoxFontScaled(.title)
                 .foregroundStyle(isOutdoor ? AppColor.mango : AppColor.blue)
                 .frame(width: 28, height: 28)
                 .background(AppColor.bg1)

@@ -183,7 +183,7 @@ enum OnDevicePlanGenerator {
 
     @MainActor
     private static func makePlanSession(usePCC: Bool, tools: [any Tool]) -> LanguageModelSession {
-        if #available(iOS 27.0, macOS 27.0, visionOS 27.0, *), usePCC {
+        if usePCC {
             return CoachDynamicProfiles.makeSession(mode: .planDeep, tools: tools)
         }
         return makeOnDevicePlanSession(tools: tools)
@@ -216,10 +216,12 @@ enum OnDevicePlanGenerator {
             weekCount: weekCount
         )
 
-        let skeletonResponse = try await session.respond(
+        let skeletonResponse = try await MangoxFoundationModelsSupport.respond(
+            session: session,
             to: skeletonPrompt,
             generating: OnDevicePlanSkeleton.self,
-            options: MangoxFoundationModelsSupport.greedyGenerationOptions
+            options: MangoxFoundationModelsSupport.greedyGenerationOptions,
+            label: "plan_skeleton"
         )
         let skeleton = skeletonResponse.content
         guard !skeleton.weeks.isEmpty else {
@@ -249,10 +251,12 @@ enum OnDevicePlanGenerator {
                 priorWeeksSummary: builtWeeks
             )
 
-            let weekResponse = try await session.respond(
+            let weekResponse = try await MangoxFoundationModelsSupport.respond(
+                session: session,
                 to: weekPrompt,
                 generating: OnDeviceGeneratedPlanWeek.self,
-                options: MangoxFoundationModelsSupport.greedyGenerationOptions
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions,
+                label: "plan_week_\(weekNum)"
             )
 
             let planWeek = mapWeek(
@@ -309,10 +313,14 @@ enum OnDevicePlanGenerator {
             priorWeeksSummary: plan.weeks.filter { $0.weekNumber < weekNumber }
         )
 
-        let weekResponse = try await session.respond(
-            to: weekPrompt + "\n\nRegenerate this week with fresh workouts; keep phase and TSS target.",
+        let regenerationPrompt =
+            weekPrompt + "\n\nRegenerate this week with fresh workouts; keep phase and TSS target."
+        let weekResponse = try await MangoxFoundationModelsSupport.respond(
+            session: session,
+            to: regenerationPrompt,
             generating: OnDeviceGeneratedPlanWeek.self,
-            options: MangoxFoundationModelsSupport.greedyGenerationOptions
+            options: MangoxFoundationModelsSupport.greedyGenerationOptions,
+            label: "plan_week_regeneration_\(weekNumber)"
         )
 
         return mapWeek(

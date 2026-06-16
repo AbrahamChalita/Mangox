@@ -6,7 +6,7 @@ enum WhoopCyclingWorkoutMapper {
     static let cyclingSportIDs: Set<Int> = [1, 63, 64, 65, 126]
 
     static func isCycling(_ dto: WhoopWorkoutDTO) -> Bool {
-        cyclingSportIDs.contains(dto.sport_id)
+        cyclingSportIDs.contains(dto.sportId)
     }
 
     static func payload(from dto: WhoopWorkoutDTO) -> ExternalWorkoutPayload? {
@@ -23,16 +23,16 @@ enum WhoopCyclingWorkoutMapper {
         guard duration >= minimumValidWorkoutSeconds else { return nil }
 
         let score = dto.score
-        let avgHR = Double(score?.average_heart_rate ?? 0)
-        let maxHR = score?.max_heart_rate ?? 0
-        let distance = score?.distance_meter ?? 0
-        let elevation = score?.altitude_gain_meter ?? 0
+        let avgHR = Double(score?.averageHeartRate ?? 0)
+        let maxHR = score?.maxHeartRate ?? 0
+        let distance = score?.distanceMeter ?? 0
+        let elevation = score?.altitudeGainMeter ?? 0
         let tss = estimateTSS(durationSeconds: duration, score: score)
 
         return ExternalWorkoutPayload(
             source: .whoop,
             externalID: dto.id,
-            title: dto.sport_name.nilIfEmpty,
+            title: dto.sportName.nilIfEmpty,
             format: .whoop,
             startDate: start,
             durationSeconds: duration,
@@ -54,12 +54,12 @@ enum WhoopCyclingWorkoutMapper {
         let hours = Double(durationSeconds) / 3600
         guard hours > 0 else { return 0 }
 
-        if let avg = score?.average_heart_rate, avg > 0 {
+        if let avg = score?.averageHeartRate, avg > 0 {
             let profile = LoggedActivityTSSEstimator.Profile.current()
             if let maxHR = profile.maxHR, maxHR > 0 {
                 var metrics = LoggedActivityMetrics()
                 metrics.avgHeartRate = avg
-                metrics.maxHeartRate = score?.max_heart_rate
+                metrics.maxHeartRate = score?.maxHeartRate
                 metrics.strain = score?.strain
                 let synthetic = LoggedActivity(
                     id: UUID(),

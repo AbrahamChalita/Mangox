@@ -82,6 +82,8 @@ enum RecordingState: Equatable {
 final class WorkoutManager {
     // MARK: - Public State
 
+    var onLocalChange: (() -> Void)?
+
     var state: RecordingState = .idle {
         didSet {
             guard state != oldValue else { return }
@@ -627,6 +629,7 @@ final class WorkoutManager {
         do {
             try modelContext.save()
             MangoxModelNotifications.postWorkoutAggregatesMayHaveChanged()
+            onLocalChange?()
         } catch {
             workoutLogger.error("endWorkout final save failed: \(error)")
         }

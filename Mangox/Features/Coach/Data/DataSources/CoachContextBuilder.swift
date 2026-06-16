@@ -416,26 +416,22 @@ enum CoachContextBuilder {
         let snapshotTokenBudget = MangoxPCCSupport.snapshotTokenBudget(
             usePrivateCloudCompute: usePrivateCloudCompute
         )
-        if #available(iOS 26.4, macOS 26.4, visionOS 26.4, *) {
-            let model = SystemLanguageModel.default
-            do {
-                let fullTok = try await model.tokenCount(for: full)
-                if fullTok <= snapshotTokenBudget {
-                    MangoxFoundationModelsSupport.logSnapshotSelection(
-                        fullChosen: true, tokenEstimate: fullTok)
-                    return full
-                }
-                let compactTok = try await model.tokenCount(for: compact)
+        let model = SystemLanguageModel.default
+        do {
+            let fullTok = try await model.tokenCount(for: full)
+            if fullTok <= snapshotTokenBudget {
                 MangoxFoundationModelsSupport.logSnapshotSelection(
-                    fullChosen: false, tokenEstimate: compactTok)
-                return compact
-            } catch {
-                let charBudget = usePrivateCloudCompute ? 10_000 : 2400
-                return full.count > charBudget ? compact : full
+                    fullChosen: true, tokenEstimate: fullTok)
+                return full
             }
+            let compactTok = try await model.tokenCount(for: compact)
+            MangoxFoundationModelsSupport.logSnapshotSelection(
+                fullChosen: false, tokenEstimate: compactTok)
+            return compact
+        } catch {
+            let charBudget = usePrivateCloudCompute ? 10_000 : 2400
+            return full.count > charBudget ? compact : full
         }
-        let charBudget = usePrivateCloudCompute ? 10_000 : 2400
-        return full.count > charBudget ? compact : full
     }
 
     // MARK: - Encryption

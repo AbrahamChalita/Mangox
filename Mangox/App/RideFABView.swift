@@ -8,6 +8,7 @@ struct RideFABView: View {
     let showFloatingButton: Bool
     let onSelect: (AppRoute) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var showRideMenu = false
     @Namespace private var fabNamespace
 
@@ -19,7 +20,7 @@ struct RideFABView: View {
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        withAnimation(MangoxMotion.micro) { showRideMenu = false }
+                        withAnimation(MangoxMotion.respectingReduceMotion(accessibilityReduceMotion, preferred: MangoxMotion.micro)) { showRideMenu = false }
                     }
                     .transition(.opacity)
             }
@@ -34,8 +35,8 @@ struct RideFABView: View {
             guard !isVisible, showRideMenu else { return }
             showRideMenu = false
         }
-        .animation(MangoxMotion.expansive, value: showRideMenu)
-        .animation(MangoxMotion.smooth, value: showFloatingButton)
+        .animation(MangoxMotion.respectingReduceMotion(accessibilityReduceMotion, preferred: MangoxMotion.expansive), value: showRideMenu)
+        .animation(MangoxMotion.respectingReduceMotion(accessibilityReduceMotion, preferred: MangoxMotion.smooth), value: showFloatingButton)
     }
 
     private var floatingMenu: some View {
@@ -66,7 +67,7 @@ struct RideFABView: View {
 
     private var collapsedFAB: some View {
         fabToggleButton(isExpanded: false) {
-            withAnimation(MangoxMotion.micro) {
+            withAnimation(MangoxMotion.respectingReduceMotion(accessibilityReduceMotion, preferred: MangoxMotion.micro)) {
                 showRideMenu = true
             }
         }
@@ -98,7 +99,7 @@ struct RideFABView: View {
                 Spacer(minLength: 0)
 
                 fabToggleButton(isExpanded: true) {
-                    withAnimation(MangoxMotion.micro) {
+                    withAnimation(MangoxMotion.respectingReduceMotion(accessibilityReduceMotion, preferred: MangoxMotion.micro)) {
                         showRideMenu = false
                     }
                 }
@@ -166,7 +167,7 @@ struct RideFABView: View {
         }
         .buttonStyle(MangoxPressStyle())
         .shadow(color: .black.opacity(0.35), radius: isExpanded ? 8 : 10, x: 0, y: isExpanded ? 4 : 6)
-        .accessibilityLabel(isExpanded ? "Close ride options" : "Start a ride")
+        .accessibilityLabel(isExpanded ? A11yL10n.closeRideOptions : A11yL10n.startRide)
     }
 
     private func menuRow(
@@ -177,7 +178,7 @@ struct RideFABView: View {
         route: AppRoute
     ) -> some View {
         Button {
-            withAnimation(MangoxMotion.smooth) { showRideMenu = false }
+            withAnimation(MangoxMotion.respectingReduceMotion(accessibilityReduceMotion, preferred: MangoxMotion.smooth)) { showRideMenu = false }
             onSelect(route)
         } label: {
             HStack(spacing: 14) {

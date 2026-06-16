@@ -250,8 +250,6 @@ final class BLEManager: NSObject, BLEServiceProtocol {
     private var reconnectTask: Task<Void, Never>?
     private var hrReconnectTask: Task<Void, Never>?
     private let reconnectTimeoutSeconds: UInt64 = 15
-    /// The trainer peripheral UUID to attempt reconnection to.
-    private var reconnectTrainerUUID: UUID?
 
     // MARK: - RSSI Monitoring
 

@@ -230,7 +230,7 @@ struct SettingsView: View {
                                 HStack(spacing: 14) {
                                     settingsIconBadge("arrow.clockwise", color: .white.opacity(0.5))
                                     Text("Show Onboarding")
-                                        .font(.system(size: 15, weight: .medium))
+                                        .mangoxFontScaled(.bodyBold)
                                         .foregroundStyle(.white.opacity(0.85))
                                     Spacer()
                                 }
@@ -245,15 +245,16 @@ struct SettingsView: View {
                             HStack(spacing: 14) {
                                 settingsIconBadge("info.circle.fill", color: .white.opacity(0.4))
                                 Text("Version")
-                                    .font(.system(size: 15, weight: .medium))
+                                    .mangoxFontScaled(.bodyBold)
                                     .foregroundStyle(.white.opacity(0.85))
                                 Spacer()
                                 Text(
-                                    Bundle.main.infoDictionary?["CFBundleShortVersionString"]
-                                        as? String ?? "1.0"
-                                )
-                                .font(.system(size: 14, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.32))
+                                Bundle.main.infoDictionary?["CFBundleShortVersionString"]
+                                    as? String ?? "1.0"
+                            )
+                            .mangoxFontScaled(.body)
+                            .monospacedDigit()
+                            .foregroundStyle(.white.opacity(0.32))
                             }
                             .padding(.vertical, 12)
                             .padding(.horizontal, 16)
@@ -269,7 +270,7 @@ struct SettingsView: View {
                                 HStack(spacing: 14) {
                                     settingsIconBadge("photo.artframe", color: .orange)
                                     Text("Story Card Debug")
-                                        .font(.system(size: 15, weight: .medium))
+                                        .mangoxFontScaled(.bodyBold)
                                         .foregroundStyle(.white.opacity(0.85))
                                     Spacer()
                                     Image(systemName: "chevron.right")

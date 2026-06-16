@@ -350,10 +350,12 @@ extension WorkoutSummaryOnDeviceInsight {
         let session = LanguageModelSession(model: model, instructions: Instructions(instructions))
 
         do {
-            let response = try await session.respond(
+            let response = try await MangoxFoundationModelsSupport.respond(
+                session: session,
                 to: stats,
                 generating: WorkoutSmartTitleGenerated.self,
-                options: MangoxFoundationModelsSupport.greedyGenerationOptions
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions,
+                label: "workout_smart_title"
             )
             let title = response.content.title.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty else { return }
@@ -412,10 +414,12 @@ extension WorkoutSummaryOnDeviceInsight {
             await MangoxFoundationModelsSupport.logPromptFootprint(
                 model: model, label: "strava_description", instructions: Instructions(instructions),
                 prompt: stats, tools: [])
-            let response = try await session.respond(
+            let response = try await MangoxFoundationModelsSupport.respond(
+                session: session,
                 to: stats,
                 generating: WorkoutStravaDescriptionGenerated.self,
-                options: MangoxFoundationModelsSupport.greedyGenerationOptions
+                options: MangoxFoundationModelsSupport.greedyGenerationOptions,
+                label: "strava_description"
             )
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "strava_description")
             let body = response.content.body.trimmingCharacters(in: .whitespacesAndNewlines)

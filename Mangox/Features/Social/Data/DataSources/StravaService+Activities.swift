@@ -88,7 +88,13 @@ extension StravaService {
 
             let (data, response) = try await urlSession.data(for: request)
             recordRateLimitHeaders(from: response)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { break }
+            guard let http = response as? HTTPURLResponse else {
+                throw StravaError.invalidResponse
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+                throw StravaError.activityFetchFailed(message)
+            }
 
             let batch = try JSONDecoder().decode([SummaryActivity].self, from: data)
             if batch.isEmpty { break }
@@ -114,8 +120,12 @@ extension StravaService {
 
         let (data, response) = try await urlSession.data(for: request)
         recordRateLimitHeaders(from: response)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+        guard let http = response as? HTTPURLResponse else {
+            throw StravaError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            throw StravaError.activityFetchFailed(message)
         }
         return try JSONDecoder().decode(SummaryActivity.self, from: data)
     }

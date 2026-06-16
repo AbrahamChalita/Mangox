@@ -1131,7 +1131,6 @@ struct PhonePowerDisplay: View {
     @ScaledMetric(relativeTo: .caption) private var zoneNameFontSize = 12
     @ScaledMetric(relativeTo: .caption) private var pctUnitFontSize = 11
     @ScaledMetric(relativeTo: .caption2) private var rangeFontSize = 10
-    @ScaledMetric(relativeTo: .caption) private var progressBarHeight = 4
     /// Keeps zone/FTP column from expanding and stealing space from the hero watts.
     @ScaledMetric(relativeTo: .body) private var zoneColumnWidth = 118
     @ScaledMetric(relativeTo: .body) private var zoneColumnWidthWithPill = 148

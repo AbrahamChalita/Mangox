@@ -7,7 +7,7 @@ enum WhoopWorkoutMapper {
     private static let cyclingIDs: Set<Int> = [1, 63, 64, 65, 126]
 
     static func draft(from dto: WhoopWorkoutDTO) -> LoggedActivityDraft? {
-        guard !cyclingIDs.contains(dto.sport_id) else { return nil }
+        guard !cyclingIDs.contains(dto.sportId) else { return nil }
 
         let fmt = ISO8601DateFormatter()
         fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -17,27 +17,27 @@ enum WhoopWorkoutMapper {
         let duration = end.map { Int($0.timeIntervalSince(start)) } ?? 0
         guard duration > 0 else { return nil }
 
-        let type = activityType(for: dto.sport_id, name: dto.sport_name)
-        let customLabel: String? = type == .other ? dto.sport_name : nil
+        let type = activityType(for: dto.sportId, name: dto.sportName)
+        let customLabel: String? = type == .other ? dto.sportName : nil
 
         var metrics = LoggedActivityMetrics()
         if let score = dto.score {
-            metrics.avgHeartRate = score.average_heart_rate
-            metrics.maxHeartRate = score.max_heart_rate
+            metrics.avgHeartRate = score.averageHeartRate
+            metrics.maxHeartRate = score.maxHeartRate
             metrics.strain = score.strain
             metrics.kilojoules = score.kilojoule
-            if let dist = score.distance_meter, dist > 0 { metrics.distanceMeters = dist }
-            if let gain = score.altitude_gain_meter, gain > 0 { metrics.elevationGainMeters = gain }
-            metrics.altitudeChangeMeters = score.altitude_change_meter
-            metrics.percentRecorded = score.percent_recorded
-            if let zones = score.zone_durations {
+            if let dist = score.distanceMeter, dist > 0 { metrics.distanceMeters = dist }
+            if let gain = score.altitudeGainMeter, gain > 0 { metrics.elevationGainMeters = gain }
+            metrics.altitudeChangeMeters = score.altitudeChangeMeter
+            metrics.percentRecorded = score.percentRecorded
+            if let zones = score.zoneDurations {
                 metrics.heartRateZoneMillis = [
-                    zones.zone_zero_milli ?? 0,
-                    zones.zone_one_milli ?? 0,
-                    zones.zone_two_milli ?? 0,
-                    zones.zone_three_milli ?? 0,
-                    zones.zone_four_milli ?? 0,
-                    zones.zone_five_milli ?? 0,
+                    zones.zoneZeroMilli ?? 0,
+                    zones.zoneOneMilli ?? 0,
+                    zones.zoneTwoMilli ?? 0,
+                    zones.zoneThreeMilli ?? 0,
+                    zones.zoneFourMilli ?? 0,
+                    zones.zoneFiveMilli ?? 0,
                 ]
             }
         }

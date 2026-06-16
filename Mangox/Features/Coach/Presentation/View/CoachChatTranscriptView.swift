@@ -156,7 +156,7 @@ struct CoachChatTranscriptView: View {
                         .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Scroll to latest message")
+                .accessibilityLabel(A11yL10n.scrollToLatest)
                 .padding(.trailing, 20)
                 .padding(.bottom, 12)
                 .transition(
@@ -272,7 +272,7 @@ struct CoachChatTranscriptView: View {
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Dismiss limit notice")
+                .accessibilityLabel(A11yL10n.dismissLimitNotice)
             }
 
             Text("Daily limit reached")

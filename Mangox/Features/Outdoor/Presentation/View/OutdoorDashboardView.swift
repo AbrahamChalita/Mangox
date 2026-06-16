@@ -41,46 +41,11 @@ struct OutdoorDashboardView: View {
     @State private var showFollowResumeChip = false
     @State private var restoredRideToastVisible = false
 
-    @State private var renderedBreadcrumbChunks: [RenderedBreadcrumbChunk] = []
-    @State private var renderedLiveTail: [CLLocationCoordinate2D] = []
-    @State private var renderedCompletedRoutePolylines: [RenderedRoutePolyline] = []
-    @State private var renderedRemainingRoutePolylines: [RenderedRoutePolyline] = []
-    @State private var renderedLookaheadPolylines: [RenderedRoutePolyline] = []
-
-    private struct RenderedBreadcrumbChunk: Identifiable {
-        let id: UUID
-        let coords: [CLLocationCoordinate2D]
-        let avgSpeed: Double
-    }
-
-    private struct RenderedRoutePolyline: Identifiable {
-        let id: Int
-        let coords: [CLLocationCoordinate2D]
-    }
-
-    private struct IdentifiedCoordinate: Identifiable {
-        let id: Int
-        let coordinate: CLLocationCoordinate2D
-    }
-
-    private struct RenderedWaypoint: Identifiable {
-        let id: Int
-        let labelIndex: Int
-        let coordinate: CLLocationCoordinate2D
-    }
-
-    private struct CoordinateKey: Hashable {
-        let lat: UInt64
-        let lon: UInt64
-
-        init(_ coordinate: CLLocationCoordinate2D) {
-            lat = coordinate.latitude.bitPattern
-            lon = coordinate.longitude.bitPattern
-        }
+    private var cameraDistance: CLLocationDistance {
+        mapCameraService.mapCameraPosition.camera?.distance ?? 1_200
     }
 
     private var mapRenderBudgetBucket: Int {
-        let cameraDistance = mapCameraService.mapCameraPosition.camera?.distance ?? 1_200
         switch cameraDistance {
         case ..<450: return 0
         case ..<1_000: return 1
@@ -89,141 +54,32 @@ struct OutdoorDashboardView: View {
         }
     }
 
-    private var routePolylinePointBudget: Int {
-        switch mapRenderBudgetBucket {
-        case 0:
-            return 320
-        case 1:
-            return 220
-        case 2:
-            return 150
-        default:
-            return 90
-        }
+    private struct MapRenderTrigger: Equatable {
+        let scenePhase: ScenePhase
+        let isFollowingUser: Bool
+        let showMapInCompact: Bool
+        let isCompact: Bool
+        let outdoorMapReady: Bool
+        let showDestinationSearch: Bool
+        let budgetBucket: Int
+        let mapWaypointsCount: Int
+        let navigationMode: NavigationMode
+        let isCalculating: Bool
     }
 
-    private var breadcrumbPointBudget: Int {
-        switch mapRenderBudgetBucket {
-        case 0:
-            return 220
-        case 1:
-            return 160
-        case 2:
-            return 110
-        default:
-            return 80
-        }
-    }
-
-    private var breadcrumbRenderFingerprint: Int {
-        var hasher = Hasher()
-        hasher.combine(ls.frozenBreadcrumbChunks.count)
-        if let lastChunk = ls.frozenBreadcrumbChunks.last {
-            hasher.combine(lastChunk.coords.count)
-            hasher.combine(lastChunk.avgSpeed.bitPattern)
-            if let first = lastChunk.coords.first {
-                hasher.combine(first.latitude.bitPattern)
-                hasher.combine(first.longitude.bitPattern)
-            }
-            if let last = lastChunk.coords.last {
-                hasher.combine(last.latitude.bitPattern)
-                hasher.combine(last.longitude.bitPattern)
-            }
-        }
-        hasher.combine(ls.liveBreadcrumbTail.count)
-        if let first = ls.liveBreadcrumbTail.first {
-            hasher.combine(first.latitude.bitPattern)
-            hasher.combine(first.longitude.bitPattern)
-        }
-        if let last = ls.liveBreadcrumbTail.last {
-            hasher.combine(last.latitude.bitPattern)
-            hasher.combine(last.longitude.bitPattern)
-        }
-        return hasher.finalize()
-    }
-
-    private var routeRenderFingerprint: Int {
-        var hasher = Hasher()
-        combinePolylineFingerprint(ns.completedRoutePolylines, into: &hasher)
-        combinePolylineFingerprint(ns.remainingRoutePolylines, into: &hasher)
-        combinePolylineFingerprint(ns.lookaheadPolylines, into: &hasher)
-        return hasher.finalize()
-    }
-
-    private func combinePolylineFingerprint(
-        _ polylines: [[CLLocationCoordinate2D]],
-        into hasher: inout Hasher
-    ) {
-        hasher.combine(polylines.count)
-        for polyline in polylines {
-            hasher.combine(polyline.count)
-            if let first = polyline.first {
-                hasher.combine(first.latitude.bitPattern)
-                hasher.combine(first.longitude.bitPattern)
-            }
-            if let last = polyline.last {
-                hasher.combine(last.latitude.bitPattern)
-                hasher.combine(last.longitude.bitPattern)
-            }
-        }
-    }
-
-    private func coordinateIdentity(_ coordinate: CLLocationCoordinate2D, occurrence: Int = 0) -> Int {
-        var hasher = Hasher()
-        hasher.combine(coordinate.latitude.bitPattern)
-        hasher.combine(coordinate.longitude.bitPattern)
-        hasher.combine(occurrence)
-        return hasher.finalize()
-    }
-
-    private func polylineIdentity(_ polyline: [CLLocationCoordinate2D]) -> Int {
-        var hasher = Hasher()
-        hasher.combine(polyline.count)
-        if let first = polyline.first {
-            hasher.combine(first.latitude.bitPattern)
-            hasher.combine(first.longitude.bitPattern)
-        }
-        if polyline.count > 2 {
-            let mid = polyline[polyline.count / 2]
-            hasher.combine(mid.latitude.bitPattern)
-            hasher.combine(mid.longitude.bitPattern)
-        }
-        if let last = polyline.last {
-            hasher.combine(last.latitude.bitPattern)
-            hasher.combine(last.longitude.bitPattern)
-        }
-        return hasher.finalize()
-    }
-
-    private func identifiedCoordinates(_ coordinates: [CLLocationCoordinate2D]) -> [IdentifiedCoordinate] {
-        var occurrenceByCoordinate: [CoordinateKey: Int] = [:]
-        return coordinates.map { coordinate in
-            let key = CoordinateKey(coordinate)
-            let occurrence = occurrenceByCoordinate[key, default: 0]
-            occurrenceByCoordinate[key] = occurrence + 1
-            return IdentifiedCoordinate(
-                id: coordinateIdentity(coordinate, occurrence: occurrence),
-                coordinate: coordinate
-            )
-        }
-    }
-
-    private var renderedPauseGapCoordinates: [IdentifiedCoordinate] {
-        identifiedCoordinates(ls.pauseGapCoordinates)
-    }
-
-    private var renderedWaypoints: [RenderedWaypoint] {
-        var occurrenceByCoordinate: [CoordinateKey: Int] = [:]
-        return viewModel.mapWaypoints.enumerated().map { index, coordinate in
-            let key = CoordinateKey(coordinate)
-            let occurrence = occurrenceByCoordinate[key, default: 0]
-            occurrenceByCoordinate[key] = occurrence + 1
-            return RenderedWaypoint(
-                id: coordinateIdentity(coordinate, occurrence: occurrence),
-                labelIndex: index + 1,
-                coordinate: coordinate
-            )
-        }
+    private var mapRenderTrigger: MapRenderTrigger {
+        MapRenderTrigger(
+            scenePhase: scenePhase,
+            isFollowingUser: mapCameraService.isFollowingUser,
+            showMapInCompact: viewModel.showMapInCompact,
+            isCompact: hSizeClass == .compact,
+            outdoorMapReady: outdoorMapReady,
+            showDestinationSearch: viewModel.showDestinationSearch,
+            budgetBucket: mapRenderBudgetBucket,
+            mapWaypointsCount: viewModel.mapWaypoints.count,
+            navigationMode: ns.mode,
+            isCalculating: ns.isCalculating
+        )
     }
 
     private var shouldUseMapFollowUpdates: Bool {
@@ -240,72 +96,16 @@ struct OutdoorDashboardView: View {
         ls.mapFollowActive = shouldUseMapFollowUpdates
     }
 
-    private func refreshMapDerivedOverlays() {
-        refreshBreadcrumbRenderCache()
-        refreshRouteRenderCache()
-    }
-
-    private func refreshBreadcrumbRenderCache() {
-        guard shouldUseMapFollowUpdates else {
-            renderedBreadcrumbChunks = []
-            renderedLiveTail = []
-            return
-        }
-        renderedBreadcrumbChunks = ls.frozenBreadcrumbChunks.compactMap { chunk in
-            let sanitized = chunk.coords.sanitizedForMapPolyline(maxPoints: breadcrumbPointBudget)
-            guard sanitized.count > 1 else { return nil }
-            return RenderedBreadcrumbChunk(id: chunk.id, coords: sanitized, avgSpeed: chunk.avgSpeed)
-        }
-        renderedLiveTail = ls.liveBreadcrumbTail.sanitizedForMapPolyline(
-            maxPoints: max(160, breadcrumbPointBudget)
+    private func refreshMapRenderData() {
+        let loc = ls.currentLocation
+        viewModel.updateMapRenderData(
+            cameraDistance: cameraDistance,
+            isRenderingEnabled: shouldUseMapFollowUpdates,
+            currentCoordinate: loc?.coordinate,
+            smoothedRiderCoordinate: mapCameraService.smoothedRiderCoordinate,
+            isFollowingUser: mapCameraService.isFollowingUser,
+            horizontalAccuracy: loc?.horizontalAccuracy ?? -1
         )
-    }
-
-    private func refreshRouteRenderCache() {
-        guard shouldUseMapFollowUpdates else {
-            renderedCompletedRoutePolylines = []
-            renderedRemainingRoutePolylines = []
-            renderedLookaheadPolylines = []
-            return
-        }
-        renderedCompletedRoutePolylines = ns.completedRoutePolylines.map { polyline in
-            RenderedRoutePolyline(
-                id: polylineIdentity(polyline),
-                coords: polyline.sanitizedForMapPolyline(maxPoints: routePolylinePointBudget)
-            )
-        }
-        renderedRemainingRoutePolylines = ns.remainingRoutePolylines.map { polyline in
-            RenderedRoutePolyline(
-                id: polylineIdentity(polyline),
-                coords: polyline.sanitizedForMapPolyline(maxPoints: routePolylinePointBudget)
-            )
-        }
-        renderedLookaheadPolylines = ns.lookaheadPolylines.map { polyline in
-            RenderedRoutePolyline(
-                id: polylineIdentity(polyline),
-                coords: polyline.sanitizedForMapPolyline(maxPoints: max(90, routePolylinePointBudget - 40))
-            )
-        }
-    }
-
-    private var routeLineWidth: CGFloat {
-        let cameraDistance = mapCameraService.mapCameraPosition.camera?.distance ?? 1_200
-        switch cameraDistance {
-        case ..<450: return 6
-        case ..<1_000: return 5
-        case ..<2_500: return 4
-        default: return 3
-        }
-    }
-
-    private var breadcrumbLineWidth: CGFloat {
-        let cameraDistance = mapCameraService.mapCameraPosition.camera?.distance ?? 1_200
-        switch cameraDistance {
-        case ..<450: return 5
-        case ..<1_000: return 4
-        case ..<2_500: return 3.5
-        default: return 3
-        }
     }
 
     @Bindable private var prefs = RidePreferences.shared
@@ -448,7 +248,7 @@ struct OutdoorDashboardView: View {
     }
 
     private func outdoorDashboardAttachObservers<Content: View>(_ root: Content) -> some View {
-        root
+        let lifecycleRoot = root
             .animation(MangoxMotion.standard, value: viewModel.showDestinationSearch)
             .onAppear(perform: handleViewAppear)
             .task { await runOutdoorMapPrewarmTask() }
@@ -460,31 +260,41 @@ struct OutdoorDashboardView: View {
             }
             .onChange(of: viewModel.showDestinationSearch) { _, isOpen in
                 handleDestinationSearchChange(isOpen)
+                refreshMapRenderData()
             }
             .onDisappear(perform: handleViewDisappear)
-            .onChange(of: scenePhase) { _, phase in
-                handleScenePhaseChange(phase)
-            }
-            .onChange(of: mapCameraService.isFollowingUser) { _, isFollowing in
-                handleFollowStateChange(isFollowing)
-            }
-            .onChange(of: viewModel.showMapInCompact) { _, _ in updateMapFollowActivation() }
-            .onChange(of: hSizeClass) { _, _ in updateMapFollowActivation() }
-            .onChange(of: outdoorMapReady) { _, _ in updateMapFollowActivation() }
-            .onChange(of: mapRenderBudgetBucket) { _, _ in refreshMapDerivedOverlays() }
-            .onChange(of: breadcrumbRenderFingerprint) { _, _ in refreshBreadcrumbRenderCache() }
-            .onChange(of: routeRenderFingerprint) { _, _ in refreshRouteRenderCache() }
+
+        let renderRoot = attachMapRenderObservers(to: lifecycleRoot)
+
+        return renderRoot
             .task(id: ls.isAuthorized) {
                 await runOutdoorLoadingBypassTask()
             }
             .onChange(of: ls.currentLocation) { _, location in
                 handleCurrentLocationChange(location)
+                refreshMapRenderData()
             }
             .onChange(of: ls.newLapJustCompleted) { _, didCompleteLap in
                 handleLapCompletionChange(didCompleteLap)
             }
             .onChange(of: ls.authorizationStatus) { _, status in
                 handleAuthorizationStatusChange(status)
+            }
+            .onChange(of: viewModel.mapRenderData) { _, _ in
+                updateMapFollowActivation()
+            }
+    }
+
+    private func attachMapRenderObservers<Content: View>(to root: Content) -> some View {
+        root
+            .onChange(of: scenePhase) { _, phase in
+                handleScenePhaseChange(phase)
+            }
+            .onChange(of: mapCameraService.isFollowingUser) { _, isFollowing in
+                handleFollowStateChange(isFollowing)
+            }
+            .onChange(of: mapRenderTrigger) { _, _ in
+                refreshMapRenderData()
             }
     }
 
@@ -644,7 +454,7 @@ struct OutdoorDashboardView: View {
             prefs: prefs
         )
         updateMapFollowActivation()
-        refreshMapDerivedOverlays()
+        refreshMapRenderData()
     }
 
     private func runOutdoorMapPrewarmTask() async {
@@ -670,7 +480,7 @@ struct OutdoorDashboardView: View {
     private func handleSetupPhaseChange(_ committed: Bool) {
         viewModel.handleSetupPhaseChange(committed: committed, locationManager: ls)
         updateMapFollowActivation()
-        refreshMapDerivedOverlays()
+        refreshMapRenderData()
     }
 
     private func handleDestinationSearchChange(_ isOpen: Bool) {
@@ -686,7 +496,7 @@ struct OutdoorDashboardView: View {
             showFollowResumeChip = false
         }
         updateMapFollowActivation()
-        refreshMapDerivedOverlays()
+        refreshMapRenderData()
     }
 
     private func handleFollowStateChange(_ isFollowing: Bool) {
@@ -718,7 +528,7 @@ struct OutdoorDashboardView: View {
     private func handleAuthorizationStatusChange(_ status: CLAuthorizationStatus) {
         viewModel.handleAuthorizationChange(status: status, locationManager: ls)
         updateMapFollowActivation()
-        refreshMapDerivedOverlays()
+        refreshMapRenderData()
     }
 
     /// Mapless iPhone layout: surface navigation under speed when a route or TBT is active.
@@ -976,23 +786,6 @@ struct OutdoorDashboardView: View {
             .padding(.horizontal, 24)
 
             Spacer()
-        }
-    }
-
-    private var mapStyle: MapStyle {
-        if viewModel.isHybridMapStyle {
-            return .hybrid(elevation: .realistic, pointsOfInterest: .excludingAll)
-        }
-        return .standard(elevation: .realistic, emphasis: .muted)
-    }
-
-    /// Colour for a breadcrumb chunk based on average speed.
-    private func speedColor(_ kmh: Double) -> Color {
-        switch kmh {
-        case ..<10: return Color.white.opacity(0.35)  // very slow
-        case 10..<20: return AppColor.mango  // moderate
-        case 20..<30: return AppColor.yellow  // good pace
-        default: return AppColor.success  // fast
         }
     }
 
@@ -1623,7 +1416,7 @@ struct OutdoorDashboardView: View {
             ZStack {
                 Group {
                     if outdoorMapReady && geo.size.width > 0 && viewModel.showMapInCompact {
-                        mapView
+                        outdoorMapView
                             .ignoresSafeArea(edges: [.top, .bottom, .leading, .trailing])
                     } else {
                         AppColor.bg
@@ -2228,7 +2021,7 @@ struct OutdoorDashboardView: View {
                 HStack(spacing: 0) {
                     ZStack(alignment: .top) {
                         if outdoorMapReady {
-                            mapView
+                            outdoorMapView
                         } else {
                             AppColor.bg
                         }
@@ -2330,198 +2123,31 @@ struct OutdoorDashboardView: View {
 
     // MARK: - Map
 
-    @ViewBuilder
-    private var mapView: some View {
-        Map(
-            position: Binding(
-                get: { mapCameraService.mapCameraPosition },
-                set: { newPos in
-                    let shouldDisableFollow = shouldDisableFollowMode(for: newPos)
-                    mapCameraService.mapCameraPosition = newPos
-                    if shouldDisableFollow {
-                        mapCameraService.isFollowingUser = false
-                    }
-                }
-            )
-        ) {
-            // Frozen breadcrumb chunks — colour-coded by average speed
-            ForEach(renderedBreadcrumbChunks) { chunk in
-                MapPolyline(coordinates: chunk.coords)
-                    .stroke(speedColor(chunk.avgSpeed), lineWidth: breadcrumbLineWidth)
-            }
-
-            // Live tail — always mango coloured
-            if renderedLiveTail.count > 1 {
-                MapPolyline(coordinates: renderedLiveTail)
-                    .stroke(AppColor.mango, lineWidth: breadcrumbLineWidth)
-            }
-
-            // Route overlay — traversed (grey) vs remaining (yellow)
-            ForEach(renderedCompletedRoutePolylines) { done in
-                if done.coords.count > 1 {
-                    MapPolyline(coordinates: done.coords)
-                        .stroke(Color.white.opacity(0.35), lineWidth: routeLineWidth)
+    private var mapCameraBinding: Binding<MapCameraPosition> {
+        Binding(
+            get: { mapCameraService.mapCameraPosition },
+            set: { newPos in
+                let shouldDisableFollow = shouldDisableFollowMode(for: newPos)
+                mapCameraService.mapCameraPosition = newPos
+                if shouldDisableFollow {
+                    mapCameraService.isFollowingUser = false
                 }
             }
-            ForEach(renderedRemainingRoutePolylines) { left in
-                if left.coords.count > 1 {
-                    MapPolyline(coordinates: left.coords)
-                        .stroke(AppColor.yellow, lineWidth: routeLineWidth)
-                }
-            }
+        )
+    }
 
-            // Lookahead ghost — dashed white, 300m ahead on remaining route
-            ForEach(renderedLookaheadPolylines) { lookahead in
-                if lookahead.coords.count > 1 {
-                    MapPolyline(coordinates: lookahead.coords)
-                        .stroke(
-                            Color.white.opacity(0.45),
-                            style: StrokeStyle(lineWidth: max(2, routeLineWidth - 1), dash: [8, 6])
-                        )
-                }
-            }
-
-            // Off-course snap-back line — dashed red line to nearest route point
-            let snapBack = ns.snapBackPolyline
-            if snapBack.count == 2 {
-                MapPolyline(coordinates: snapBack)
-                    .stroke(
-                        AppColor.red.opacity(0.75),
-                        style: StrokeStyle(lineWidth: 2, dash: [5, 5])
-                    )
-            }
-
-            // Pause gap markers
-            ForEach(renderedPauseGapCoordinates) { coordinate in
-                Annotation("", coordinate: coordinate.coordinate) {
-                    Circle()
-                        .fill(AppColor.yellow.opacity(0.85))
-                        .frame(width: 10, height: 10)
-                        .overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
-                }
-            }
-
-            // Rider position — solid circle dot (smoothed when follow mode matches the camera).
-            if let loc = ls.currentLocation {
-                let riderCoord =
-                    mapCameraService.isFollowingUser
-                    ? mapCameraService.smoothedRiderCoordinate
-                    : loc.coordinate
-                Annotation("", coordinate: riderCoord) {
-                    ZStack {
-                        if ls.horizontalAccuracy >= 0 {
-                            let ring = CGFloat(min(max(ls.horizontalAccuracy, 5), 60))
-                            Circle()
-                                .fill(AppColor.mango.opacity(0.12))
-                                .frame(width: 18 + ring, height: 18 + ring)
-                                .overlay(
-                                    Circle()
-                                        .strokeBorder(AppColor.mango.opacity(0.2), lineWidth: 1)
-                                )
-                        }
-
-                        Circle()
-                            .fill(AppColor.mango)
-                            .frame(width: 18, height: 18)
-                            .overlay(Circle().strokeBorder(.white, lineWidth: 3))
-                            .shadow(color: .black.opacity(0.35), radius: 3)
-                    }
-                }
-            }
-
-            // Destination pin
-            if let dest = ns.destination {
-                Marker(dest.name ?? "Destination", coordinate: dest.location.coordinate)
-                    .tint(AppColor.red)
-            }
-
-            // User-placed waypoints
-            ForEach(renderedWaypoints) { waypoint in
-                Annotation("", coordinate: waypoint.coordinate) {
-                    VStack(spacing: 2) {
-                        ZStack {
-                            Circle()
-                                .fill(AppColor.blue)
-                                .frame(width: 22, height: 22)
-                            Image(systemName: "mappin")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                        Text("WP\(waypoint.labelIndex)")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(AppColor.blue.opacity(0.85))
-                            .clipShape(Capsule())
-                    }
-                }
-            }
-        }
-        .mapStyle(mapStyle)
-        /// Pinch / pan exits follow mode via `Map` position binding; programmatic camera updates use the same binding.
-        .mapControls {}
-        .safeAreaPadding(.top, 90)
-        // Shift the camera so the rider dot is visible above the stats card,
-        // not hidden behind it. Only active on compact (iPhone); wide layout has
-        // no overlapping card. statsCardHeight is measured live from the card.
-        .safeAreaPadding(.bottom, hSizeClass == .compact ? statsCardHeight : 0)
-        .overlay {
-            if restoredRideToastVisible {
-                VStack {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.arrow.trianglehead.counterclockwise")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(AppColor.mango)
-                        Text("Ride restored from checkpoint")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .mangoxSurface(.mapOverlay, shape: .capsule)
-                    .padding(.top, 22)
-                    Spacer()
-                }
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
-            if showFollowResumeChip && !mapCameraService.isFollowingUser && ls.currentLocation != nil {
-                VStack {
-                    Spacer()
-                    Button {
-                        mapCameraService.centerMapOnUser()
-                    } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: "location.viewfinder")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Resume Follow")
-                                .font(.system(size: 12, weight: .semibold))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .mangoxSurface(.mapOverlay, shape: .capsule)
-                    }
-                    .buttonStyle(MangoxPressStyle())
-                    .padding(.bottom, hSizeClass == .compact ? statsCardHeight + 14 : 24)
-                }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
-            if ns.isCalculating {
-                ZStack {
-                    Color.black.opacity(0.35).ignoresSafeArea()
-                    ProgressView("Building route…")
-                        .tint(AppColor.mango)
-                        .padding(20)
-                        .glassEffect(
-                            .regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-            }
-        }
-        .frame(minWidth: 1, minHeight: 1)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    private var outdoorMapView: some View {
+        OutdoorMapView(
+            cameraPosition: mapCameraBinding,
+            renderData: viewModel.mapRenderData,
+            isHybridMapStyle: viewModel.isHybridMapStyle,
+            isCompact: hSizeClass == .compact,
+            statsCardHeight: statsCardHeight,
+            restoredRideToastVisible: restoredRideToastVisible,
+            showFollowResumeChip: showFollowResumeChip && !mapCameraService.isFollowingUser && ls.currentLocation != nil,
+            isCalculatingRoute: ns.isCalculating,
+            onResumeFollow: { mapCameraService.centerMapOnUser() }
+        )
     }
 
     private func shouldDisableFollowMode(for newPosition: MapCameraPosition) -> Bool {

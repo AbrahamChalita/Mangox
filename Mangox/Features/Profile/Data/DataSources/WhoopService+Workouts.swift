@@ -5,36 +5,36 @@ import Foundation
 
 struct WhoopWorkoutPage: Decodable, Sendable {
     let records: [WhoopWorkoutDTO]
-    let next_token: String?
+    let nextToken: String?
 }
 
 struct WhoopWorkoutDTO: Decodable, Sendable {
     let id: String
     let start: String
     let end: String?
-    let sport_id: Int
-    let sport_name: String
-    let score_state: String?
+    let sportId: Int
+    let sportName: String
+    let scoreState: String?
     let score: Score?
 
     struct Score: Decodable, Sendable {
         let strain: Double?
-        let average_heart_rate: Int?
-        let max_heart_rate: Int?
+        let averageHeartRate: Int?
+        let maxHeartRate: Int?
         let kilojoule: Double?
-        let distance_meter: Double?
-        let altitude_gain_meter: Double?
-        let altitude_change_meter: Double?
-        let percent_recorded: Double?
-        let zone_durations: ZoneDurations?
+        let distanceMeter: Double?
+        let altitudeGainMeter: Double?
+        let altitudeChangeMeter: Double?
+        let percentRecorded: Double?
+        let zoneDurations: ZoneDurations?
 
         struct ZoneDurations: Decodable, Sendable {
-            let zone_zero_milli: Int?
-            let zone_one_milli: Int?
-            let zone_two_milli: Int?
-            let zone_three_milli: Int?
-            let zone_four_milli: Int?
-            let zone_five_milli: Int?
+            let zoneZeroMilli: Int?
+            let zoneOneMilli: Int?
+            let zoneTwoMilli: Int?
+            let zoneThreeMilli: Int?
+            let zoneFourMilli: Int?
+            let zoneFiveMilli: Int?
         }
     }
 }
@@ -68,7 +68,7 @@ extension WhoopService {
                 context: "WHOOP workouts"
             )
             all.append(contentsOf: page.records)
-            nextToken = page.next_token
+            nextToken = page.nextToken
         } while nextToken != nil && all.count < cap
 
         return all
