@@ -70,8 +70,12 @@ enum CoachFoundationModelsPromptSupport {
         User message:
         \(userMessage)
         """
-        if let cgImage = image?.cgImage {
-            Attachment(cgImage)
+        if let image {
+            """
+
+            Attached image metadata:
+            \(image.pixelWidth)x\(image.pixelHeight) JPEG.
+            """
         }
     }
 }

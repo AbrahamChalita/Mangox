@@ -223,6 +223,20 @@ final class BLEManager: NSObject, BLEServiceProtocol {
     /// main thread free from BLE I/O and avoiding `unsafeForcedSync` runtime warnings.
     private let bleQueue = DispatchQueue(label: "com.abchalita.Mangox.ble", qos: .userInteractive)
 
+    /// CoreBluetooth delegate callbacks arrive on `bleQueue`, but all manager state is
+    /// `@MainActor`. This keeps the intentional GCD hop in one place and avoids
+    /// `Task { @MainActor in }` forced-sync warnings on high-rate BLE callbacks.
+    nonisolated private func hopToMainActorFromCoreBluetooth(
+        _ body: @escaping @Sendable @MainActor (BLEManager) -> Void
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                body(self)
+            }
+        }
+    }
+
     private var centralManager: CBCentralManager!
     private static let centralRestoreIdentifier = "com.abchalita.Mangox.BLECentral"
     private var trainerPeripheral: CBPeripheral?
@@ -971,95 +985,89 @@ extension BLEManager: CBCentralManagerDelegate {
         let didRestoreScanning = dict[CBCentralManagerRestoredStateScanServicesKey] != nil
 
         let boxedPeripherals = restoredPeripherals.map { SendablePeripheral(value: $0) }
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                for boxed in boxedPeripherals {
-                    let peripheral = boxed.value
-                    peripheral.delegate = self
-                    let id = peripheral.identifier
-                    let name = peripheral.name ?? "Unknown"
+        hopToMainActorFromCoreBluetooth { `self` in
+            for boxed in boxedPeripherals {
+                let peripheral = boxed.value
+                peripheral.delegate = self
+                let id = peripheral.identifier
+                let name = peripheral.name ?? "Unknown"
 
-                    let role: DeviceType
-                    if id == self.savedTrainerUUID {
-                        role = .trainer
-                    } else if id == self.savedHRUUID {
-                        role = .heartRateMonitor
-                    } else if id == self.savedCSCUUID {
-                        role = .cyclingSpeedCadence
-                    } else {
-                        role = .unknown
-                    }
-                    self.peripheralRoles[id] = role
-
-                    switch role {
-                    case .trainer:
-                        self.trainerPeripheral = peripheral
-                        self.trainerConnectionState =
-                            peripheral.state == .connected ? .connected(name) : .connecting(name)
-                        if peripheral.state == .connected {
-                            peripheral.discoverServices([
-                                BLEConstants.ftmsServiceUUID,
-                                BLEConstants.cyclingPowerServiceUUID,
-                                BLEConstants.heartRateServiceUUID,
-                            ])
-                        }
-                    case .heartRateMonitor:
-                        self.hrPeripheral = peripheral
-                        self.hrConnectionState =
-                            peripheral.state == .connected ? .connected(name) : .connecting(name)
-                        if peripheral.state == .connected {
-                            peripheral.discoverServices([BLEConstants.heartRateServiceUUID])
-                        }
-                    case .cyclingSpeedCadence:
-                        self.cscPeripheral = peripheral
-                        self.cscConnectionState =
-                            peripheral.state == .connected ? .connected(name) : .connecting(name)
-                        if peripheral.state == .connected {
-                            peripheral.discoverServices([BLEConstants.cyclingSpeedCadenceServiceUUID])
-                        }
-                    case .unknown:
-                        break
-                    }
+                let role: DeviceType
+                if id == self.savedTrainerUUID {
+                    role = .trainer
+                } else if id == self.savedHRUUID {
+                    role = .heartRateMonitor
+                } else if id == self.savedCSCUUID {
+                    role = .cyclingSpeedCadence
+                } else {
+                    role = .unknown
                 }
+                self.peripheralRoles[id] = role
 
-                self.isScanning = didRestoreScanning
+                switch role {
+                case .trainer:
+                    self.trainerPeripheral = peripheral
+                    self.trainerConnectionState =
+                        peripheral.state == .connected ? .connected(name) : .connecting(name)
+                    if peripheral.state == .connected {
+                        peripheral.discoverServices([
+                            BLEConstants.ftmsServiceUUID,
+                            BLEConstants.cyclingPowerServiceUUID,
+                            BLEConstants.heartRateServiceUUID,
+                        ])
+                    }
+                case .heartRateMonitor:
+                    self.hrPeripheral = peripheral
+                    self.hrConnectionState =
+                        peripheral.state == .connected ? .connected(name) : .connecting(name)
+                    if peripheral.state == .connected {
+                        peripheral.discoverServices([BLEConstants.heartRateServiceUUID])
+                    }
+                case .cyclingSpeedCadence:
+                    self.cscPeripheral = peripheral
+                    self.cscConnectionState =
+                        peripheral.state == .connected ? .connected(name) : .connecting(name)
+                    if peripheral.state == .connected {
+                        peripheral.discoverServices([BLEConstants.cyclingSpeedCadenceServiceUUID])
+                    }
+                case .unknown:
+                    break
+                }
             }
+
+            self.isScanning = didRestoreScanning
         }
     }
 
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         let state = central.state
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.bluetoothState = state
-                if state == .poweredOn {
-                    // Yield one cycle so `sensorLiveRouteScope()` can set gate state before reconnect.
-                    Task { @MainActor [weak self] in
-                        await Task.yield()
-                        guard let self else { return }
-                        guard TrainerSensorLiveObservationGate.isLiveRouteActive else { return }
-                        if !self.trainerConnectionState.isConnected
-                            || !self.hrConnectionState.isConnected
-                            || !self.cscConnectionState.isConnected
-                        {
-                            self.reconnectOrScan()
-                        }
+        hopToMainActorFromCoreBluetooth { `self` in
+            self.bluetoothState = state
+            if state == .poweredOn {
+                // Yield one cycle so `sensorLiveRouteScope()` can set gate state before reconnect.
+                Task { @MainActor [weak self] in
+                    await Task.yield()
+                    guard let self else { return }
+                    guard TrainerSensorLiveObservationGate.isLiveRouteActive else { return }
+                    if !self.trainerConnectionState.isConnected
+                        || !self.hrConnectionState.isConnected
+                        || !self.cscConnectionState.isConnected
+                    {
+                        self.reconnectOrScan()
                     }
-                } else {
-                    self.stopScan()
-                    self.trainerConnectionState = .disconnected
-                    self.hrConnectionState = .disconnected
-                    self.cscConnectionState = .disconnected
-                    self.trainerPeripheral = nil
-                    self.hrPeripheral = nil
-                    self.cscPeripheral = nil
-                    self.peripheralRoles.removeAll()
-                    self.cscCrankState = CSCParser.CrankState()
-                    self.cscWheelState = CSCParser.WheelState()
-                    self.metrics = CyclingMetrics()
                 }
+            } else {
+                self.stopScan()
+                self.trainerConnectionState = .disconnected
+                self.hrConnectionState = .disconnected
+                self.cscConnectionState = .disconnected
+                self.trainerPeripheral = nil
+                self.hrPeripheral = nil
+                self.cscPeripheral = nil
+                self.peripheralRoles.removeAll()
+                self.cscCrankState = CSCParser.CrankState()
+                self.cscWheelState = CSCParser.WheelState()
+                self.metrics = CyclingMetrics()
             }
         }
     }
@@ -1078,30 +1086,27 @@ extension BLEManager: CBCentralManagerDelegate {
         let type = inferDeviceType(advertisementData: advertisementData, peripheralName: name)
 
         let box = SendablePeripheral(value: peripheral)
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let peripheral = box.value
+        hopToMainActorFromCoreBluetooth { `self` in
+            let peripheral = box.value
 
-                if var existing = self.discoveredPeripheralByID[id] {
-                    existing.rssi = rssi
-                    if existing.deviceType == .unknown, type != .unknown {
-                        existing.deviceType = type
-                    }
-                    self.discoveredPeripheralByID[id] = existing
-                } else {
-                    self.discoveredPeripheralByID[id] = DiscoveredPeripheral(
-                        id: id,
-                        peripheral: peripheral,
-                        name: name,
-                        rssi: rssi,
-                        deviceType: type
-                    )
+            if var existing = self.discoveredPeripheralByID[id] {
+                existing.rssi = rssi
+                if existing.deviceType == .unknown, type != .unknown {
+                    existing.deviceType = type
                 }
+                self.discoveredPeripheralByID[id] = existing
+            } else {
+                self.discoveredPeripheralByID[id] = DiscoveredPeripheral(
+                    id: id,
+                    peripheral: peripheral,
+                    name: name,
+                    rssi: rssi,
+                    deviceType: type
+                )
+            }
 
-                if self.peripheralRoles[id] == nil, type != .unknown {
-                    self.peripheralRoles[id] = type
-                }
+            if self.peripheralRoles[id] == nil, type != .unknown {
+                self.peripheralRoles[id] = type
             }
         }
     }
@@ -1111,62 +1116,59 @@ extension BLEManager: CBCentralManagerDelegate {
         didConnect peripheral: CBPeripheral
     ) {
         let box = SendablePeripheral(value: peripheral)
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let peripheral = box.value
+        hopToMainActorFromCoreBluetooth { `self` in
+            let peripheral = box.value
 
-                let name = peripheral.name ?? "Unknown"
-                let role = self.role(for: peripheral)
+            let name = peripheral.name ?? "Unknown"
+            let role = self.role(for: peripheral)
 
-                self.cancelConnectTimeout(for: role)
+            self.cancelConnectTimeout(for: role)
 
-                if role == .trainer && self.isReconnecting {
-                    self.finishReconnect(for: .trainer, success: true)
-                } else if role == .heartRateMonitor {
-                    self.finishReconnect(for: .heartRateMonitor, success: true)
-                }
-
-                switch role {
-                case .trainer:
-                    self.trainerPeripheral = peripheral
-                    self.trainerConnectionState = .connected(name)
-                case .heartRateMonitor:
-                    self.hrPeripheral = peripheral
-                    self.hrConnectionState = .connected(name)
-                case .cyclingSpeedCadence:
-                    self.cscPeripheral = peripheral
-                    self.cscConnectionState = .connected(name)
-                case .unknown:
-                    if self.trainerPeripheral == nil {
-                        self.trainerPeripheral = peripheral
-                        self.peripheralRoles[peripheral.identifier] = .trainer
-                        self.trainerConnectionState = .connected(name)
-                    } else {
-                        self.hrPeripheral = peripheral
-                        self.peripheralRoles[peripheral.identifier] = .heartRateMonitor
-                        self.hrConnectionState = .connected(name)
-                    }
-                }
-
-                peripheral.delegate = self
-                self.startRSSIMonitoring()
-
-                let servicesToDiscover: [CBUUID]
-                switch self.role(for: peripheral) {
-                case .heartRateMonitor:
-                    servicesToDiscover = [BLEConstants.heartRateServiceUUID]
-                case .cyclingSpeedCadence:
-                    servicesToDiscover = [BLEConstants.cyclingSpeedCadenceServiceUUID]
-                case .trainer, .unknown:
-                    servicesToDiscover = [
-                        BLEConstants.ftmsServiceUUID,
-                        BLEConstants.cyclingPowerServiceUUID,
-                        BLEConstants.heartRateServiceUUID,
-                    ]
-                }
-                peripheral.discoverServices(servicesToDiscover)
+            if role == .trainer && self.isReconnecting {
+                self.finishReconnect(for: .trainer, success: true)
+            } else if role == .heartRateMonitor {
+                self.finishReconnect(for: .heartRateMonitor, success: true)
             }
+
+            switch role {
+            case .trainer:
+                self.trainerPeripheral = peripheral
+                self.trainerConnectionState = .connected(name)
+            case .heartRateMonitor:
+                self.hrPeripheral = peripheral
+                self.hrConnectionState = .connected(name)
+            case .cyclingSpeedCadence:
+                self.cscPeripheral = peripheral
+                self.cscConnectionState = .connected(name)
+            case .unknown:
+                if self.trainerPeripheral == nil {
+                    self.trainerPeripheral = peripheral
+                    self.peripheralRoles[peripheral.identifier] = .trainer
+                    self.trainerConnectionState = .connected(name)
+                } else {
+                    self.hrPeripheral = peripheral
+                    self.peripheralRoles[peripheral.identifier] = .heartRateMonitor
+                    self.hrConnectionState = .connected(name)
+                }
+            }
+
+            peripheral.delegate = self
+            self.startRSSIMonitoring()
+
+            let servicesToDiscover: [CBUUID]
+            switch self.role(for: peripheral) {
+            case .heartRateMonitor:
+                servicesToDiscover = [BLEConstants.heartRateServiceUUID]
+            case .cyclingSpeedCadence:
+                servicesToDiscover = [BLEConstants.cyclingSpeedCadenceServiceUUID]
+            case .trainer, .unknown:
+                servicesToDiscover = [
+                    BLEConstants.ftmsServiceUUID,
+                    BLEConstants.cyclingPowerServiceUUID,
+                    BLEConstants.heartRateServiceUUID,
+                ]
+            }
+            peripheral.discoverServices(servicesToDiscover)
         }
     }
 
@@ -1176,108 +1178,105 @@ extension BLEManager: CBCentralManagerDelegate {
         error: Error?
     ) {
         let box = SendablePeripheral(value: peripheral)
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let peripheral = box.value
+        hopToMainActorFromCoreBluetooth { `self` in
+            let peripheral = box.value
 
-                let role = self.role(for: peripheral)
-                self.peripheralRoles.removeValue(forKey: peripheral.identifier)
+            let role = self.role(for: peripheral)
+            self.peripheralRoles.removeValue(forKey: peripheral.identifier)
 
-                if !self.trainerConnectionState.isConnected && !self.hrConnectionState.isConnected && !self.cscConnectionState.isConnected {
+            if !self.trainerConnectionState.isConnected && !self.hrConnectionState.isConnected && !self.cscConnectionState.isConnected {
+                self.stopRSSIMonitoring()
+            }
+
+            switch role {
+            case .trainer:
+                self.reconnectTask?.cancel()
+                self.reconnectTask = nil
+
+                if !self.hrConnectionState.isConnected && !self.cscConnectionState.isConnected {
                     self.stopRSSIMonitoring()
                 }
 
-                switch role {
-                case .trainer:
-                    self.reconnectTask?.cancel()
-                    self.reconnectTask = nil
+                // Attempt reconnect if we were in a live ride (recording or paused).
+                // We use the observation gate as a proxy for "dashboard is active".
+                if TrainerSensorLiveObservationGate.isLiveRouteActive {
+                    self.attemptReconnect(for: .trainer)
+                    return
+                }
 
-                    if !self.hrConnectionState.isConnected && !self.cscConnectionState.isConnected {
-                        self.stopRSSIMonitoring()
+                self.ftmsControl.detach()
+                self.crankState.reset()
+                self.trainerFTMSService = nil
+                self.trainerPeripheral = nil
+                self.trainerConnectionState = .disconnected
+                self.smoothedPower = 0
+                self.powerEMA = 0
+                self.lastPacketReceived = nil
+                self.metrics.power = 0
+                self.metrics.cadence = 0
+                self.metrics.speed = 0
+                self.metrics.totalDistance = 0
+                self.metrics.includesTotalDistanceInPacket = false
+                self.metrics.lastUpdate = nil
+
+                if self.metrics.hrSource != .dedicated {
+                    self.metrics.heartRate = 0
+                    self.metrics.hrSource = .none
+                    self.smoothedHR = 0
+                    self.hrEMA = 0
+                }
+
+            case .heartRateMonitor:
+                // Attempt reconnect if we were in a live ride (recording or paused).
+                if TrainerSensorLiveObservationGate.isLiveRouteActive {
+                    self.attemptReconnect(for: .heartRateMonitor)
+                    return
+                }
+
+                self.hrPeripheral = nil
+                self.hrConnectionState = .disconnected
+
+                if self.metrics.hrSource == .dedicated {
+                    self.metrics.heartRate = 0
+                    self.metrics.hrSource = .none
+                    self.smoothedHR = 0
+                    self.hrEMA = 0
+                }
+
+                if !self.trainerConnectionState.isConnected && !self.cscConnectionState.isConnected {
+                    self.stopRSSIMonitoring()
+                }
+
+            case .cyclingSpeedCadence:
+                self.cscPeripheral = nil
+                self.cscConnectionState = .disconnected
+                self.cscCrankState = CSCParser.CrankState()
+                self.cscWheelState = CSCParser.WheelState()
+                if !self.trainerConnectionState.isConnected {
+                    self.metrics.cadence = 0
+                    if self.metrics.speed > 0 {
+                        self.metrics.speed = 0
                     }
+                }
 
-                    // Attempt reconnect if we were in a live ride (recording or paused).
-                    // We use the observation gate as a proxy for "dashboard is active".
-                    if TrainerSensorLiveObservationGate.isLiveRouteActive {
-                        self.attemptReconnect(for: .trainer)
-                        return
-                    }
+                if !self.trainerConnectionState.isConnected && !self.hrConnectionState.isConnected {
+                    self.stopRSSIMonitoring()
+                }
 
-                    self.ftmsControl.detach()
-                    self.crankState.reset()
-                    self.trainerFTMSService = nil
+            case .unknown:
+                if self.trainerPeripheral?.identifier == peripheral.identifier {
                     self.trainerPeripheral = nil
                     self.trainerConnectionState = .disconnected
-                    self.smoothedPower = 0
-                    self.powerEMA = 0
-                    self.lastPacketReceived = nil
-                    self.metrics.power = 0
-                    self.metrics.cadence = 0
-                    self.metrics.speed = 0
-                    self.metrics.totalDistance = 0
-                    self.metrics.includesTotalDistanceInPacket = false
-                    self.metrics.lastUpdate = nil
-
-                    if self.metrics.hrSource != .dedicated {
-                        self.metrics.heartRate = 0
-                        self.metrics.hrSource = .none
-                        self.smoothedHR = 0
-                        self.hrEMA = 0
-                    }
-
-                case .heartRateMonitor:
-                    // Attempt reconnect if we were in a live ride (recording or paused).
-                    if TrainerSensorLiveObservationGate.isLiveRouteActive {
-                        self.attemptReconnect(for: .heartRateMonitor)
-                        return
-                    }
-
+                }
+                if self.hrPeripheral?.identifier == peripheral.identifier {
                     self.hrPeripheral = nil
                     self.hrConnectionState = .disconnected
-
-                    if self.metrics.hrSource == .dedicated {
-                        self.metrics.heartRate = 0
-                        self.metrics.hrSource = .none
-                        self.smoothedHR = 0
-                        self.hrEMA = 0
-                    }
-
-                    if !self.trainerConnectionState.isConnected && !self.cscConnectionState.isConnected {
-                        self.stopRSSIMonitoring()
-                    }
-
-                case .cyclingSpeedCadence:
+                }
+                if self.cscPeripheral?.identifier == peripheral.identifier {
                     self.cscPeripheral = nil
                     self.cscConnectionState = .disconnected
                     self.cscCrankState = CSCParser.CrankState()
                     self.cscWheelState = CSCParser.WheelState()
-                    if !self.trainerConnectionState.isConnected {
-                        self.metrics.cadence = 0
-                        if self.metrics.speed > 0 {
-                            self.metrics.speed = 0
-                        }
-                    }
-
-                    if !self.trainerConnectionState.isConnected && !self.hrConnectionState.isConnected {
-                        self.stopRSSIMonitoring()
-                    }
-
-                case .unknown:
-                    if self.trainerPeripheral?.identifier == peripheral.identifier {
-                        self.trainerPeripheral = nil
-                        self.trainerConnectionState = .disconnected
-                    }
-                    if self.hrPeripheral?.identifier == peripheral.identifier {
-                        self.hrPeripheral = nil
-                        self.hrConnectionState = .disconnected
-                    }
-                    if self.cscPeripheral?.identifier == peripheral.identifier {
-                        self.cscPeripheral = nil
-                        self.cscConnectionState = .disconnected
-                        self.cscCrankState = CSCParser.CrankState()
-                        self.cscWheelState = CSCParser.WheelState()
-                    }
                 }
             }
         }
@@ -1289,27 +1288,24 @@ extension BLEManager: CBCentralManagerDelegate {
         error: Error?
     ) {
         let box = SendablePeripheral(value: peripheral)
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let peripheral = box.value
+        hopToMainActorFromCoreBluetooth { `self` in
+            let peripheral = box.value
 
-                let role = self.role(for: peripheral)
-                self.peripheralRoles.removeValue(forKey: peripheral.identifier)
+            let role = self.role(for: peripheral)
+            self.peripheralRoles.removeValue(forKey: peripheral.identifier)
 
-                switch role {
-                case .trainer:
-                    self.trainerPeripheral = nil
-                    self.trainerConnectionState = .disconnected
-                case .heartRateMonitor:
-                    self.hrPeripheral = nil
-                    self.hrConnectionState = .disconnected
-                case .cyclingSpeedCadence:
-                    self.cscPeripheral = nil
-                    self.cscConnectionState = .disconnected
-                case .unknown:
-                    break
-                }
+            switch role {
+            case .trainer:
+                self.trainerPeripheral = nil
+                self.trainerConnectionState = .disconnected
+            case .heartRateMonitor:
+                self.hrPeripheral = nil
+                self.hrConnectionState = .disconnected
+            case .cyclingSpeedCadence:
+                self.cscPeripheral = nil
+                self.cscConnectionState = .disconnected
+            case .unknown:
+                break
             }
         }
     }
@@ -1340,16 +1336,13 @@ extension BLEManager: CBPeripheralDelegate {
             if service.uuid == BLEConstants.ftmsServiceUUID {
                 let pBox = SendablePeripheral(value: peripheral)
                 let sBox = SendableService(value: service)
-                DispatchQueue.main.async { [weak self] in
-                    MainActor.assumeIsolated {
-                        guard let self else { return }
-                        let peripheral = pBox.value
-                        let service = sBox.value
-                        let deviceRole = self.role(for: peripheral)
-                        if deviceRole == .trainer || deviceRole == .unknown {
-                            self.trainerFTMSService = service
-                            self.ftmsControl.attach(peripheral: peripheral, service: service)
-                        }
+                hopToMainActorFromCoreBluetooth { `self` in
+                    let peripheral = pBox.value
+                    let service = sBox.value
+                    let deviceRole = self.role(for: peripheral)
+                    if deviceRole == .trainer || deviceRole == .unknown {
+                        self.trainerFTMSService = service
+                        self.ftmsControl.attach(peripheral: peripheral, service: service)
                     }
                 }
             }
@@ -1400,10 +1393,8 @@ extension BLEManager: CBPeripheralDelegate {
                 // Route FTMS control-related characteristics to FTMSControlService
                 if service.uuid == BLEConstants.ftmsServiceUUID {
                     let cBox = SendableCharacteristic(value: characteristic)
-                    DispatchQueue.main.async { [weak self] in
-                        MainActor.assumeIsolated {
-                            self?.ftmsControl.handleDiscoveredCharacteristic(cBox.value)
-                        }
+                    hopToMainActorFromCoreBluetooth { `self` in
+                        self.ftmsControl.handleDiscoveredCharacteristic(cBox.value)
                     }
                 }
 
@@ -1465,29 +1456,25 @@ extension BLEManager: CBPeripheralDelegate {
         print("[BLE] \(characteristic.uuid.uuidString): \(hexStr)")
         #endif
 
-        // Use GCD + assumeIsolated instead of Task { @MainActor in } to avoid
-        // unsafeForcedSync warnings from Swift Concurrency's actor-checking path.
         let box = SendableCharacteristic(value: characteristic)
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let characteristic = box.value
-                let uuid = characteristic.uuid
+        hopToMainActorFromCoreBluetooth { `self` in
+            let characteristic = box.value
+            let uuid = characteristic.uuid
 
-                // Route FTMS control-related value updates to FTMSControlService
-                switch uuid {
-                case BLEConstants.ftmsControlPointUUID,
-                     BLEConstants.ftmsFeatureUUID,
-                     BLEConstants.ftmsSupportedResistanceLevelRangeUUID,
-                     BLEConstants.ftmsStatusUUID:
-                    self.ftmsControl.handleValueUpdate(for: characteristic)
-                    return
-                default:
-                    break
-                }
+            // Route FTMS control-related value updates to FTMSControlService
+            switch uuid {
+            case BLEConstants.ftmsControlPointUUID,
+                 BLEConstants.ftmsFeatureUUID,
+                 BLEConstants.ftmsSupportedResistanceLevelRangeUUID,
+                 BLEConstants.ftmsStatusUUID:
+                self.ftmsControl.handleValueUpdate(for: characteristic)
+                return
+            default:
+                break
+            }
 
-                switch uuid {
-                case BLEConstants.indoorBikeDataUUID:
+            switch uuid {
+            case BLEConstants.indoorBikeDataUUID:
                     if let packet = FTMSParser.parseIndoorBikeDataPacket(data) {
                         let parsed = packet.metrics
                         // `trainerPeripheral != nil` covers connecting + connected (not only `.isConnected`).
@@ -1578,9 +1565,8 @@ extension BLEManager: CBPeripheralDelegate {
                     self.metrics.lastUpdate = .now
                     self.notifySubscribers()
 
-                default:
-                    break
-                }
+            default:
+                break
             }
         }
     }
@@ -1597,17 +1583,14 @@ extension BLEManager: CBPeripheralDelegate {
 
         let rssi = RSSI.intValue
         let peripheralID = peripheral.identifier
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                if peripheralID == self.trainerPeripheral?.identifier {
-                    self.trainerRSSI = rssi
-                    #if DEBUG
-                    bleLogger.debug("Trainer RSSI: \(rssi) dBm (\(self.trainerConnectionQuality.description, privacy: .public))")
-                    #endif
-                } else if peripheralID == self.hrPeripheral?.identifier {
-                    self.hrRSSI = rssi
-                }
+        hopToMainActorFromCoreBluetooth { `self` in
+            if peripheralID == self.trainerPeripheral?.identifier {
+                self.trainerRSSI = rssi
+                #if DEBUG
+                bleLogger.debug("Trainer RSSI: \(rssi) dBm (\(self.trainerConnectionQuality.description, privacy: .public))")
+                #endif
+            } else if peripheralID == self.hrPeripheral?.identifier {
+                self.hrRSSI = rssi
             }
         }
     }

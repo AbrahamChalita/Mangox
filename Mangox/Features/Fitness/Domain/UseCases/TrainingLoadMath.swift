@@ -1,12 +1,12 @@
 // Features/Fitness/Domain/UseCases/TrainingLoadMath.swift
 import Foundation
 
-struct TrainingLoadInput: Sendable, Equatable {
+nonisolated struct TrainingLoadInput: Sendable, Equatable {
     let startDate: Date
     let tss: Double
 }
 
-struct TrainingLoadPoint: Sendable, Equatable {
+nonisolated struct TrainingLoadPoint: Sendable, Equatable {
     let date: Date
     let ctl: Double
     let atl: Double
@@ -17,7 +17,7 @@ struct TrainingLoadPoint: Sendable, Equatable {
 ///
 /// TSB ("form") is a load balance signal: chronic load minus acute load. It is
 /// intentionally separate from morning recovery/readiness signals such as WHOOP.
-enum TrainingLoadMath {
+nonisolated enum TrainingLoadMath {
     static let ctlDays = 42
     static let atlDays = 7
     static let defaultWarmBackDays = 180

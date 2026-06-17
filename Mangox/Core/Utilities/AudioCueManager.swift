@@ -15,7 +15,7 @@ final class AudioCueManager: NSObject, AVSpeechSynthesizerDelegate {
 
     private let synth = AVSpeechSynthesizer()
     private var isEnabled: Bool { RidePreferences.shared.stepAudioCueEnabled }
-    private nonisolated(unsafe) var audioSessionObservers: [NotificationCenter.ObservationToken] = []
+    private nonisolated(unsafe) var audioSessionObservers: [NSObjectProtocol] = []
 
     private override init() {
         super.init()
@@ -115,30 +115,31 @@ final class AudioCueManager: NSObject, AVSpeechSynthesizerDelegate {
         let session = AVAudioSession.sharedInstance()
         audioSessionObservers = [
             NotificationCenter.default.addObserver(
-                of: session,
-                for: AVAudioSession.DidBecomeInactiveMessage.self
-            ) { [weak self] _ in
-                self?.handleAudioSessionDidBecomeInactive()
-            },
-            NotificationCenter.default.addObserver(
-                of: session,
-                for: AVAudioSession.ResumptionRecommendationMessage.self
-            ) { [weak self] _ in
-                self?.handleAudioSessionResumptionRecommendation()
+                forName: AVAudioSession.interruptionNotification,
+                object: session,
+                queue: .main
+            ) { [weak self] notification in
+                guard
+                    let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+                else { return }
+                let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+                Task { @MainActor [weak self] in
+                    self?.handleAudioSessionInterruption(typeRawValue: rawType, optionRawValue: rawOptions)
+                }
             },
         ]
     }
 
-    private func handleAudioSessionDidBecomeInactive() {
-        if synth.isSpeaking {
-            synth.pauseSpeaking(at: .immediate)
-        }
-    }
-
-    private func handleAudioSessionResumptionRecommendation() {
-        if synth.isPaused {
-            configureAudioSessionIfNeeded()
-            synth.continueSpeaking()
+    private func handleAudioSessionInterruption(typeRawValue: UInt, optionRawValue: UInt) {
+        if typeRawValue == 1 { // began
+            if synth.isSpeaking {
+                synth.pauseSpeaking(at: .immediate)
+            }
+        } else if typeRawValue == 0 { // ended
+            if (optionRawValue & 1) != 0, synth.isPaused { // shouldResume
+                configureAudioSessionIfNeeded()
+                synth.continueSpeaking()
+            }
         }
     }
 }

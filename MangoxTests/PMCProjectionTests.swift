@@ -8,11 +8,11 @@ final class PMCProjectionTests: XCTestCase {
         let result = PMCProjection.project(
             currentCTL: 45,
             currentATL: 30,
-            dailyTSS: Array(repeating: 0.0, count: 30)
+            dailyTSS: Array(repeating: 0.0, count: 90)
         )
 
-        XCTAssertEqual(result.count, 30)
-        // After many zero days, both should be very low
+        XCTAssertEqual(result.count, 90)
+        // CTL uses a 42-day EMA, so decay is deliberately slower than ATL.
         let last = result.last!
         XCTAssertLessThan(last.ctl, 5.0)
         XCTAssertLessThan(last.atl, 2.0)
@@ -29,12 +29,13 @@ final class PMCProjectionTests: XCTestCase {
         )
 
         let last = projection.last!
-        // At equilibrium, CTL ≈ weeklyTSS (for 42-day with this alpha)
-        // ATL ≈ weeklyTSS / 6 (7-day window)
-        XCTAssertGreaterThan(last.ctl, 55)
-        XCTAssertLessThan(last.ctl, 75)
-        XCTAssertGreaterThan(last.atl, 30)
-        XCTAssertLessThan(last.atl, 50)
+        let daily = 400.0 / 7.0
+        XCTAssertEqual(last.ctl, expectedEMA(start: 40, target: daily, alpha: 2.0 / 43.0, days: 56), accuracy: 0.001)
+        XCTAssertEqual(last.atl, expectedEMA(start: 35, target: daily, alpha: 2.0 / 8.0, days: 56), accuracy: 0.001)
+        XCTAssertGreaterThan(last.ctl, 54)
+        XCTAssertLessThan(last.ctl, 58)
+        XCTAssertGreaterThan(last.atl, 56)
+        XCTAssertLessThan(last.atl, 58)
     }
 
     func testProjectionUsesSameAlphaFormulaAsFitnessTracker() {
@@ -81,5 +82,13 @@ final class PMCProjectionTests: XCTestCase {
         )
         XCTAssertGreaterThanOrEqual(result[0].appliedTSS, 0)
         XCTAssertGreaterThanOrEqual(result[1].appliedTSS, 0)
+    }
+
+    private func expectedEMA(start: Double, target: Double, alpha: Double, days: Int) -> Double {
+        var value = start
+        for _ in 0..<days {
+            value = value + alpha * (target - value)
+        }
+        return value
     }
 }

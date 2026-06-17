@@ -272,12 +272,12 @@ final class StravaService: StravaServiceProtocol {
         !clientID.isEmpty && !redirectURIString.isEmpty && OAuthTokenExchangeClient.isAvailable
     }
 
-    private static let authorizeURL = URL(string: "https://www.strava.com/oauth/authorize")!
+    nonisolated private static let authorizeURL = URL(string: "https://www.strava.com/oauth/authorize")!
     /// Strava API v3 base (migrated host per Strava 2027 deadline). OAuth stays on www.strava.com.
-    static let apiBase = URL(string: "https://www.api-v3.strava.com")!
-    private static let uploadURL = apiBase.appending(path: "uploads")
-    private static let athleteURL = apiBase.appending(path: "athlete")
-    static let athleteActivitiesURL = apiBase.appending(path: "athlete/activities")
+    nonisolated static let apiBase = URL(string: "https://www.api-v3.strava.com")!
+    nonisolated private static let uploadURL = apiBase.appending(path: "uploads")
+    nonisolated private static let athleteURL = apiBase.appending(path: "athlete")
+    nonisolated static let athleteActivitiesURL = apiBase.appending(path: "athlete/activities")
     private static let keychainAccount = "strava.session.v1"
     private static let localSavedAtKey = "mangox.linked_oauth.strava.saved_at"
 
@@ -1204,4 +1204,3 @@ private final class WebAuthenticationPresentationContextProvider: NSObject, ASWe
         #endif
     }
 }
-

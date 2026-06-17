@@ -290,7 +290,9 @@ struct CalendarView: View {
             byDay[day] = items.sorted { $0.startDate > $1.startDate }
         }
         workoutsByDayStart = byDay
-        workoutsGroupedByDay = byDay.keys.sorted(by: >).map { day in (day, byDay[day]!) }
+        workoutsGroupedByDay = byDay.keys
+            .sorted(by: >)
+            .compactMap { day in byDay[day].map { (day, $0) } }
         recomputeFilteredWorkoutGroups()
     }
 

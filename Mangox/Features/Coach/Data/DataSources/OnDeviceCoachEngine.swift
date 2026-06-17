@@ -38,27 +38,6 @@ nonisolated enum CoachRouteKind: String, Equatable {
     case cloudCoach
 }
 
-extension CoachRouteKind: Generable {
-    nonisolated static var generationSchema: GenerationSchema {
-        GenerationSchema(type: Self.self, anyOf: [localNarrowReply, pccCoach, cloudCoach].map(\.rawValue))
-    }
-
-    nonisolated init(_ content: GeneratedContent) throws {
-        let rawValue = try content.value(String.self)
-        guard let value = Self(rawValue: rawValue) else {
-            throw GeneratedContent.ParsingError(
-                rawContent: content.jsonString,
-                debugDescription: "Unexpected rawValue \"\(rawValue)\" for \(Self.self)"
-            )
-        }
-        self = value
-    }
-
-    nonisolated var generatedContent: GeneratedContent {
-        GeneratedContent(rawValue)
-    }
-}
-
 @Generable
 struct CoachRouteDecision: Equatable {
     @Guide(description: "One short internal sentence; not shown in the UI.")
@@ -68,7 +47,7 @@ struct CoachRouteDecision: Equatable {
         description:
             "localNarrowReply for short stats from the fact sheet. pccCoach for plans, web search, periodization, multi-turn coaching, or deep training analysis. cloudCoach only when PCC is inappropriate."
     )
-    var route: CoachRouteKind
+    var route: String
 }
 
 // MARK: - Guided generation: narrow reply
@@ -396,7 +375,7 @@ enum OnDeviceCoachEngine {
     /// Prewarms the default PCC coach profile so the first deep-coaching turn is faster.
     static func prewarmPCCCoachIfAvailable() {
         guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return }
-        guard PrivateCloudComputeLanguageModel().supportsLocale(Locale.current) else { return }
+        guard MangoxFoundationModelsSupport.privateCloudComputeSupportsCurrentLocale() else { return }
         Task.detached(priority: .utility) { @MainActor in
             let session = makePCCCoachSession(mode: .generalCoach, tools: [])
             session.prewarm(promptPrefix: nil)
@@ -459,7 +438,7 @@ enum OnDeviceCoachEngine {
                 options: MangoxFoundationModelsSupport.greedyGenerationOptions, label: "route")
             logTranscript(session, label: "route")
             MangoxFoundationModelsSupport.logTranscriptEntries(session, label: "route")
-            return decision.content.route
+            return CoachRouteKind(rawValue: decision.content.route) ?? .pccCoach
         } catch {
             MangoxFoundationModelsSupport.logGenerationFailure(error, label: "coach_route")
             throw error
@@ -561,7 +540,7 @@ enum OnDeviceCoachEngine {
         onPartial: (NarrowCoachReply.PartiallyGenerated) async -> Void
     ) async throws -> NarrowCoachReply? {
         guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return nil }
-        guard PrivateCloudComputeLanguageModel().supportsLocale(Locale.current) else { return nil }
+        guard MangoxFoundationModelsSupport.privateCloudComputeSupportsCurrentLocale() else { return nil }
         return try await streamGuidedCoachReply(
             userMessage: userMessage,
             trainingSnapshot: trainingSnapshot,
@@ -1332,15 +1311,13 @@ extension AIService {
         rides: [Workout],
         limit: Int = 20
     ) -> String {
-        let df = DateFormatter()
-        df.dateStyle = .medium
-        df.timeStyle = .none
         let slice = rides.prefix(limit)
         if slice.isEmpty { return "No completed rides on file." }
 
         return slice.map { ride in
+            let dateString = ride.startDate.formatted(.dateTime.year().month(.abbreviated).day())
             var line =
-                "\(df.string(from: ride.startDate)): TSS \(Int(ride.tss)), \(Int(ride.duration / 60))min"
+                "\(dateString): TSS \(Int(ride.tss)), \(Int(ride.duration / 60))min"
             if ride.avgPower > 0 {
                 line += ", \(Int(ride.avgPower))W avg"
             }
@@ -1382,11 +1359,10 @@ extension AIService {
             .sorted { $0.date > $1.date }
             .prefix(limit)
         if rows.isEmpty { return "No FTP test history stored." }
-        let df = DateFormatter()
-        df.dateStyle = .medium
         return rows.map { r in
             let applied = r.applied ? "applied" : "not applied"
-            return "\(df.string(from: r.date)): \(r.estimatedFTP)W est (\(applied))"
+            let dateString = r.date.formatted(.dateTime.year().month(.abbreviated).day())
+            return "\(dateString): \(r.estimatedFTP)W est (\(applied))"
         }.joined(separator: "\n")
     }
 
@@ -1477,9 +1453,6 @@ extension AIService {
             }
 
         let trend = AerobicDecouplingTrend.analyze(rides: samples)
-        let df = DateFormatter()
-        df.dateStyle = .medium
-        df.timeStyle = .none
 
         var lines: [String] = [
             trend.plainLanguageSummary,
@@ -1491,10 +1464,11 @@ extension AIService {
         } else {
             lines.append("Per-ride decoupling (oldest → newest):")
             for sample in samples {
+                let dateString = sample.date.formatted(.dateTime.year().month(.abbreviated).day())
                 lines.append(
                     String(
                         format: "%@: %.1f%% (%@)",
-                        df.string(from: sample.date),
+                        dateString,
                         sample.decouplingPercent,
                         sample.status.rawValue
                     )

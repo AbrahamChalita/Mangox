@@ -42,7 +42,6 @@ enum MangoxCoachSearchHeuristics {
 
 // MARK: - PCC model factory (web-search extension when SDK exposes it)
 
-@available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
 enum MangoxPrivateCloudComputeModelFactory {
 
     /// Set to `true` once `PrivateCloudComputeLanguageModel.Extension.webSearch` ships in the public SDK.
@@ -52,15 +51,9 @@ enum MangoxPrivateCloudComputeModelFactory {
     /// When false, web-search turns must use Mangox Cloud (PCC cannot ground live results yet).
     nonisolated static var isLiveWebSearchAvailable: Bool { sdkExposesWebSearchExtension }
 
-    static func coachModel(enableWebSearch: Bool) -> PrivateCloudComputeLanguageModel {
-        guard enableWebSearch, sdkExposesWebSearchExtension else {
-            return PrivateCloudComputeLanguageModel()
-        }
-        // When Apple exposes the API in a future Xcode beta, enable:
-        // return PrivateCloudComputeLanguageModel(
-        //     extensions: [PrivateCloudComputeLanguageModel.Extension.webSearch(resultLocale: Locale.current)]
-        // )
-        return PrivateCloudComputeLanguageModel()
+    static func coachModel(enableWebSearch: Bool) -> SystemLanguageModel {
+        _ = enableWebSearch
+        return MangoxFoundationModelsSupport.coachSystemLanguageModel()
     }
 }
 

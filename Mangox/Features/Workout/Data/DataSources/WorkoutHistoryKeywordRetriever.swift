@@ -21,14 +21,11 @@ enum WorkoutHistoryKeywordRetriever {
         )
         let rides = ((try? modelContext.fetch(descriptor)) ?? []).filter(\.isValid).prefix(72)
 
-        let df = DateFormatter()
-        df.dateStyle = .medium
-        df.timeStyle = .none
-
         var scored: [(Int, String)] = []
         for ride in rides {
+            let dateString = ride.startDate.formatted(.dateTime.year().month(.abbreviated).day())
             var line =
-                "\(df.string(from: ride.startDate)): TSS \(Int(ride.tss)), \(Int(ride.duration / 60))min"
+                "\(dateString): TSS \(Int(ride.tss)), \(Int(ride.duration / 60))min"
             if ride.avgPower > 0 {
                 line += ", \(Int(ride.avgPower))W avg"
             }

@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import Supabase
 import SwiftData
+import os.log
 
 /// One unit of bidirectional sync — a Postgres table backed by a SwiftData model.
 ///
@@ -28,6 +29,11 @@ extension SupabaseSyncDomain {
 @MainActor
 @Observable
 final class SyncCoordinator {
+    private nonisolated static let logger = Logger(
+        subsystem: "com.abchalita.Mangox",
+        category: "SupabaseSync"
+    )
+
     enum SyncState: Equatable {
         case idle
         case running
@@ -90,7 +96,9 @@ final class SyncCoordinator {
             } catch {
                 firstError = firstError ?? error
                 #if DEBUG
-                print("[Sync] push failed: \(domain.name) — \(error)")
+                Self.logger.debug(
+                    "Push failed for \(domain.name, privacy: .public): \(error.localizedDescription, privacy: .private)"
+                )
                 #endif
             }
         }
@@ -110,7 +118,9 @@ final class SyncCoordinator {
             } catch {
                 firstError = firstError ?? error
                 #if DEBUG
-                print("[Sync] pull failed: \(domain.name) — \(error)")
+                Self.logger.debug(
+                    "Pull failed for \(domain.name, privacy: .public): \(error.localizedDescription, privacy: .private)"
+                )
                 #endif
             }
         }

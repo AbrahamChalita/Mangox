@@ -1444,7 +1444,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 failedPath: .privateCloudCompute
             )
             resetStreamingState(clearLoading: true)
-            PrivateCloudComputeLanguageModel().quotaUsage.limitIncreaseSuggestion?.show()
+            MangoxPCCSupport.presentQuotaLimitIncreaseIfAvailable(from: OnDevicePlanGeneratorError.quotaLimitReached(quotaMessage))
             skipLocalCoachForNextTurn = false
             return
         }
@@ -1652,7 +1652,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
         modelContext: ModelContext
     ) async -> Bool {
         guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return false }
-        guard PrivateCloudComputeLanguageModel().supportsLocale(Locale.current) else { return false }
+        guard MangoxFoundationModelsSupport.privateCloudComputeSupportsCurrentLocale() else { return false }
 
         let mode = CoachAgentMode.detect(userMessage: userText, planIntake: planIntake)
         let webSearchTurn = mode.enablesPCCWebSearch

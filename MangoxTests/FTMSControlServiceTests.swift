@@ -5,7 +5,7 @@ import Foundation
 @MainActor
 struct FTMSControlServiceTests {
 
-    @Test func mismatchedOpCodeDoesNotResumePendingContinuation() async {
+    @Test func mismatchedOpCodeDoesNotResumePendingContinuation() async throws {
         let service = FTMSControlService()
         var resumed = false
 
@@ -14,6 +14,7 @@ struct FTMSControlServiceTests {
                 service.setPendingForTesting(opCode: .setTargetPower, continuation: continuation)
             }
         }
+        await Task.yield()
 
         // Stale response for a different op code (requestControl).
         service.parseControlPointResponseForTesting(Data([0x80, FTMSOpCode.requestControl.rawValue, FTMSResultCode.success.rawValue]))
@@ -38,6 +39,7 @@ struct FTMSControlServiceTests {
                 service.setPendingForTesting(opCode: .reset, continuation: continuation)
             }
         }
+        await Task.yield()
 
         service.parseControlPointResponseForTesting(Data([0x80, FTMSOpCode.reset.rawValue, FTMSResultCode.operationFailed.rawValue]))
 

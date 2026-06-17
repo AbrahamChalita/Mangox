@@ -1,5 +1,6 @@
 import Foundation
 import Supabase
+import os.log
 
 /// Lazy singleton wrapping the Supabase client.
 ///
@@ -7,6 +8,11 @@ import Supabase
 /// (populated from `Config/App.xcconfig`). If either is missing the client is
 /// `nil` and the app behaves as fully-local — sync paths short-circuit safely.
 enum MangoxSupabase {
+    private static let logger = Logger(
+        subsystem: "com.abchalita.Mangox",
+        category: "Supabase"
+    )
+
     static let shared: SupabaseClient? = {
         guard
             let host = infoString("SUPABASE_URL_HOST"),
@@ -14,7 +20,7 @@ enum MangoxSupabase {
             let url  = URL(string: "https://\(host)")
         else {
             #if DEBUG
-            print("[MangoxSupabase] Disabled: SUPABASE_URL_HOST / SUPABASE_PUBLISHABLE_KEY missing.")
+            logger.debug("Disabled: SUPABASE_URL_HOST / SUPABASE_PUBLISHABLE_KEY missing.")
             #endif
             return nil
         }

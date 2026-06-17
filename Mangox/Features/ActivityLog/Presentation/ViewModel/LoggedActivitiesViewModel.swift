@@ -39,6 +39,11 @@ final class LoggedActivitiesViewModel {
 
     private static let staleKey = "mangox.activityLog.lastImport"
     private static let staleDuration: TimeInterval = 4 * 60 * 60
+    private static let weekRangeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
 
     var whoopConnected: Bool { whoopConnectedProvider() }
     var stravaConnected: Bool { stravaConnectedProvider() }
@@ -287,9 +292,7 @@ final class LoggedActivitiesViewModel {
         if calendar.isDate(weekStart, equalTo: lastWeek, toGranularity: .weekOfYear) {
             return "Last Week"
         }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "MMM d"
         let end = calendar.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
-        return "\(fmt.string(from: weekStart)) – \(fmt.string(from: end))"
+        return "\(weekRangeFormatter.string(from: weekStart)) – \(weekRangeFormatter.string(from: end))"
     }
 }

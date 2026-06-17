@@ -139,10 +139,8 @@ enum CoachContextBuilder {
                 if !ride.notes.isEmpty {
                     parts.append("notes: \(ride.notes.prefix(40))")
                 }
-                let formatter = DateFormatter()
-                formatter.dateStyle = .medium
-                formatter.timeStyle = .none
-                return "\(formatter.string(from: ride.startDate)): \(parts.joined(separator: " · "))"
+                let dateString = ride.startDate.formatted(.dateTime.year().month(.abbreviated).day())
+                return "\(dateString): \(parts.joined(separator: " · "))"
             }
             .joined(separator: "\n")
 

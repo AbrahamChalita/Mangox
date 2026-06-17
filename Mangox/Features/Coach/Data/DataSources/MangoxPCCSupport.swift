@@ -12,31 +12,11 @@ enum MangoxPCCSupport {
         let settingsMessage: String?
     }
 
-    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
     static func availabilityDetail() -> AvailabilityDetail {
-        let model = PrivateCloudComputeLanguageModel()
-        switch model.availability {
-        case .available:
-            return AvailabilityDetail(isReady: true, settingsMessage: nil)
-        case .unavailable(let reason):
-            switch reason {
-            case .deviceNotEligible:
-                return AvailabilityDetail(
-                    isReady: false,
-                    settingsMessage: "This device does not support Apple Intelligence or Private Cloud Compute."
-                )
-            case .systemNotReady:
-                return AvailabilityDetail(
-                    isReady: false,
-                    settingsMessage: "Turn on Apple Intelligence in Settings and connect to the internet to use Private Cloud."
-                )
-            @unknown default:
-                return AvailabilityDetail(
-                    isReady: false,
-                    settingsMessage: "Private Cloud Compute is not available on this device."
-                )
-            }
-        }
+        AvailabilityDetail(
+            isReady: false,
+            settingsMessage: "Private Cloud Compute is not available in this FoundationModels SDK."
+        )
     }
 
     static var settingsAvailabilityLine: String {
@@ -56,32 +36,8 @@ enum MangoxPCCSupport {
         let settingsSummary: String
     }
 
-    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
     static func quotaSnapshot() -> QuotaSnapshot? {
-        guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return nil }
-        let usage = PrivateCloudComputeLanguageModel().quotaUsage
-        let approaching: Bool = {
-            if case .belowLimit(let below) = usage.status { return below.isApproachingLimit }
-            return false
-        }()
-        let summary: String
-        if usage.isLimitReached {
-            if let reset = usage.resetDate {
-                summary = "Private Cloud daily limit reached — resets \(Self.shortResetLabel(reset))."
-            } else {
-                summary = "Private Cloud daily limit reached for today."
-            }
-        } else if approaching {
-            summary = "Private Cloud usage is high today; heavy tasks like plan generation may hit the limit."
-        } else {
-            summary = "Private Cloud quota available."
-        }
-        return QuotaSnapshot(
-            isLimitReached: usage.isLimitReached,
-            isApproachingLimit: approaching,
-            resetDate: usage.resetDate,
-            settingsSummary: summary
-        )
+        nil
     }
 
     /// Blocks coach PCC turns when quota is exhausted.
@@ -99,21 +55,13 @@ enum MangoxPCCSupport {
         )
     }
 
-    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
     static func presentQuotaLimitIncreaseIfAvailable(from error: Error) {
-        guard case .quotaLimitReached(let detail) = error as? PrivateCloudComputeLanguageModel.Error else {
-            if let snap = quotaSnapshot(), snap.isLimitReached {
-                PrivateCloudComputeLanguageModel().quotaUsage.limitIncreaseSuggestion?.show()
-            }
-            return
-        }
-        detail.limitIncreaseSuggestion?.show()
+        _ = error
     }
 
     // MARK: - Errors
 
     static func isNetworkFailure(_ error: Error) -> Bool {
-        if case .networkFailure = error as? PrivateCloudComputeLanguageModel.Error { return true }
         if let urlErr = error as? URLError {
             switch urlErr.code {
             case .notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost,
@@ -141,17 +89,6 @@ enum MangoxPCCSupport {
         ]
         if failureMarkers.contains(where: { message.contains($0) }) { return true }
 
-        if error is LanguageModelError { return true }
-        if error is LanguageModelSession.Error { return true }
-        if let pcc = error as? PrivateCloudComputeLanguageModel.Error {
-            switch pcc {
-            case .networkFailure, .quotaLimitReached:
-                return false
-            default:
-                return true
-            }
-        }
-
         let ns = error as NSError
         if ns.domain.localizedCaseInsensitiveContains("foundationmodels")
             || ns.domain.localizedCaseInsensitiveContains("generativemodels")
@@ -168,16 +105,12 @@ enum MangoxPCCSupport {
 
     static func isQuotaLimitReached(_ error: Error) -> Bool {
         if let planErr = error as? OnDevicePlanGeneratorError, case .quotaLimitReached = planErr { return true }
-        if case .quotaLimitReached = error as? PrivateCloudComputeLanguageModel.Error { return true }
         return false
     }
 
     static func userFacingMessage(for error: Error) -> String? {
         if isQuotaLimitReached(error) {
             if let planErr = error as? OnDevicePlanGeneratorError { return planErr.localizedDescription }
-            if case .quotaLimitReached(let detail) = error as? PrivateCloudComputeLanguageModel.Error {
-                return coachQuotaUserMessage(resetDate: detail.resetDate)
-            }
             return coachQuotaUserMessage(resetDate: quotaSnapshot()?.resetDate)
         }
         if isNetworkFailure(error) {
@@ -196,14 +129,8 @@ enum MangoxPCCSupport {
         usePrivateCloudCompute ? 8_000 : 1_900
     }
 
-    @available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
     static func contextWindowTokens() async -> Int {
-        let model = PrivateCloudComputeLanguageModel()
-        do {
-            return try await model.contextSize
-        } catch {
-            return 32_768
-        }
+        32_768
     }
 
     // MARK: - Private

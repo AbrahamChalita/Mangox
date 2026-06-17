@@ -1,10 +1,9 @@
 import Foundation
 import FoundationModels
 
-// MARK: - Coach agent modes (iOS 27 Dynamic Profiles)
+// MARK: - Coach agent modes
 
 /// Per-turn coach behavior: on-device stats, PCC plan design, or PCC general coaching.
-@available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
 enum CoachAgentMode: Equatable, Sendable {
     case statsNarrow
     case planDeep
@@ -38,7 +37,6 @@ enum CoachAgentMode: Equatable, Sendable {
     }
 }
 
-@available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
 enum CoachDynamicProfiles {
 
     static func makeSession(
@@ -46,8 +44,25 @@ enum CoachDynamicProfiles {
         tools: [any Tool],
         history: [Transcript.Entry] = []
     ) -> LanguageModelSession {
-        let profile = MangoxCoachAgentProfile(mode: mode, tools: tools)
-        return LanguageModelSession(profile: profile, history: history)
+        // The local SDK exposes the iOS 26 FoundationModels session API, not the
+        // iOS 27 DynamicProfile/PCC surface. Keep the public factory so higher
+        // layers remain stable, but fall back to explicit session construction.
+        let instructions: Instructions
+        switch mode {
+        case .statsNarrow:
+            instructions = Instructions(OnDeviceCoachEngine.narrowCoachInstructions)
+        case .planDeep:
+            instructions = Instructions(pccCoachInstructions(planIntake: true))
+        case .generalCoach:
+            instructions = Instructions(pccCoachInstructions(planIntake: false))
+        case .pccWebSearch:
+            instructions = Instructions(pccWebSearchInstructions())
+        }
+        return LanguageModelSession(
+            model: MangoxFoundationModelsSupport.coachSystemLanguageModel(),
+            tools: tools,
+            instructions: instructions
+        )
     }
 
     static func pccWebSearchInstructions() -> String {
@@ -86,75 +101,5 @@ enum CoachDynamicProfiles {
         Set `category` and 1-3 `tags` for the main topics.
         Fill `reasoning` first, then `body`, then optional `followUp`, `suggestedActions`, `tags`, and `category`.
         """
-    }
-}
-
-@available(iOS 27.0, macOS 27.0, visionOS 27.0, *)
-private struct MangoxCoachAgentProfile: LanguageModelSession.DynamicProfile {
-    let mode: CoachAgentMode
-    let tools: [any Tool]
-
-    @LanguageModelSession.DynamicProfileBuilder
-    var body: some LanguageModelSession.DynamicProfile {
-        switch mode {
-        case .statsNarrow:
-            statsNarrowProfile
-        case .planDeep:
-            planDeepProfile
-        case .generalCoach:
-            generalCoachProfile
-        case .pccWebSearch:
-            pccWebSearchProfile
-        }
-    }
-
-    private var statsNarrowProfile: some LanguageModelSession.DynamicProfile {
-        LanguageModelSession.Profile {
-            Instructions(OnDeviceCoachEngine.narrowCoachInstructions)
-            tools
-        }
-        .model(MangoxFoundationModelsSupport.coachSystemLanguageModel())
-        .samplingMode(.greedy)
-        .toolCallingMode(.allowed)
-        .mangoxCoachInstrumentation(mode: .statsNarrow)
-    }
-
-    private var planDeepProfile: some LanguageModelSession.DynamicProfile {
-        LanguageModelSession.Profile {
-            Instructions(CoachDynamicProfiles.pccCoachInstructions(planIntake: true))
-            tools
-        }
-        .model(MangoxPrivateCloudComputeModelFactory.coachModel(enableWebSearch: false))
-        .samplingMode(.greedy)
-        .reasoningLevel(.deep)
-        .toolCallingMode(.allowed)
-        .historyTransform(MangoxFoundationModelsSupport.coachHistoryTransform)
-        .mangoxCoachInstrumentation(mode: .planDeep)
-    }
-
-    private var generalCoachProfile: some LanguageModelSession.DynamicProfile {
-        LanguageModelSession.Profile {
-            Instructions(CoachDynamicProfiles.pccCoachInstructions(planIntake: false))
-            tools
-        }
-        .model(MangoxPrivateCloudComputeModelFactory.coachModel(enableWebSearch: false))
-        .samplingMode(.greedy)
-        .reasoningLevel(.moderate)
-        .toolCallingMode(.allowed)
-        .historyTransform(MangoxFoundationModelsSupport.coachHistoryTransform)
-        .mangoxCoachInstrumentation(mode: .generalCoach)
-    }
-
-    private var pccWebSearchProfile: some LanguageModelSession.DynamicProfile {
-        LanguageModelSession.Profile {
-            Instructions(CoachDynamicProfiles.pccWebSearchInstructions())
-            tools
-        }
-        .model(MangoxPrivateCloudComputeModelFactory.coachModel(enableWebSearch: true))
-        .samplingMode(.greedy)
-        .reasoningLevel(.deep)
-        .toolCallingMode(.allowed)
-        .historyTransform(MangoxFoundationModelsSupport.coachHistoryTransform)
-        .mangoxCoachInstrumentation(mode: .pccWebSearch)
     }
 }

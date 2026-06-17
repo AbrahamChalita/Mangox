@@ -751,7 +751,10 @@ struct OutdoorDashboardView: View {
                     .padding(.horizontal, 28)
 
                     Button {
-                        UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
+                        guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else {
+                            return
+                        }
+                        UIApplication.shared.open(settingsURL)
                     } label: {
                         Text("Open Settings")
                             .font(.system(size: 16, weight: .bold))
