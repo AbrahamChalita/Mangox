@@ -87,52 +87,15 @@ final class FitnessViewModel {
             return
         }
 
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        guard let startDate = cal.date(byAdding: .day, value: -rangeDays, to: today)
-        else { return }
-        guard let warmStart = cal.date(byAdding: .day, value: -Self.pmcWarmBackDays, to: startDate)
-        else { return }
-
-        var tssByDay: [Date: Double] = [:]
-        for workout in pmcWorkouts {
-            let day = cal.startOfDay(for: workout.startDate)
-            if day < warmStart || day > today { continue }
-            tssByDay[day, default: 0] += workout.tss
-        }
-        for activity in loggedActivities {
-            let day = cal.startOfDay(for: activity.startDate)
-            if day < warmStart || day > today { continue }
-            tssByDay[day, default: 0] += activity.tss
-        }
-
-        let ctlConstant = 42.0
-        let atlConstant = 7.0
-        var ctl = 0.0
-        var atl = 0.0
-
-        var points: [PMCPoint] = []
-        var currentDate = warmStart
-
-        while currentDate <= today {
-            let dayTSS = tssByDay[currentDate] ?? 0
-            ctl = ctl + (dayTSS - ctl) / ctlConstant
-            atl = atl + (dayTSS - atl) / atlConstant
-
-            if currentDate >= startDate {
-                points.append(
-                    PMCPoint(
-                        date: currentDate,
-                        ctl: ctl,
-                        atl: atl,
-                        tsb: ctl - atl
-                    ))
-            }
-
-            currentDate = cal.date(byAdding: .day, value: 1, to: currentDate)!
-        }
-
-        pmcData = points
+        let workoutInputs = pmcWorkouts.map { TrainingLoadInput(startDate: $0.startDate, tss: $0.tss) }
+        let activityInputs = loggedActivities.map { TrainingLoadInput(startDate: $0.startDate, tss: $0.tss) }
+        pmcData = TrainingLoadMath
+            .buildPoints(
+                inputs: workoutInputs + activityInputs,
+                rangeDays: rangeDays,
+                warmBackDays: Self.pmcWarmBackDays
+            )
+            .map { PMCPoint(date: $0.date, ctl: $0.ctl, atl: $0.atl, tsb: $0.tsb) }
     }
 
     // MARK: - Power curve

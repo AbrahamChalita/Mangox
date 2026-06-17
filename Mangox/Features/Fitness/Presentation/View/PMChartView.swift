@@ -61,7 +61,8 @@ struct PMChartView: View {
 
     @MainActor
     private func rebuildWorkoutSnapshotCaches() {
-        pmcWorkoutSnapshotCache = allWorkouts.map { WorkoutMetricsSnapshot(pmcFieldsFrom: $0) }
+        let completedWorkouts = allWorkouts.filter { $0.status == .completed && $0.isValid }
+        pmcWorkoutSnapshotCache = completedWorkouts.map { WorkoutMetricsSnapshot(pmcFieldsFrom: $0) }
         rebuildPowerCurveSnapshotCache()
         rebuildLoggedActivitySnapshotCache()
     }
@@ -84,8 +85,9 @@ struct PMChartView: View {
 
     @MainActor
     private func rebuildPowerCurveSnapshotCache() {
+        let completedWorkouts = allWorkouts.filter { $0.status == .completed && $0.isValid }
         powerCurveSnapshotCache = WorkoutMetricsSnapshot.powerCurveCandidates(
-            from: allWorkouts,
+            from: completedWorkouts,
             rangeDays: viewModel.rangeDays
         )
     }

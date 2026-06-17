@@ -429,10 +429,7 @@ struct CalendarView: View {
                                     Button {
                                         navigationPath.append(AppRoute.summary(workoutID: workout.id))
                                     } label: {
-                                        WorkoutRowView(
-                                            workout: workout,
-                                            trainingPlanLookupService: di.trainingPlanLookupService
-                                        )
+                                        workoutHistoryRow(workout)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -463,10 +460,7 @@ struct CalendarView: View {
                                     Button {
                                         navigationPath.append(AppRoute.summary(workoutID: workout.id))
                                     } label: {
-                                        WorkoutRowView(
-                                            workout: workout,
-                                            trainingPlanLookupService: di.trainingPlanLookupService
-                                        )
+                                        workoutHistoryRow(workout)
                                     }
                                     .buttonStyle(.plain)
                                     .padding(.bottom, 8)
@@ -480,6 +474,18 @@ struct CalendarView: View {
                     .padding(.bottom, 24)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func workoutHistoryRow(_ workout: Workout) -> some View {
+        if workout.isImported {
+            ExternalWorkoutCard(workout: workout)
+        } else {
+            WorkoutRowView(
+                workout: workout,
+                trainingPlanLookupService: di.trainingPlanLookupService
+            )
         }
     }
 
@@ -969,5 +975,222 @@ struct CalendarView: View {
             return try Data(contentsOf: url)
         }
         return try Data(contentsOf: url)
+    }
+}
+
+// MARK: - External workout row
+
+private struct ExternalWorkoutCard: View {
+    let workout: Workout
+
+    private var source: ExternalWorkoutSourcePresentation {
+        ExternalWorkoutSourcePresentation(workout: workout)
+    }
+
+    private var zone: PowerZone {
+        PowerZone.zone(for: Int(workout.avgPower))
+    }
+
+    private var headline: String {
+        if workout.savedRouteName?.isEmpty == false {
+            return workout.savedRouteName ?? source.title
+        }
+        return source.title
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            sourceRail
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 10) {
+                    sourceBadge
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(headline)
+                            .mangoxFont(.bodyBold)
+                            .foregroundStyle(AppColor.fg0)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+
+                        Text(workout.startDate, format: .dateTime.weekday(.wide).month(.abbreviated).day().hour().minute())
+                            .mangoxFont(.caption)
+                            .foregroundStyle(AppColor.fg2)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AppColor.fg3)
+                        .padding(.top, 4)
+                }
+
+                HStack(spacing: 8) {
+                    externalMetric("TIME", AppFormat.duration(workout.duration), AppColor.fg1)
+                    externalMetric("DIST", formattedDistance, AppColor.blue)
+                    externalMetric("TSS", formattedTSS, tssColor)
+                    externalMetric(powerOrHeartLabel, powerOrHeartValue, powerOrHeartColor)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+        }
+        .background {
+            LinearGradient(
+                colors: [
+                    source.color.opacity(0.16),
+                    AppColor.bg2,
+                    AppColor.bg2
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+        .overlay {
+            Rectangle()
+                .stroke(source.color.opacity(0.22), lineWidth: 1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var sourceRail: some View {
+        Rectangle()
+            .fill(
+                LinearGradient(
+                    colors: [source.color, source.color.opacity(0.38)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .frame(width: 5)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(.white.opacity(0.28))
+                    .frame(height: 22)
+            }
+    }
+
+    private var sourceBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: source.icon)
+                .font(.system(size: 10, weight: .bold))
+            Text(source.badge)
+                .mangoxFont(.label)
+                .tracking(0.8)
+        }
+        .foregroundStyle(AppColor.fg0)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(source.color.opacity(0.18), in: RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue))
+        .overlay {
+            RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue)
+                .strokeBorder(source.color.opacity(0.35), lineWidth: 1)
+        }
+    }
+
+    private func externalMetric(_ label: String, _ value: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .mangoxFont(.micro)
+                .foregroundStyle(AppColor.fg3)
+                .lineLimit(1)
+            Text(value)
+                .mangoxFont(.caption)
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .background(AppColor.bg0.opacity(0.34), in: RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue))
+        .overlay {
+            RoundedRectangle(cornerRadius: MangoxRadius.button.rawValue)
+                .strokeBorder(AppColor.hair, lineWidth: 1)
+        }
+    }
+
+    private var formattedDistance: String {
+        guard workout.distance > 0 else { return "--" }
+        return String(format: "%.1f km", workout.distance / 1000)
+    }
+
+    private var formattedTSS: String {
+        guard workout.tss > 0 else { return "--" }
+        return String(format: "%.0f", workout.tss)
+    }
+
+    private var powerOrHeartLabel: String {
+        workout.avgPower > 0 ? "POWER" : "HR"
+    }
+
+    private var powerOrHeartValue: String {
+        if workout.avgPower > 0 {
+            return "\(Int(workout.avgPower))W"
+        }
+        if workout.avgHR > 0 {
+            return "\(Int(workout.avgHR))"
+        }
+        return "--"
+    }
+
+    private var powerOrHeartColor: Color {
+        if workout.avgPower > 0 { return zone.color }
+        if workout.avgHR > 0 { return AppColor.heartRate }
+        return AppColor.fg2
+    }
+
+    private var tssColor: Color {
+        let tss = workout.tss
+        if tss <= 0 { return AppColor.fg2 }
+        if tss < 150 { return AppColor.success }
+        if tss < 300 { return AppColor.yellow }
+        if tss < 450 { return AppColor.orange }
+        return AppColor.red
+    }
+
+    private var accessibilityLabel: String {
+        "\(source.title), \(workout.startDate.formatted(date: .abbreviated, time: .shortened)), \(AppFormat.duration(workout.duration)), \(formattedDistance), TSS \(formattedTSS)"
+    }
+}
+
+private struct ExternalWorkoutSourcePresentation {
+    let badge: String
+    let title: String
+    let icon: String
+    let color: Color
+
+    init(workout: Workout) {
+        switch (workout.externalSource, workout.importFormat) {
+        case (.strava?, _), (_, .strava?):
+            badge = "STRAVA"
+            title = "Strava ride"
+            icon = "point.topleft.down.curvedto.point.bottomright.up"
+            color = AppColor.strava
+        case (.whoop?, _), (_, .whoop?):
+            badge = "WHOOP"
+            title = "WHOOP ride"
+            icon = "waveform.path.ecg"
+            color = AppColor.whoop
+        case (_, .fit?):
+            badge = "FIT"
+            title = "FIT import"
+            icon = "doc.badge.gearshape"
+            color = AppColor.blue
+        case (_, .tcx?):
+            badge = "TCX"
+            title = "TCX import"
+            icon = "doc.text"
+            color = AppColor.mango
+        default:
+            badge = "IMPORT"
+            title = "Imported ride"
+            icon = "square.and.arrow.down"
+            color = AppColor.blue
+        }
     }
 }

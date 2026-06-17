@@ -159,7 +159,8 @@ final class HomeViewModel {
         trainingCacheGeneration += 1
         let generation = trainingCacheGeneration
         let profile = LoggedActivityTSSEstimator.Profile.current()
-        var slices = workouts.map { HomeWorkoutMetricSlice(startDate: $0.startDate, tss: $0.tss) }
+        let completedWorkouts = workouts.filter { $0.status == .completed && $0.isValid }
+        var slices = completedWorkouts.map { HomeWorkoutMetricSlice(startDate: $0.startDate, tss: $0.tss) }
         slices.reserveCapacity(slices.count + activities.count)
         for record in activities {
             let domain = record.toDomain()
