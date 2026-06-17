@@ -23,6 +23,20 @@ interface ExchangeRequest {
   redirect_uri?: string;
 }
 
+type ValidatedExchangeRequest =
+  | {
+    provider: Provider;
+    grant_type: "authorization_code";
+    code: string;
+    redirect_uri: string;
+  }
+  | {
+    provider: Provider;
+    grant_type: "refresh_token";
+    refresh_token: string;
+    redirect_uri?: string;
+  };
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -53,7 +67,7 @@ function parseRequest(body: unknown): ExchangeRequest {
   return body as ExchangeRequest;
 }
 
-function validateRequest(req: ExchangeRequest): void {
+function validateRequest(req: ExchangeRequest): ValidatedExchangeRequest {
   if (req.provider !== "whoop" && req.provider !== "strava") {
     throw new Error("invalid_provider");
   }
@@ -66,31 +80,41 @@ function validateRequest(req: ExchangeRequest): void {
     if (!allowedRedirectURIs().has(req.redirect_uri.trim())) {
       throw new Error("invalid_redirect_uri");
     }
+    return {
+      provider: req.provider,
+      grant_type: req.grant_type,
+      code: req.code.trim(),
+      redirect_uri: req.redirect_uri.trim(),
+    };
   }
-  if (req.grant_type === "refresh_token") {
-    if (!req.refresh_token?.trim()) throw new Error("missing_refresh_token");
-    if (req.redirect_uri?.trim() && !allowedRedirectURIs().has(req.redirect_uri.trim())) {
-      throw new Error("invalid_redirect_uri");
-    }
+  if (!req.refresh_token?.trim()) throw new Error("missing_refresh_token");
+  if (req.redirect_uri?.trim() && !allowedRedirectURIs().has(req.redirect_uri.trim())) {
+    throw new Error("invalid_redirect_uri");
   }
+  return {
+    provider: req.provider,
+    grant_type: req.grant_type,
+    refresh_token: req.refresh_token.trim(),
+    redirect_uri: req.redirect_uri?.trim(),
+  };
 }
 
-function buildUpstreamBody(req: ExchangeRequest): URLSearchParams {
+function buildUpstreamBody(req: ValidatedExchangeRequest): URLSearchParams {
   const params = new URLSearchParams();
 
   if (req.provider === "whoop") {
     params.set("client_id", requireEnv("WHOOP_CLIENT_ID"));
     params.set("client_secret", requireEnv("WHOOP_CLIENT_SECRET"));
-    params.set("grant_type", req.grant_type!);
+    params.set("grant_type", req.grant_type);
     if (req.grant_type === "authorization_code") {
-      params.set("code", req.code!.trim());
-      params.set("redirect_uri", req.redirect_uri!.trim());
+      params.set("code", req.code);
+      params.set("redirect_uri", req.redirect_uri);
     } else {
-      params.set("refresh_token", req.refresh_token!.trim());
+      params.set("refresh_token", req.refresh_token);
       // WHOOP's OAuth implementation requires redirect_uri even on refresh_token grants
       // (non-standard but documented in their error responses). Use the provided URI or
       // fall back to the registered default.
-      const redirectUri = req.redirect_uri?.trim() || DEFAULT_REDIRECTS[0];
+      const redirectUri = req.redirect_uri || DEFAULT_REDIRECTS[0];
       params.set("redirect_uri", redirectUri);
     }
     return params;
@@ -98,11 +122,11 @@ function buildUpstreamBody(req: ExchangeRequest): URLSearchParams {
 
   params.set("client_id", requireEnv("STRAVA_CLIENT_ID"));
   params.set("client_secret", requireEnv("STRAVA_CLIENT_SECRET"));
-  params.set("grant_type", req.grant_type!);
+  params.set("grant_type", req.grant_type);
   if (req.grant_type === "authorization_code") {
-    params.set("code", req.code!.trim());
+    params.set("code", req.code);
   } else {
-    params.set("refresh_token", req.refresh_token!.trim());
+    params.set("refresh_token", req.refresh_token);
   }
   return params;
 }
@@ -135,10 +159,9 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "method_not_allowed" }, 405);
   }
 
-  let payload: ExchangeRequest;
+  let payload: ValidatedExchangeRequest;
   try {
-    payload = parseRequest(await req.json());
-    validateRequest(payload);
+    payload = validateRequest(parseRequest(await req.json()));
   } catch (e) {
     const message = e instanceof Error ? e.message : "invalid_request";
     const status = message.startsWith("missing_server_secret:") ? 503 : 400;
@@ -148,7 +171,7 @@ Deno.serve(async (req: Request) => {
   const upstreamBody = buildUpstreamBody(payload);
   let upstreamResponse: Response;
   try {
-    upstreamResponse = await fetch(tokenURL(payload.provider!), {
+    upstreamResponse = await fetch(tokenURL(payload.provider), {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",

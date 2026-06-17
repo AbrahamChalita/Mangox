@@ -24,6 +24,9 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
     var messages: [ChatMessage] = []
     var isLoading: Bool = false
+    /// Set by `canBeginTurn()` so a second rapid UI tap cannot schedule a duplicate turn
+    /// while the first `Task` is still pending on the main-actor queue.
+    private var isTurnReserved = false
     var error: String? = nil
     var generatingPlan: Bool = false
     var planProgress: PlanGenerationProgress?
@@ -54,7 +57,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
     /// Shown while falling back between delivery tiers ("Trying Private Cloud…").
     var streamRouteStatus: String? = nil
 
-    private var streamRawBuffer: String = ""
+    private var streamParser = CoachThinkingTagParser.IncrementalParser()
     private var streamUsesTokenDeltas = false
     private var streamDisplayThrottleTask: Task<Void, Never>?
     private var activeChatTurnTask: Task<Void, Never>?
@@ -651,6 +654,12 @@ final class AIService: AIServiceProtocol, CoachRepository {
         return false
     }
 
+    func canBeginTurn() -> Bool {
+        guard !isLoading, !isTurnReserved else { return false }
+        isTurnReserved = true
+        return true
+    }
+
     private func qualifiesForUnbilledPCCCoach(_ text: String, forcePlanIntake: Bool) -> Bool {
         if skipLocalCoachForNextTurn { return false }
         guard MangoxFoundationModelsSupport.isPrivateCloudComputeCoachAvailable else { return false }
@@ -755,7 +764,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
     }
 
     private func applyStreamDraftToUI() {
-        let snap = CoachThinkingTagParser.snapshot(streamBuffer: streamRawBuffer)
+        let snap = streamParser.currentSnapshot
         streamDraftText = snap.visible
         streamIsThinking =
             snap.visible.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -775,7 +784,8 @@ final class AIService: AIServiceProtocol, CoachRepository {
         planIntake: Bool,
         usedWebSearch: Bool
     ) {
-        streamRawBuffer = body
+        streamParser.reset()
+        _ = streamParser.append(body)
         streamUsesTokenDeltas = false
         streamPartialTags = CoachReplyMetadataSupport.resolvedTags(
             modelTags: partialTags ?? [],
@@ -791,7 +801,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
     private func resetStreamingState(clearLoading: Bool) {
         streamDraftText = ""
-        streamRawBuffer = ""
+        streamParser.reset()
         streamDisplayThrottleTask?.cancel()
         streamDisplayThrottleTask = nil
         streamStatusText = nil
@@ -843,11 +853,61 @@ final class AIService: AIServiceProtocol, CoachRepository {
         activeChatTurnTask?.cancel()
         activeChatTurnTask = nil
         activeChatTurnGeneration &+= 1
+        isTurnReserved = false
         resetStreamingState(clearLoading: true)
     }
 
     func cancelActiveChatTurn() {
         cancelActiveChatTurnIfNeeded()
+    }
+
+    // MARK: - Stream helpers
+
+    /// Consumes a chat SSE stream, pulsing the watchdog on every event. Runs on the main actor
+    /// so streaming state updates stay synchronous with the UI.
+    @MainActor
+    private func consumeChatStream(
+        adapter: any ChatProviderAdapter,
+        request: ChatRequest,
+        configuration: ChatProviderConfiguration,
+        userID: String,
+        watchdog: StreamWatchdog
+    ) async throws -> (finalResponse: ChatAPIResponse?, streamFailure: String?) {
+        var finalResponse: ChatAPIResponse?
+        var streamFailure: String?
+        for try await event in adapter.streamChat(
+            request: request, configuration: configuration, userID: userID)
+        {
+            await watchdog.pulse()
+            switch event {
+            case .status(let s):
+                streamStatusText = s
+            case .searchStarted:
+                streamIsSearchingWeb = true
+            case .searchCompleted:
+                streamIsSearchingWeb = false
+            case .textDelta(let delta):
+                _ = streamParser.append(delta)
+                streamStatusText = nil
+                streamRouteStatus = nil
+                streamIsThinking = false
+                streamIsSearchingWeb = false
+                streamUsesTokenDeltas = true
+                scheduleStreamDraftDisplayFlush()
+            case .reasoningDelta:
+                streamIsThinking = true
+                if streamDraftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    streamStatusText = "Thinking…"
+                }
+            case .toolCalls:
+                break
+            case .completed(let message):
+                finalResponse = message
+            case .failed(let err):
+                streamFailure = err
+            }
+        }
+        return (finalResponse, streamFailure)
     }
 
     // MARK: - Mangox Cloud coach turn (no new user row)
@@ -920,39 +980,29 @@ final class AIService: AIServiceProtocol, CoachRepository {
         streamRouteStatus = nil
 
         do {
-            var finalResponse: ChatAPIResponse?
-            var streamFailure: String?
-
-            for try await event in adapter.streamChat(
-                request: request, configuration: provider, userID: userID)
-            {
-                switch event {
-                case .status(let s):
-                    streamStatusText = s
-                    streamIsSearchingWeb = s.localizedCaseInsensitiveContains("search")
-                case .textDelta(let delta):
-                    streamRawBuffer += delta
-                    streamStatusText = nil
-                    streamRouteStatus = nil
-                    streamIsThinking = false
-                    streamIsSearchingWeb = false
-                    streamUsesTokenDeltas = true
-                    scheduleStreamDraftDisplayFlush()
-                case .reasoningDelta:
-                    streamIsThinking = true
-                    if streamDraftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        streamStatusText = "Thinking…"
+            let watchdog = StreamWatchdog(timeout: 60)
+            let streamResult: (finalResponse: ChatAPIResponse?, streamFailure: String?) =
+                try await withThrowingTaskGroup(of: (ChatAPIResponse?, String?).self) { group in
+                    group.addTask {
+                        try await watchdog.wait()
+                        return (nil, nil)
                     }
-                case .toolCalls:
-                    break
-                case .completed(let message):
-                    finalResponse = message
-                case .failed(let err):
-                    streamFailure = err
+                    group.addTask { [weak self] in
+                        guard let self else { return (nil, nil) }
+                        return try await consumeChatStream(
+                            adapter: adapter,
+                            request: request,
+                            configuration: provider,
+                            userID: userID,
+                            watchdog: watchdog
+                        )
+                    }
+                    let result = try await group.next()!
+                    group.cancelAll()
+                    return result
                 }
-            }
 
-            if let streamFailure {
+            if let streamFailure = streamResult.streamFailure {
                 resetStreamingState(clearLoading: true)
                 appendAssistantErrorBubble(
                     streamFailure,
@@ -966,7 +1016,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 return
             }
 
-            guard let response = finalResponse else {
+            guard let response = streamResult.finalResponse else {
                 resetStreamingState(clearLoading: true)
                 appendAssistantErrorBubble(
                     "The coach didn't return a complete reply. Please try again.",
@@ -1082,6 +1132,17 @@ final class AIService: AIServiceProtocol, CoachRepository {
         } catch is CancellationError {
             logCoachFlow("coachFlow cloud cancelled")
             resetStreamingState(clearLoading: true)
+        } catch is CoachStreamTimeoutError {
+            logCoachFlow("coachFlow cloud streamTimeout")
+            resetStreamingState(clearLoading: true)
+            appendAssistantErrorBubble(
+                "The coach stream stalled. Please try again.",
+                category: "error",
+                modelContext: modelContext,
+                failedPath: .mangoxCloudBackend,
+                retryActions: Self.coachErrorRetryActions
+            )
+            self.error = "Coach stream timed out"
         } catch {
             logger.error("runMangoxCloudCoachTurn failed: \(error)")
             logCoachFlow("coachFlow cloud catch transportOrDecodeError")
@@ -1222,6 +1283,9 @@ final class AIService: AIServiceProtocol, CoachRepository {
         image: CoachUserImageAttachment? = nil,
         modelContext: ModelContext
     ) async {
+        // Consume the synchronous reservation taken by `canBeginTurn()` (if any).
+        isTurnReserved = false
+
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let planIntake = forcePlanIntake || planIntakeModeActive || Self.shouldForcePlanIntake(for: trimmed)
         let hasImage = image != nil
@@ -2203,6 +2267,76 @@ final class AIService: AIServiceProtocol, CoachRepository {
         return (response.workout, response.validation_warnings ?? [])
     }
 
+    private enum PlanStreamConsumptionResult {
+        case completed(PlanGenerationResult)
+        case failed(underlying: Error, receivedStreamPayload: Bool)
+        case finished(receivedStreamPayload: Bool)
+    }
+
+    /// Consumes the plan SSE byte stream, pulsing the watchdog on every line.
+    @MainActor
+    private func consumePlanSSEStream(
+        bytes: URLSession.AsyncBytes,
+        watchdog: StreamWatchdog
+    ) async -> PlanStreamConsumptionResult {
+        var receivedStreamPayload = false
+        do {
+            for try await line in bytes.lines {
+                await watchdog.pulse()
+                guard line.hasPrefix("data: ") else { continue }
+                let json = String(line.dropFirst(6))
+                guard let data = json.data(using: .utf8) else { continue }
+
+                guard let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                    let type = event["type"] as? String
+                else { continue }
+
+                switch type {
+                case "progress":
+                    receivedStreamPayload = true
+                    let phase = event["phase"] as? String ?? ""
+                    let message = event["message"] as? String ?? ""
+                    let current = event["current"] as? Int
+                    let total = event["total"] as? Int
+                    planProgress = PlanGenerationProgress(
+                        phase: phase, message: message, current: current, total: total
+                    )
+
+                case "complete":
+                    receivedStreamPayload = true
+                    let decoded = try JSONDecoder().decode(PlanGenerationResponse.self, from: data)
+                    lastCreditsRemaining = decoded.credits_remaining
+                    return .completed(
+                        PlanGenerationResult(
+                            plan: decoded.plan,
+                            requestId: decoded.request_id,
+                            validationWarnings: decoded.validation_warnings ?? [],
+                            creditsRemaining: decoded.credits_remaining,
+                            generationMetrics: decoded.generation_metrics
+                        )
+                    )
+
+                case "error":
+                    receivedStreamPayload = true
+                    let errorMsg = event["error"] as? String ?? "Plan generation failed"
+                    return .failed(
+                        underlying: NSError(
+                            domain: "PlanGeneration", code: -1,
+                            userInfo: [NSLocalizedDescriptionKey: errorMsg]),
+                        receivedStreamPayload: receivedStreamPayload
+                    )
+
+                default:
+                    break
+                }
+            }
+        } catch {
+            return .failed(underlying: error, receivedStreamPayload: receivedStreamPayload)
+        }
+
+        return .finished(receivedStreamPayload: receivedStreamPayload)
+    }
+
     /// Streaming plan generation with SSE progress events.
     private func generatePlanStreaming(
         request: PlanGenerationRequest,
@@ -2257,67 +2391,43 @@ final class AIService: AIServiceProtocol, CoachRepository {
             }
         }
 
-        // Parse SSE events
-        var receivedStreamPayload = false
-        do {
-            for try await line in bytes.lines {
-                guard line.hasPrefix("data: ") else { continue }
-                let json = String(line.dropFirst(6))
-                guard let data = json.data(using: .utf8) else { continue }
-
-                guard let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                    let type = event["type"] as? String
-                else { continue }
-
-                switch type {
-                case "progress":
-                    receivedStreamPayload = true
-                    let phase = event["phase"] as? String ?? ""
-                    let message = event["message"] as? String ?? ""
-                    let current = event["current"] as? Int
-                    let total = event["total"] as? Int
-                    planProgress = PlanGenerationProgress(
-                        phase: phase, message: message, current: current, total: total
-                    )
-
-                case "complete":
-                    receivedStreamPayload = true
-                    let decoded = try JSONDecoder().decode(PlanGenerationResponse.self, from: data)
-                    lastCreditsRemaining = decoded.credits_remaining
-                    return PlanGenerationResult(
-                        plan: decoded.plan,
-                        requestId: decoded.request_id,
-                        validationWarnings: decoded.validation_warnings ?? [],
-                        creditsRemaining: decoded.credits_remaining,
-                        generationMetrics: decoded.generation_metrics
-                    )
-
-                case "error":
-                    receivedStreamPayload = true
-                    let errorMsg = event["error"] as? String ?? "Plan generation failed"
-                    throw NSError(
-                        domain: "PlanGeneration", code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: errorMsg])
-
-                default:
-                    break
-                }
+        // Parse SSE events with a stall watchdog.
+        let watchdog = StreamWatchdog(timeout: 60)
+        let consumptionResult: PlanStreamConsumptionResult = try await withThrowingTaskGroup(
+            of: PlanStreamConsumptionResult.self
+        ) { group in
+            group.addTask {
+                try await watchdog.wait()
+                return .failed(
+                    underlying: CoachStreamTimeoutError(),
+                    receivedStreamPayload: false
+                )
             }
-        } catch {
-            throw PlanStreamError(underlying: error, receivedStreamPayload: receivedStreamPayload)
+            group.addTask { [weak self] in
+                guard let self else {
+                    return .failed(
+                        underlying: CoachStreamTimeoutError(),
+                        receivedStreamPayload: false
+                    )
+                }
+                return await consumePlanSSEStream(bytes: bytes, watchdog: watchdog)
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
         }
 
-        if receivedStreamPayload {
+        switch consumptionResult {
+        case .completed(let result):
+            return result
+        case .failed(let error, let receivedStreamPayload):
+            throw PlanStreamError(underlying: error, receivedStreamPayload: receivedStreamPayload)
+        case .finished(let receivedStreamPayload):
             throw PlanStreamError(
                 underlying: URLError(.badServerResponse),
-                receivedStreamPayload: true
+                receivedStreamPayload: receivedStreamPayload
             )
         }
-
-        throw PlanStreamError(
-            underlying: URLError(.badServerResponse),
-            receivedStreamPayload: false
-        )
     }
 
     private struct PlanStreamError: Error {
@@ -3341,6 +3451,9 @@ final class AIService: AIServiceProtocol, CoachRepository {
         preferCloud: Bool,
         modelContext: ModelContext
     ) async {
+        // Consume the synchronous reservation taken by `canBeginTurn()` (if any).
+        isTurnReserved = false
+
         guard let lastUserMsg = messages.last(where: { $0.role == .user }) else {
             logCoachFlow("coachFlow regenerate skip reason=noUserMessage")
             return
@@ -3368,7 +3481,13 @@ final class AIService: AIServiceProtocol, CoachRepository {
 
         let retryImage: CoachUserImageAttachment?
         if let jpeg = lastUserMsg.imageJPEG {
-            retryImage = CoachUserImageAttachment(jpegData: jpeg, pixelWidth: 0, pixelHeight: 0)
+            let uiImage = UIImage(data: jpeg)
+            let scale = uiImage?.scale ?? 1
+            retryImage = CoachUserImageAttachment(
+                jpegData: jpeg,
+                pixelWidth: Int((uiImage?.size.width ?? 0) * scale),
+                pixelHeight: Int((uiImage?.size.height ?? 0) * scale)
+            )
         } else {
             retryImage = nil
         }
@@ -3403,7 +3522,7 @@ final class AIService: AIServiceProtocol, CoachRepository {
     }
 
     var suggestsFreshConversation: Bool {
-        messages.count >= contextWindowSize
+        messages.count > contextWindowSize
     }
 
     // MARK: - Recovery Status
@@ -3516,5 +3635,35 @@ final class AIService: AIServiceProtocol, CoachRepository {
                 QuickPrompt(text: "What should I do today?", icon: "figure.outdoor.cycle"))
         }
         return groundedQuickPrompts(from: prompts, availability: availability, fallback: [])
+    }
+}
+
+// MARK: - Stream watchdog
+
+private struct CoachStreamTimeoutError: Error {
+    let description = "The coach stream stalled. Please try again."
+}
+
+/// Resets a timer on every `pulse()`; throws `CoachStreamTimeoutError` if no pulse arrives
+/// within `timeout`. This catches servers that open an SSE connection then stop sending.
+private actor StreamWatchdog {
+    private var lastEventTime = Date()
+    private let timeout: TimeInterval
+
+    init(timeout: TimeInterval) {
+        self.timeout = timeout
+    }
+
+    func pulse() {
+        lastEventTime = Date()
+    }
+
+    func wait() async throws {
+        while true {
+            try await Task.sleep(for: .seconds(timeout))
+            if Date().timeIntervalSince(lastEventTime) >= timeout {
+                throw CoachStreamTimeoutError()
+            }
+        }
     }
 }

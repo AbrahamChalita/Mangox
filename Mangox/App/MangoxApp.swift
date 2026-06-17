@@ -5,6 +5,7 @@ import UIKit
 #endif
 
 @main
+@MainActor
 struct MangoxApp: App {
     @State private var di = DIContainer()
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
@@ -41,10 +42,6 @@ struct MangoxApp: App {
                         .environment(di.syncCoordinator)
                         .environment(\.launchOverlayVisible, showLaunch)
                         .preferredColorScheme(.dark)
-                        .overlay {
-                            NotificationLifecycleHook(di: di)
-                                .allowsHitTesting(false)
-                        }
                 } else {
                     OnboardingView(viewModel: di.makeOnboardingViewModel())
                         .environment(di)
@@ -96,40 +93,5 @@ private extension MangoxApp {
         UITabBar.appearance().tintColor = selectedColor
         UITabBar.appearance().unselectedItemTintColor = unselectedColor
         #endif
-    }
-}
-
-// MARK: - Local notification refresh (evening preview, missed key, FTP nudge)
-
-private struct NotificationLifecycleHook: View {
-    @Environment(\.scenePhase) private var scenePhase
-    let di: DIContainer
-
-    var body: some View {
-        Color.clear
-            .frame(width: 0, height: 0)
-            .accessibilityHidden(true)
-            .onChange(of: scenePhase) { _, phase in
-                switch phase {
-                case .active:
-                    FitnessSettingsSnapshotBackfill.runIfNeeded()
-                    TrainingPlanProgressCleanupMigration.runIfNeeded()
-                    TrainingNotificationsScheduler.evaluateMissedKeyIfNeeded()
-                    TrainingNotificationsScheduler.rescheduleFTPReminder()
-                    WorkoutRAGIndex.scheduleBackgroundSync()
-                    if di.authState.isSignedIn {
-                        Task {
-                            await di.syncCoordinator.syncNow()
-                            await di.externalWebhookSignalService.consumePendingSignals()
-                        }
-                    }
-                case .background:
-                    di.locationService.persistRecordingCheckpointNow()
-                    di.persistIndoorRecordingCheckpointNow()
-                    TrainingNotificationsScheduler.rescheduleEveningPreview()
-                default:
-                    break
-                }
-            }
     }
 }

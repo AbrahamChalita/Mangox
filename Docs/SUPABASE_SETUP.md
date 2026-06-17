@@ -186,8 +186,12 @@ Use the Supabase MCP `apply_migration` tool with snake_case names. Migrations ap
 8. `08_views_and_rpc_for_ai`
 9. `09_harden_functions_and_indexes`
 10. `20260527120000_linked_oauth_accounts` (in-repo SQL under `supabase/migrations/`)
+11. `20260616113000_external_webhook_events`
+12. `20260616182624_workouts_import_format_strava_whoop` — extends `workouts.import_format` to `strava` / `whoop` (matches iOS `WorkoutImportFormat`)
 
 After any DDL change, run `get_advisors` (security + performance) and address WARN-level findings before shipping.
+
+When adding a `WorkoutImportFormat` case, ship a matching migration that updates `workouts_import_format_check` in the same change.
 
 ### Migration history mismatch (`db pull` / `db push` errors)
 
@@ -215,10 +219,11 @@ supabase migration repair --status reverted \
 supabase db push
 ```
 
-If you already ran the `linked_oauth_accounts` SQL in the dashboard:
+If you already ran a migration SQL in the dashboard (without `db push`):
 
 ```bash
 supabase migration repair --status applied 20260527120000
+supabase migration repair --status applied 20260616182624
 ```
 
 **Alternative:** paste `supabase/migrations/20260527120000_linked_oauth_accounts.sql` into the Supabase SQL editor and run it, then mark applied as above.
@@ -285,9 +290,10 @@ Mangox receives provider webhook callbacks through the Supabase Edge Function `e
 
 Deploy after applying `20260616113000_external_webhook_events.sql`:
 
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically for Edge Functions — do not set them with `supabase secrets set` (names starting with `SUPABASE_` are skipped).
+
 ```bash
 supabase secrets set \
-  SUPABASE_SERVICE_ROLE_KEY='your-service-role-key' \
   STRAVA_WEBHOOK_VERIFY_TOKEN='your-random-strava-verify-token' \
   MANGOX_WEBHOOK_SECRET='your-random-shared-webhook-secret'
 
@@ -300,6 +306,8 @@ Register callback URLs:
 - WHOOP: `https://<project-ref>.supabase.co/functions/v1/external-webhooks?provider=whoop&secret=<MANGOX_WEBHOOK_SECRET>`
 
 Strava's subscription verification uses `STRAVA_WEBHOOK_VERIFY_TOKEN` and returns the required `hub.challenge`. Runtime event callbacks write to `external_webhook_events` for app-side refresh/processing.
+
+**Deploy checklist:** Both `STRAVA_WEBHOOK_VERIFY_TOKEN` and `MANGOX_WEBHOOK_SECRET` must be set before deploying `external-webhooks`. The function fails closed (401) when either secret is missing — unauthenticated webhook writes are rejected.
 
 ### Redirect URIs
 

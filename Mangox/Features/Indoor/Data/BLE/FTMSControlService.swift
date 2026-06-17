@@ -22,6 +22,22 @@ enum FTMSOpCode: UInt8 {
     case responseCode            = 0x80
 }
 
+/// Op codes for FTMS Machine Status notifications (characteristic 0x2ADA).
+enum FTMSMachineStatusOpCode: UInt8 {
+    case reset                       = 0x01
+    case stoppedOrPausedBySafetyKey  = 0x02
+    case startedOrResumedBySafetyKey = 0x04
+    case targetSpeedChanged          = 0x05
+    case targetPowerChanged          = 0x07
+    case targetResistanceChanged     = 0x08
+    case spinDownStopPedaling        = 0x0C
+    case spinDownSpeedTooHigh        = 0x0D
+    case spinDownSpeedTooLow         = 0x0E
+    case spinDownCalibrationComplete = 0x0F
+    case indoorBikeSimulationChanged = 0x12
+    case controlPermissionLost       = 0xFF
+}
+
 /// Result codes returned by the trainer in Control Point indication responses.
 enum FTMSResultCode: UInt8 {
     case success                = 0x01
@@ -206,6 +222,9 @@ final class FTMSControlService {
     /// Pending continuation for the current control point write → indication round-trip.
     private var pendingContinuation: CheckedContinuation<FTMSResultCode, Error>?
 
+    /// Op code of the in-flight control-point write (echoed in the trainer's response).
+    private var pendingRequestOpCode: FTMSOpCode?
+
     /// Timeout task for the pending control point write.
     private var pendingTimeoutTask: Task<Void, Never>?
 
@@ -214,6 +233,7 @@ final class FTMSControlService {
     /// Called by BLEManager after discovering the FTMS service on the trainer peripheral.
     /// Discovers the required characteristics.
     func attach(peripheral: CBPeripheral, service: CBService) {
+        cancelPending(with: FTMSControlError.disconnected)
         self.peripheral = peripheral
         isAvailable = false
         hasControl = false
@@ -540,7 +560,10 @@ final class FTMSControlService {
         // Cancel any in-flight request
         cancelPending(with: FTMSControlError.superseded)
 
+        let requestOpCode = FTMSOpCode(rawValue: data.first ?? 0xFF)
+
         return try await withCheckedThrowingContinuation { continuation in
+            self.pendingRequestOpCode = requestOpCode
             self.pendingContinuation = continuation
 
             // Timeout after 5 seconds.
@@ -582,11 +605,18 @@ final class FTMSControlService {
         let opName = FTMSOpCode(rawValue: requestOpCode).map { "\($0)" } ?? "0x\(String(format: "%02X", requestOpCode))"
         ftmsControlLogger.info("FTMS Response: \(opName) → \(result.description)")
 
-        // Resume the pending continuation
+        guard let expected = pendingRequestOpCode, expected.rawValue == requestOpCode else {
+            ftmsControlLogger.warning(
+                "Stale FTMS response for op 0x\(String(format: "%02X", requestOpCode)) — ignoring"
+            )
+            return
+        }
+
         pendingTimeoutTask?.cancel()
         pendingTimeoutTask = nil
         let continuation = pendingContinuation
         pendingContinuation = nil
+        pendingRequestOpCode = nil
         continuation?.resume(returning: result)
     }
 
@@ -656,47 +686,45 @@ final class FTMSControlService {
     /// (e.g. "target power changed", "control permission lost", "reset").
     private func parseFTMSStatus(_ data: Data) {
         guard let first = data.first else { return }
+        guard let opCode = FTMSMachineStatusOpCode(rawValue: first) else {
+            ftmsControlLogger.debug("FTMS Status: 0x\(String(format: "%02X", first))")
+            return
+        }
 
-        switch first {
-        case 0x01:
+        switch opCode {
+        case .reset:
             ftmsControlLogger.info("FTMS Status: Reset")
             hasControl = false
             activeMode = .none
-        case 0x02:
+        case .stoppedOrPausedBySafetyKey:
             ftmsControlLogger.info("FTMS Status: Stopped/Paused by safety key")
             activeMode = .none
-        case 0x04:
+        case .startedOrResumedBySafetyKey:
             ftmsControlLogger.info("FTMS Status: Started/Resumed by safety key")
-        case 0x05:
-            // Target speed changed
+        case .targetSpeedChanged:
             break
-        case 0x07:
-            // Target power changed
+        case .targetPowerChanged:
             if data.count >= 3 {
                 let watts = Int(Int16(bitPattern: UInt16(data[1]) | (UInt16(data[2]) << 8)))
                 ftmsControlLogger.info("FTMS Status: Target power changed to \(watts)W")
             }
-        case 0x08:
-            // Target resistance changed
+        case .targetResistanceChanged:
             break
-        case 0x12:
-            // Indoor bike simulation parameters changed
+        case .indoorBikeSimulationChanged:
             ftmsControlLogger.info("FTMS Status: Simulation parameters changed")
-        case 0x0C:
+        case .spinDownStopPedaling:
             ftmsControlLogger.info("FTMS Status: Spin down — stop pedaling, coast to zero")
-        case 0x0D:
+        case .spinDownSpeedTooHigh:
             ftmsControlLogger.info("FTMS Status: Spin down — speed too high, slow down")
-        case 0x0E:
+        case .spinDownSpeedTooLow:
             ftmsControlLogger.info("FTMS Status: Spin down — speed too low, speed up")
-        case 0x0F:
+        case .spinDownCalibrationComplete:
             ftmsControlLogger.info("FTMS Status: Spin down calibration complete ✅")
             activeMode = .none
-        case 0xFF:
+        case .controlPermissionLost:
             ftmsControlLogger.info("FTMS Status: Control permission lost")
             hasControl = false
             activeMode = .none
-        default:
-            ftmsControlLogger.debug("FTMS Status: 0x\(String(format: "%02X", first))")
         }
     }
 
@@ -707,7 +735,22 @@ final class FTMSControlService {
         pendingTimeoutTask = nil
         let continuation = pendingContinuation
         pendingContinuation = nil
+        pendingRequestOpCode = nil
         continuation?.resume(throwing: error)
+    }
+
+    // MARK: - Testing hooks
+
+    internal func setPendingForTesting(
+        opCode: FTMSOpCode,
+        continuation: CheckedContinuation<FTMSResultCode, Error>
+    ) {
+        pendingRequestOpCode = opCode
+        pendingContinuation = continuation
+    }
+
+    internal func parseControlPointResponseForTesting(_ data: Data) {
+        parseControlPointResponse(data)
     }
 }
 

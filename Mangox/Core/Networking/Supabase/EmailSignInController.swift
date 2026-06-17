@@ -176,6 +176,7 @@ final class EmailSignInController {
 
     private static func elapsedMilliseconds(since startedAt: ContinuousClock.Instant) -> Int {
         let duration = startedAt.duration(to: ContinuousClock.now)
-        return Int(Double(duration.components.seconds) * 1_000 + Double(duration.components.attoseconds) / 1e15)
+        return Int(duration.components.seconds) * 1_000
+            + Int(duration.components.attoseconds / 1_000_000_000_000_000)
     }
 }

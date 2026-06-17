@@ -14,7 +14,10 @@ enum RiderProfileAvatarStore {
     private static let maxDimension: CGFloat = 512
 
     static var directoryURL: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            assertionFailure("Application Support directory unavailable")
+            return FileManager.default.temporaryDirectory.appendingPathComponent(subdirectory, isDirectory: true)
+        }
         return base.appendingPathComponent(subdirectory, isDirectory: true)
     }
 

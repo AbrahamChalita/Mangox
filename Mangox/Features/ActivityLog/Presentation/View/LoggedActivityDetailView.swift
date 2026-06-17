@@ -92,11 +92,10 @@ struct LoggedActivityDetailView: View {
         )
     }
 
+    @ViewBuilder
     private func statsGrid(_ activity: LoggedActivity) -> some View {
         let stats = buildStats(activity)
-        guard !stats.isEmpty else { return AnyView(EmptyView()) }
-
-        return AnyView(
+        if !stats.isEmpty {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 ForEach(stats, id: \.label) { stat in
                     VStack(spacing: 4) {
@@ -116,7 +115,7 @@ struct LoggedActivityDetailView: View {
                     .accessibilityLabel(A11yL10n.statFormat(stat.label, stat.value))
                 }
             }
-        )
+        }
     }
 
     private func notesCard(_ activity: LoggedActivity) -> some View {

@@ -126,7 +126,10 @@ final class BLEManager: NSObject, BLEServiceProtocol {
         return ids
     }
     var metrics = CyclingMetrics()
-    var discoveredPeripherals: [DiscoveredPeripheral] = []
+    private var discoveredPeripheralByID: [UUID: DiscoveredPeripheral] = [:]
+    var discoveredPeripherals: [DiscoveredPeripheral] {
+        discoveredPeripheralByID.values.sorted { $0.rssi > $1.rssi }
+    }
     var bluetoothState: CBManagerState = .unknown
 
     /// FTMS trainer control service — handles ERG, simulation, and resistance commands.
@@ -663,7 +666,7 @@ final class BLEManager: NSObject, BLEServiceProtocol {
         guard centralManager.state == .poweredOn else { return }
         guard !isScanning else { return }
 
-        discoveredPeripherals.removeAll()
+        discoveredPeripheralByID.removeAll()
         isScanning = true
 
         if !trainerConnectionState.isConnected {
@@ -1080,21 +1083,19 @@ extension BLEManager: CBCentralManagerDelegate {
                 guard let self else { return }
                 let peripheral = box.value
 
-                if let index = self.discoveredPeripherals.firstIndex(where: { $0.id == id }) {
-                    self.discoveredPeripherals[index].rssi = rssi
-                    if self.discoveredPeripherals[index].deviceType == .unknown,
-                       type != .unknown {
-                        self.discoveredPeripherals[index].deviceType = type
+                if var existing = self.discoveredPeripheralByID[id] {
+                    existing.rssi = rssi
+                    if existing.deviceType == .unknown, type != .unknown {
+                        existing.deviceType = type
                     }
+                    self.discoveredPeripheralByID[id] = existing
                 } else {
-                    self.discoveredPeripherals.append(
-                        DiscoveredPeripheral(
-                            id: id,
-                            peripheral: peripheral,
-                            name: name,
-                            rssi: rssi,
-                            deviceType: type
-                        )
+                    self.discoveredPeripheralByID[id] = DiscoveredPeripheral(
+                        id: id,
+                        peripheral: peripheral,
+                        name: name,
+                        rssi: rssi,
+                        deviceType: type
                     )
                 }
 

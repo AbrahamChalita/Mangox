@@ -2,7 +2,7 @@
 
 ## Project
 
-Mangox is an iOS app in a single Xcode target, `Mangox`, with tests in `MangoxTests` and `MangoxUITests`. The repo also contains a small TypeScript helper package in `backend/` for coach-related parsing and schema utilities.
+Mangox is an iOS app in a single Xcode target, `Mangox`, with tests in `MangoxTests` and `MangoxUITests`. Server-side TypeScript lives in Supabase Edge Functions under `supabase/functions/` (OAuth token exchange, external webhooks).
 
 ## Repo layout
 
@@ -13,7 +13,7 @@ Mangox is an iOS app in a single Xcode target, `Mangox`, with tests in `MangoxTe
 - `MangoxTests/`: unit and integration-style tests
 - `MangoxUITests/`: UI tests
 - `Docs/`: product and engineering notes
-- `backend/`: TypeScript helper package
+- `supabase/functions/`: Supabase Edge Functions (TypeScript / Deno)
 
 ## Architecture notes
 
@@ -36,10 +36,9 @@ Use the shared `Mangox` scheme.
 
 The app scheme enables `MANGOX_DEV_PRO=1` for launches.
 
-For `backend/`:
+For Supabase Edge Functions:
 
-- Install: `npm install`
-- Typecheck: `npm run check`
+- Typecheck: `deno task check` (from repo root; requires [Deno](https://deno.land/))
 
 ## Change guidance
 
@@ -47,7 +46,7 @@ For `backend/`:
 - Follow existing SwiftUI and Swift naming/style patterns in the touched area before introducing new abstractions.
 - Avoid broad file moves or architectural rewrites unless the task requires them.
 - When changing shared logic in `Core` or cross-feature services, add or update tests in `MangoxTests`.
-- When changing `backend/`, keep the package type-safe and validated through its existing Zod-based schema flow.
+- When changing `supabase/functions/`, keep handlers type-safe and validate request bodies explicitly.
 
 ## Documentation
 

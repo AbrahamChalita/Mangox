@@ -10,7 +10,7 @@ struct HomeView: View {
     @Binding var selectedTab: Int
 
     @Environment(\.launchOverlayVisible) private var launchOverlayVisible
-    @Environment(StravaService.self) private var stravaService
+    private let stravaService: StravaServiceProtocol
     @State private var viewModel: HomeViewModel
 
     private static let recentWorkoutsDescriptor: FetchDescriptor<Workout> = {
@@ -41,11 +41,13 @@ struct HomeView: View {
     init(
         navigationPath: Binding<NavigationPath>,
         selectedTab: Binding<Int>,
-        viewModel: HomeViewModel
+        viewModel: HomeViewModel,
+        stravaService: StravaServiceProtocol
     ) {
         self._navigationPath = navigationPath
         self._selectedTab = selectedTab
         self._viewModel = State(initialValue: viewModel)
+        self.stravaService = stravaService
     }
 
     // MARK: - Design System
@@ -281,13 +283,14 @@ struct HomeView: View {
                 HStack(spacing: 4) {
                     ForEach(weekBars) { dayData in
                         VStack(spacing: 6) {
-                            Rectangle()
-                                .fill(dayData.tss == 0 ? AppColor.bg4 : weekBarColor(tss: dayData.tss))
-                                .frame(
-                                    height: dayData.tss > 0
-                                        ? max(4, CGFloat(dayData.tss / maxTSS) * 28)
-                                        : 4
-                                )
+                            if dayData.tss > 0 {
+                                Rectangle()
+                                    .fill(weekBarColor(tss: dayData.tss))
+                                    .frame(height: max(4, CGFloat(dayData.tss / maxTSS) * 28))
+                            } else {
+                                Color.clear
+                                    .frame(height: 0)
+                            }
 
                             Text(String(dayData.day.prefix(1)))
                                 .mangoxFont(.micro)
@@ -334,9 +337,10 @@ struct HomeView: View {
     }
 
     private var whoopTrainingStrip: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Divider()
-                .background(AppColor.hair)
+        VStack(alignment: .leading, spacing: 10) {
+            Rectangle()
+                .fill(AppColor.hair)
+                .frame(height: 1)
             HStack(alignment: .center, spacing: 6) {
                 Image(systemName: "waveform.path.ecg")
                     .mangoxFontScaled(.label)
@@ -634,19 +638,6 @@ struct HomeView: View {
 
 }
 
-// MARK: - Workout Extension
-
-extension Workout {
-    var hasPowerData: Bool {
-        avgPower > 0 || normalizedPower > 0
-    }
-
-    var zoneDistribution: [Double] {
-        guard hasPowerData else { return [] }
-        return [0.1, 0.25, 0.35, 0.2, 0.1]
-    }
-}
-
 // MARK: - Date Extension
 
 extension Date {
@@ -682,10 +673,10 @@ extension Date {
                 trainingPlanPersistenceRepository: TrainingPlanPersistenceRepository(),
                 modelContext: PersistenceContainer.shared.mainContext
             )
-        )
+        ),
+        stravaService: StravaService()
     )
         .modelContainer(for: [Workout.self, WorkoutRAGChunk.self, TrainingPlanProgress.self])
         .environment(HealthKitManager())
         .environment(WhoopService())
-        .environment(StravaService())
 }

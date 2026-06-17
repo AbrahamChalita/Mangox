@@ -36,7 +36,6 @@ struct MangoxConfirmOverlay<Actions: View>: View {
             )
             .padding(.horizontal, MangoxSpacing.xxl.rawValue)
         }
-        .allowsHitTesting(true)
     }
 }
 

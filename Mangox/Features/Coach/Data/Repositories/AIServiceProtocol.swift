@@ -31,6 +31,10 @@ protocol AIServiceProtocol: AnyObject {
     func coachFactSheetText() -> String
     func hasReachedFreeLimit(isPro: Bool) -> Bool
     func canSendCoachMessage(_ text: String, isPro: Bool, forcePlanIntake: Bool, hasImage: Bool) -> Bool
+    /// Synchronous reservation check used by the view before scheduling an async send.
+    /// Returns true if a turn can begin right now, reserving the slot so a second rapid
+    /// tap cannot also pass. The reservation is consumed by `sendMessage`.
+    func canBeginTurn() -> Bool
     func instantCoachEmptyStartersContent() -> CoachEmptyStartersContent
     func loadCoachEmptyStartersContent() async -> CoachEmptyStartersContent
     func warmCoachContextCache() async

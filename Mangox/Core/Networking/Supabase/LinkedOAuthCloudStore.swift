@@ -118,11 +118,19 @@ enum LinkedOAuthCloudStore {
             .execute()
     }
 
-    private static func parseUpdatedAt(_ raw: String) -> Date? {
+    private static let updatedAtFormatterFrac: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f.date(from: raw) { return d }
+        return f
+    }()
+    private static let updatedAtFormatterStd: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
-        return f.date(from: raw)
+        return f
+    }()
+
+    private static func parseUpdatedAt(_ raw: String) -> Date? {
+        if let d = updatedAtFormatterFrac.date(from: raw) { return d }
+        return updatedAtFormatterStd.date(from: raw)
     }
 }

@@ -100,8 +100,6 @@ func appRouteDestination(_ route: AppRoute, path: Binding<NavigationPath>, di: D
     case .aiPlan(let planID):
         AITrainingPlanView(planID: planID, navigationPath: path, viewModel: di.makeTrainingViewModel())
             .toolbar(.hidden, for: .navigationBar)
-    case .storyCardDebug:
-        StoryCardDebugView()
     case .loggedActivities:
         LoggedActivitiesView(viewModel: di.makeLoggedActivitiesViewModel(), navigationPath: path)
     case .loggedActivitiesForDay(let date):

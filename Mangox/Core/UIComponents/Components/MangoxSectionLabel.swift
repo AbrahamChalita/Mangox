@@ -5,8 +5,9 @@ struct MangoxSectionLabel: View {
     var horizontalPadding: CGFloat = MangoxSpacing.page
 
     var body: some View {
-        Text(title.uppercased())
+        Text(title)
             .mangoxFont(.label)
+            .textCase(.uppercase)
             .foregroundStyle(AppColor.fg3)
             .tracking(1.4)
             .padding(.horizontal, horizontalPadding)

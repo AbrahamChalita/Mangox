@@ -202,12 +202,13 @@ struct CoachPlansPanel: View {
 
     // MARK: - AI Plan Card
 
+    @ViewBuilder
     private func standardPlanCard(plan: TrainingPlan?, originalAIPlan: AIGeneratedPlan?) -> some View {
-        guard let resolvedPlan = plan, let originalAIPlan else { return AnyView(EmptyView()) }
-        let planID = originalAIPlan.id
-        let progress = allPlanProgress.first { $0.planID == planID }
+        if let resolvedPlan = plan, let originalAIPlan {
+            let planID = originalAIPlan.id
+            let progress = allPlanProgress.first { $0.planID == planID }
 
-        return AnyView(VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 planCardGlyph(systemName: "figure.outdoor.cycle", color: AppColor.mango)
 
@@ -337,10 +338,10 @@ struct CoachPlansPanel: View {
                 )
             }
             .buttonStyle(MangoxPressStyle())
+            }
+            .padding(16)
+            .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
         }
-        .padding(16)
-        .mangoxSurface(.flat, shape: .rounded(MangoxRadius.sharp.rawValue))
-        )
     }
 
     // MARK: - Card Helpers

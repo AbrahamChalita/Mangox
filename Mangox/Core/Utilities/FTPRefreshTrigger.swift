@@ -1,4 +1,4 @@
-// Features/Training/Data/DataSources/FTPRefreshTrigger.swift
+// Core/Utilities/FTPRefreshTrigger.swift
 import Foundation
 import Observation
 

@@ -65,38 +65,33 @@ enum AppColor {
     }
 }
 
-// MARK: - Training Zone Target Color
-
-extension TrainingZoneTarget {
-    /// The accent color for this training zone target.
-    /// Eliminates the duplicated 15-case `zoneTargetColor(_ zone:)` switch
-    /// in WorkoutRowView, DashboardView, and TrainingPlanView.
-    var color: Color {
-        switch self {
-        case .z1:    return AppColor.blue
-        case .z2:    return AppColor.success
-        case .z3:    return AppColor.yellow
-        case .z4:    return AppColor.orange
-        case .z5:    return AppColor.red
-        case .z1z2:  return AppColor.success
-        case .z2z3:  return Color(red: 160/255, green: 195/255, blue: 120/255)
-        case .z3z4:  return Color(red: 240/255, green: 158/255, blue: 68/255)
-        case .z3z5:  return Color(red: 236/255, green: 130/255, blue: 84/255)
-        case .z4z5:  return Color(red: 236/255, green: 95/255, blue: 74/255)
-        case .mixed: return Color.white.opacity(0.5)
-        case .all:   return AppColor.yellow
-        case .rest:  return AppColor.blue.opacity(0.4)
-        case .none:  return Color.white.opacity(0.2)
-        }
-    }
-}
-
 // MARK: - Shared Formatting Helpers
 
 /// Centralized formatting utilities.
 /// Replaces the duplicated `formatDuration`, `formatSeconds`, etc. helpers
 /// in SummaryView, WorkoutRowView, and WorkoutManager.
 enum AppFormat {
+
+    private static let isoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoStd: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+    private static let isoDay: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate]
+        return f
+    }()
+    private static let snippetRegex: NSRegularExpression? = {
+        let pattern =
+            #"(?<![0-9])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.[0-9]{1,9})?)?(?:Z|[+-]\d{2}(?::)?\d{2})?)|(?<![0-9])(\d{4}-\d{2}-\d{2})(?![0-9T])"#
+        return try? NSRegularExpression(pattern: pattern, options: [])
+    }()
 
     // MARK: - Unit Conversion
 
@@ -188,13 +183,6 @@ enum AppFormat {
     static func naturalizeISODateSnippets(in string: String) -> String {
         guard !string.isEmpty else { return string }
 
-        let isoFrac = ISO8601DateFormatter()
-        isoFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let isoStd = ISO8601DateFormatter()
-        isoStd.formatOptions = [.withInternetDateTime]
-        let isoDay = ISO8601DateFormatter()
-        isoDay.formatOptions = [.withFullDate]
-
         func parse(_ sub: String) -> Date? {
             if let d = isoFrac.date(from: sub) { return d }
             if let d = isoStd.date(from: sub) { return d }
@@ -208,13 +196,7 @@ enum AppFormat {
             return date.formatted(date: .abbreviated, time: .shortened)
         }
 
-        // Datetime first, then bare calendar dates (not followed by `T` or more digits).
-        let pattern =
-            #"(?<![0-9])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.[0-9]{1,9})?)?(?:Z|[+-]\d{2}(?::)?\d{2})?)|(?<![0-9])(\d{4}-\d{2}-\d{2})(?![0-9T])"#
-
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return string
-        }
+        guard let regex = snippetRegex else { return string }
 
         var result = string
         let nsFull = result as NSString
@@ -351,7 +333,13 @@ extension Color {
     init(hex: String) {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
+        guard Scanner(string: hex).scanHexInt64(&int), [3, 6, 8].contains(hex.count) else {
+            #if DEBUG
+            assertionFailure("Invalid hex color: \(hex)")
+            #endif
+            self = .clear
+            return
+        }
         let a: UInt64, r: UInt64, g: UInt64, b: UInt64
         switch hex.count {
         case 3:
@@ -361,7 +349,11 @@ extension Color {
         case 8:
             (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
         default:
-            (a, r, g, b) = (255, 0, 0, 0)
+            #if DEBUG
+            assertionFailure("Invalid hex color length: \(hex.count)")
+            #endif
+            self = .clear
+            return
         }
         self.init(.sRGB, red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, opacity: Double(a) / 255)
     }

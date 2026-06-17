@@ -472,6 +472,8 @@ enum PlanEventDateNormalization {
 
 enum ChatRuntimeEvent: Sendable {
     case status(String)
+    case searchStarted
+    case searchCompleted
     case textDelta(String)
     case reasoningDelta(String)
     case toolCalls([ToolCall])

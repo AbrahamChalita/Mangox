@@ -1,4 +1,4 @@
-// Features/Outdoor/Domain/Entities/RidePreferences.swift
+// Core/Preferences/RidePreferences.swift
 import Foundation
 import Observation
 

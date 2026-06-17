@@ -1,5 +1,6 @@
 // Features/Training/Domain/Entities/TrainingPlan.swift
 import Foundation
+import SwiftUI
 
 // MARK: - Suggested Trainer Mode
 
@@ -109,6 +110,26 @@ enum TrainingZoneTarget: String, Codable, Sendable {
         case .all: return 6
         }
     }
+    /// The accent color for this training zone target.
+    var color: Color {
+        switch self {
+        case .z1:    return AppColor.blue
+        case .z2:    return AppColor.success
+        case .z3:    return AppColor.yellow
+        case .z4:    return AppColor.orange
+        case .z5:    return AppColor.red
+        case .z1z2:  return AppColor.success
+        case .z2z3:  return Color(red: 160/255, green: 195/255, blue: 120/255)
+        case .z3z4:  return Color(red: 240/255, green: 158/255, blue: 68/255)
+        case .z3z5:  return Color(red: 236/255, green: 130/255, blue: 84/255)
+        case .z4z5:  return Color(red: 236/255, green: 95/255, blue: 74/255)
+        case .mixed: return Color.white.opacity(0.5)
+        case .all:   return AppColor.yellow
+        case .rest:  return AppColor.blue.opacity(0.4)
+        case .none:  return Color.white.opacity(0.2)
+        }
+    }
+
 }
 
 // MARK: - Workout Day Type

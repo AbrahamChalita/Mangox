@@ -24,109 +24,69 @@ final class RideLiveActivityManager: LiveActivityServiceProtocol {
 
     // MARK: - Outdoor
 
-    func syncRecording(
-        isRecording: Bool,
-        prefs: RidePreferences,
-        navigationService: NavigationService,
-        locationManager: LocationServiceProtocol,
-        bleService: BLEServiceProtocol
-    ) async {
-        guard prefs.outdoorLiveActivityEnabled else {
+    func syncOutdoorRecording(snapshot: OutdoorLiveActivitySnapshot) async {
+        guard snapshot.isEnabled else {
             await endIfNeeded()
             return
         }
-        guard isRecording else {
+        guard snapshot.isRecording else {
             await endIfNeeded()
             return
         }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
-        let nextTurn: String?
-        if navigationService.mode == .turnByTurn, let turn = navigationService.nextTurn {
-            nextTurn = turn.instruction
-        } else if navigationService.mode == .followRoute,
-            let hint = navigationService.followRouteHint
-        {
-            nextTurn = hint.instruction
-        } else {
-            nextTurn = nil
-        }
-
-        let hr = max(0, bleService.metrics.heartRate)
-        let power = max(0, bleService.smoothedPower)
-        let cadence = bleService.metrics.cadence
-        let hrZoneId: Int = hr > 0 ? HeartRateZone.zone(for: hr).id : 0
-        let powerZoneId: Int = power > 0 ? PowerZone.zone(for: power).id : 0
+        let hrZoneId: Int = snapshot.heartRateBpm > 0 ? HeartRateZone.zone(for: snapshot.heartRateBpm).id : 0
+        let powerZoneId: Int = snapshot.powerWatts > 0 ? PowerZone.zone(for: snapshot.powerWatts).id : 0
 
         let state = MangoxRideAttributes.ContentState(
-            speedKmh: locationManager.speed,
-            distanceM: locationManager.totalDistance,
-            durationSeconds: locationManager.rideDuration,
-            startedAt: Date().addingTimeInterval(-locationManager.rideDuration),
-            nextTurnShort: nextTurn,
-            heartRateBpm: hr,
-            powerWatts: power,
-            cadenceRpm: cadence,
+            speedKmh: snapshot.speedKmh,
+            distanceM: snapshot.distanceM,
+            durationSeconds: snapshot.durationSeconds,
+            startedAt: Date().addingTimeInterval(-snapshot.durationSeconds),
+            nextTurnShort: snapshot.nextTurnShort,
+            heartRateBpm: snapshot.heartRateBpm,
+            powerWatts: snapshot.powerWatts,
+            cadenceRpm: snapshot.cadenceRpm,
             hrZoneId: hrZoneId,
             powerZoneId: powerZoneId,
-            useImperial: prefs.isImperial,
-            isAutoPaused: locationManager.isAutoPaused,
-            isManuallyPaused: false  // TODO: wire manual pause
+            useImperial: snapshot.useImperial,
+            isAutoPaused: snapshot.isAutoPaused,
+            isManuallyPaused: snapshot.isManuallyPaused
         )
 
-        let modeLabel: String
-        switch navigationService.mode {
-        case .freeRide: modeLabel = "Outdoor"
-        case .followRoute: modeLabel = "Route"
-        case .turnByTurn: modeLabel = "Navigate"
-        }
-
-        await publishState(state, modeLabel: modeLabel)
+        await publishState(state, modeLabel: snapshot.modeLabel)
     }
 
     // MARK: - Indoor
 
-    func syncIndoorRecording(
-        isRecording: Bool,
-        prefs: RidePreferences,
-        workoutManager: WorkoutManager,
-        dataSourceService: DataSourceServiceProtocol,
-        bleService: BLEServiceProtocol
-    ) async {
-        guard prefs.indoorLiveActivityEnabled else {
+    func syncIndoorRecording(snapshot: IndoorLiveActivitySnapshot) async {
+        guard snapshot.isEnabled else {
             await endIfNeeded()
             return
         }
-        guard isRecording else {
+        guard snapshot.isRecording else {
             await endIfNeeded()
             return
         }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
-        let unified = dataSourceService.snapshotUnifiedMetrics()
-        let hr = max(0, unified.heartRate)
-        let power = workoutManager.displayPower
-        let cadence = unified.cadence
-        let speed = workoutManager.metricsSpeed
-        let distanceM = workoutManager.activeDistance
-        let duration = Double(workoutManager.elapsedSeconds)
-        let hrZoneId: Int = hr > 0 ? HeartRateZone.zone(for: hr).id : 0
-        let powerZoneId: Int = power > 0 ? PowerZone.zone(for: power).id : 0
+        let hrZoneId: Int = snapshot.heartRateBpm > 0 ? HeartRateZone.zone(for: snapshot.heartRateBpm).id : 0
+        let powerZoneId: Int = snapshot.powerWatts > 0 ? PowerZone.zone(for: snapshot.powerWatts).id : 0
 
         let state = MangoxRideAttributes.ContentState(
-            speedKmh: speed,
-            distanceM: distanceM,
-            durationSeconds: duration,
-            startedAt: Date().addingTimeInterval(-duration),
+            speedKmh: snapshot.speedKmh,
+            distanceM: snapshot.distanceM,
+            durationSeconds: snapshot.durationSeconds,
+            startedAt: Date().addingTimeInterval(-snapshot.durationSeconds),
             nextTurnShort: nil,
-            heartRateBpm: hr,
-            powerWatts: power,
-            cadenceRpm: cadence,
+            heartRateBpm: snapshot.heartRateBpm,
+            powerWatts: snapshot.powerWatts,
+            cadenceRpm: snapshot.cadenceRpm,
             hrZoneId: hrZoneId,
             powerZoneId: powerZoneId,
-            useImperial: prefs.isImperial,
-            isAutoPaused: workoutManager.state == .autoPaused,
-            isManuallyPaused: workoutManager.state == .paused
+            useImperial: snapshot.useImperial,
+            isAutoPaused: snapshot.isAutoPaused,
+            isManuallyPaused: snapshot.isManuallyPaused
         )
 
         await publishState(state, modeLabel: "Indoor")

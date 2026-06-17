@@ -1,82 +1,5 @@
 import SwiftUI
 
-enum CoachSuggestedActionNavigation {
-    static func isNavigation(_ type: String) -> Bool {
-        let k = type.lowercased()
-        return k.hasPrefix("navigate") || k.contains("open_my_plans") || k == "start_workout"
-    }
-}
-
-// MARK: - Suggested reply chip colors
-
-enum CoachReplyChipPalette {
-    case neutral
-    case mangoWash
-    case cyanWash
-    case indigoWash
-
-    static func forAction(_ action: SuggestedAction) -> CoachReplyChipPalette {
-        let k = action.type.lowercased()
-        if CoachSuggestedActionNavigation.isNavigation(k) { return .indigoWash }
-        if k == "escalate_cloud" { return .mangoWash }
-        if k == "on_device_followup" { return .cyanWash }
-        return .neutral
-    }
-
-    func leadingIconTint(isEnabled: Bool) -> Color {
-        guard isEnabled else { return .white.opacity(0.22) }
-        switch self {
-        case .neutral: return AppColor.mango.opacity(0.92)
-        case .mangoWash: return AppColor.mango.opacity(0.95)
-        case .cyanWash: return Color.cyan.opacity(0.88)
-        case .indigoWash: return Color.indigo.opacity(0.85)
-        }
-    }
-
-    func gradientFill(isEnabled: Bool) -> LinearGradient {
-        let top: Color
-        let bottom: Color
-        switch self {
-        case .neutral:
-            top = Color.white.opacity(isEnabled ? 0.1 : 0.04)
-            bottom = Color.white.opacity(isEnabled ? 0.06 : 0.03)
-        case .mangoWash:
-            top = AppColor.mango.opacity(isEnabled ? 0.2 : 0.07)
-            bottom = Color.white.opacity(isEnabled ? 0.07 : 0.04)
-        case .cyanWash:
-            top = Color.cyan.opacity(isEnabled ? 0.16 : 0.06)
-            bottom = Color.white.opacity(isEnabled ? 0.06 : 0.03)
-        case .indigoWash:
-            top = Color.indigo.opacity(isEnabled ? 0.22 : 0.08)
-            bottom = Color.white.opacity(isEnabled ? 0.07 : 0.04)
-        }
-        return LinearGradient(
-            colors: [top, bottom],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    func strokeColor(isEnabled: Bool) -> Color {
-        switch self {
-        case .neutral: return Color.white.opacity(isEnabled ? 0.12 : 0.06)
-        case .mangoWash: return AppColor.mango.opacity(isEnabled ? 0.42 : 0.14)
-        case .cyanWash: return Color.cyan.opacity(isEnabled ? 0.38 : 0.12)
-        case .indigoWash: return Color.indigo.opacity(isEnabled ? 0.4 : 0.14)
-        }
-    }
-
-    func trailingOrbTint(isEnabled: Bool) -> Color {
-        guard isEnabled else { return .white.opacity(0.2) }
-        switch self {
-        case .neutral: return AppColor.mango.opacity(0.95)
-        case .mangoWash: return AppColor.mango.opacity(0.98)
-        case .cyanWash: return Color.cyan.opacity(0.92)
-        case .indigoWash: return Color.indigo.opacity(0.9)
-        }
-    }
-}
-
 // MARK: - Message row
 
 struct CoachMessageRow: View {
@@ -413,6 +336,7 @@ struct CoachAssistantBubble: View {
                             .font(.body)
                             .foregroundStyle(.white.opacity(0.94))
                             .lineSpacing(5)
+                            .accessibilityLabel(accessibilityValueText)
                         CoachDeliveryBadge(appearance: responseAppearance, compact: true)
                             .padding(.top, 2)
                     }
@@ -446,6 +370,7 @@ struct CoachAssistantBubble: View {
                         .lineLimit(expandedLongBody || !shouldTruncateBody ? nil : 20)
                         .padding(.horizontal, 16)
                         .padding(.bottom, shouldTruncateBody && !expandedLongBody ? 4 : 10)
+                        .accessibilityLabel(accessibilityValueText)
                 }
 
                 if shouldTruncateBody {
@@ -564,9 +489,8 @@ struct CoachAssistantBubble: View {
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(A11yL10n.coachReplyFormat(categoryLabel, responseAppearance.label))
-        .accessibilityValue(accessibilityValueText)
         .onAppear { beginMetadataReveal() }
         .onChange(of: message.id) { _, _ in beginMetadataReveal() }
         .contextMenu {
@@ -989,18 +913,15 @@ private struct CoachTypingDotsIndicator: View {
                     }
                 }
             } else {
-                TimelineView(.periodic(from: .now, by: 0.05)) { context in
-                    let t = context.date.timeIntervalSinceReferenceDate
+                PhaseAnimator([0, 1, 2, 1]) { phase in
                     HStack(spacing: spacing) {
                         ForEach(0..<3, id: \.self) { index in
-                            let offset = Double(index) * 0.18
-                            let opacity = 0.34 + 0.58 * ((sin((t - offset) * 10.0) + 1.0) / 2.0)
                             Circle()
-                                .fill(accent.opacity(opacity))
+                                .fill(accent.opacity(phase == index ? 0.92 : 0.34))
                                 .frame(width: 7, height: 7)
                         }
                     }
-                }
+                } animation: { _ in .easeInOut(duration: 0.22) }
             }
         }
         .accessibilityHidden(true)
@@ -1046,7 +967,7 @@ struct CoachPendingReplyBubble: View {
     }
 
     private var streamPlainText: String {
-        CoachAssistantFormatting.cachedPlainTextForStreaming(streamingText)
+        CoachAssistantFormatting.plainTextForStreaming(streamingText)
     }
 
     var body: some View {
@@ -1160,286 +1081,6 @@ struct CoachPendingReplyBubble: View {
         case .cloud:
             hasVisibleBody ? "Coach is writing a reply" : "Coach is preparing a reply"
         }
-    }
-}
-
-// MARK: - Shared prompt row (suggested replies + empty-state starters)
-
-/// Full-width tap target shared by coach suggested replies and conversation starters.
-struct CoachTallPromptButton: View {
-    let title: String
-    var subtitle: String? = nil
-    var leadingSystemImage: String? = nil
-    var trailingSystemImage: String = "arrow.up.circle.fill"
-    var trailingTint: Color = AppColor.mango.opacity(0.95)
-    /// Tinted fill + stroke for coach quick-reply chips; starters use `.neutral`.
-    var chipPalette: CoachReplyChipPalette = .neutral
-    var isEnabled: Bool = true
-    var isSent: Bool = false
-    /// When nil, a default label is derived from `title`.
-    var accessibilityLabelOverride: String? = nil
-    let action: () -> Void
-
-    private var titleColor: Color {
-        if isSent { return AppColor.mango.opacity(0.95) }
-        return isEnabled ? .white.opacity(0.92) : .white.opacity(0.35)
-    }
-
-    private var minRowHeight: CGFloat {
-        (subtitle == nil || subtitle?.isEmpty == true) ? 52 : 58
-    }
-
-    @ViewBuilder
-    private var rowBackground: some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        if isSent {
-            shape.fill(AppColor.mango.opacity(0.12))
-        } else {
-            shape.fill(chipPalette.gradientFill(isEnabled: isEnabled))
-        }
-    }
-
-    @ViewBuilder
-    private var rowBorder: some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .strokeBorder(
-                isSent
-                    ? AppColor.mango.opacity(0.45)
-                    : chipPalette.strokeColor(isEnabled: isEnabled),
-                lineWidth: 1
-            )
-    }
-
-    var body: some View {
-        Button {
-            guard isEnabled, !isSent else { return }
-            HapticManager.shared.coachQuickReplyTapped()
-            action()
-        } label: {
-            HStack(alignment: .center, spacing: 12) {
-                if let leadingSystemImage {
-                    Image(systemName: isSent ? "checkmark.circle.fill" : leadingSystemImage)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(
-                            isSent
-                                ? AppColor.mango.opacity(0.95)
-                                : chipPalette.leadingIconTint(isEnabled: isEnabled)
-                        )
-                        .frame(width: 26, alignment: .center)
-                        .accessibilityHidden(true)
-                }
-
-                VStack(alignment: .leading, spacing: (subtitle == nil || subtitle?.isEmpty == true) ? 0 : 3) {
-                    Text(title)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(titleColor)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let subtitle, !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.white.opacity(isEnabled ? 0.44 : 0.28))
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Image(systemName: isSent ? "checkmark" : trailingSystemImage)
-                    .font(.system(size: isSent ? 14 : 20, weight: .semibold))
-                    .foregroundStyle(
-                        isSent
-                            ? AppColor.mango.opacity(0.95)
-                            : (isEnabled ? trailingTint : .white.opacity(0.2))
-                    )
-                    .accessibilityHidden(true)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(minHeight: minRowHeight, alignment: .center)
-            .background { rowBackground }
-            .overlay { rowBorder }
-        }
-        .buttonStyle(MangoxPressStyle())
-        .disabled(!isEnabled || isSent)
-        .animation(.snappy, value: isSent)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            accessibilityLabelOverride
-                ?? [title, subtitle].compactMap { $0 }.joined(separator: ", ")
-        )
-        .accessibilityAddTraits(.isButton)
-    }
-}
-
-// MARK: - Empty state starters (same card language as follow-up replies)
-
-struct CoachEmptyStartersPanel: View {
-    let bubbleMaxWidth: CGFloat
-    let greetingTitle: String
-    let headline: String
-    let subhead: String
-    /// Topic-style tags from `SystemLanguageModel(useCase: .contentTagging)` (Apple Intelligence).
-    let topicTags: [String]
-    let prompts: [QuickPrompt]
-    var startersEnabled: Bool = true
-    let onPlanBuilder: () -> Void
-    let onPrompt: (QuickPrompt) -> Void
-
-    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
-
-    private var textPrimary: Color { .white.opacity(AppOpacity.textPrimary) }
-    private var textSecondary: Color { .white.opacity(AppOpacity.textSecondary) }
-    private var textTertiary: Color { .white.opacity(AppOpacity.textTertiary) }
-
-    /// Matches Apple’s sample spirit (blurReplace) without requiring a specific SDK symbol name.
-    private var tagAppearTransition: AnyTransition {
-        if accessibilityReduceMotion { return .opacity }
-        return .opacity.combined(with: .scale(scale: 0.96, anchor: .leading))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 0) {
-                Rectangle()
-                    .fill(AppColor.mango)
-                    .frame(width: 2)
-
-                VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
-                    HStack(spacing: MangoxSpacing.xs.rawValue) {
-                        Image(systemName: "sparkles")
-                            .font(MangoxFont.micro.value)
-                            .foregroundStyle(AppColor.mango)
-                        Text("COACH")
-                            .mangoxFont(.micro)
-                            .tracking(1.4)
-                            .foregroundStyle(AppColor.fg3)
-                    }
-                    .accessibilityHidden(true)
-
-                    Text(greetingTitle)
-                        .font(MangoxFont.title.value)
-                        .foregroundStyle(AppColor.fg0)
-                        .accessibilityLabel(greetingTitle)
-
-                    Text(headline)
-                        .mangoxFont(.bodyBold)
-                        .foregroundStyle(AppColor.fg1)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-
-                    Text(subhead)
-                        .mangoxFont(.body)
-                        .foregroundStyle(AppColor.fg2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .lineSpacing(2)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, MangoxSpacing.md.rawValue)
-                .padding(.trailing, MangoxSpacing.lg.rawValue)
-                .padding(.vertical, MangoxSpacing.lg.rawValue)
-            }
-
-            Rectangle()
-                .fill(AppColor.hair)
-                .frame(height: 1)
-
-            VStack(alignment: .leading, spacing: MangoxSpacing.md.rawValue) {
-                if !topicTags.isEmpty {
-                    VStack(alignment: .leading, spacing: MangoxSpacing.sm.rawValue) {
-                        HStack(spacing: MangoxSpacing.xs.rawValue) {
-                            Image(systemName: "tag.fill")
-                                .font(MangoxFont.micro.value)
-                                .foregroundStyle(AppColor.blue.opacity(0.75))
-                            Text("GROUNDED TOPICS")
-                                .mangoxFont(.micro)
-                                .tracking(1.2)
-                                .foregroundStyle(AppColor.fg3)
-                        }
-                        .padding(.horizontal, MangoxSpacing.lg.rawValue)
-                        .padding(.top, MangoxSpacing.md.rawValue)
-
-                        Text("Based on the ride, plan, and recovery data Mangox can actually see right now.")
-                            .mangoxFont(.caption)
-                            .foregroundStyle(AppColor.fg2)
-                            .padding(.horizontal, MangoxSpacing.lg.rawValue)
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: MangoxSpacing.xs.rawValue) {
-                                ForEach(topicTags, id: \.self) { tag in
-                                    Text("#\(CoachTagPillFormatting.displayLabel(for: tag).uppercased())")
-                                        .mangoxFont(.micro)
-                                        .tracking(1.0)
-                                        .foregroundStyle(AppColor.fg2)
-                                        .padding(.horizontal, MangoxSpacing.sm.rawValue)
-                                        .padding(.vertical, 6)
-                                        .mangoxSurface(
-                                            .flatCustom(fill: Color.clear, border: AppColor.blue.opacity(0.35)),
-                                            shape: .rounded(MangoxRadius.sharp.rawValue)
-                                        )
-                                        .transition(tagAppearTransition)
-                                }
-                            }
-                            .padding(.horizontal, MangoxSpacing.lg.rawValue)
-                            .padding(.bottom, 4)
-                        }
-                    }
-                    .animation(
-                        accessibilityReduceMotion ? .easeInOut(duration: 0.16) : .smooth(duration: 0.35),
-                        value: topicTags
-                    )
-                }
-
-                HStack(spacing: MangoxSpacing.xs.rawValue) {
-                    Image(systemName: "hand.tap.fill")
-                        .font(MangoxFont.micro.value)
-                        .foregroundStyle(AppColor.mango.opacity(0.85))
-                    Text("QUICK STARTERS")
-                        .mangoxFont(.micro)
-                        .tracking(1.2)
-                        .foregroundStyle(AppColor.fg3)
-                }
-                .padding(.horizontal, MangoxSpacing.lg.rawValue)
-                .padding(.top, topicTags.isEmpty ? MangoxSpacing.md.rawValue : MangoxSpacing.xs.rawValue)
-
-                VStack(spacing: MangoxSpacing.sm.rawValue) {
-                    CoachTallPromptButton(
-                        title: "Build a training plan",
-                        subtitle: "Event, target date, weekly hours — guided setup for a full plan.",
-                        leadingSystemImage: "map.fill",
-                        trailingSystemImage: "arrow.right.circle.fill",
-                        trailingTint: AppColor.mango.opacity(0.95),
-                        isEnabled: startersEnabled,
-                        accessibilityLabelOverride: "Build a training plan, starts guided plan setup",
-                        action: onPlanBuilder
-                    )
-
-                    ForEach(prompts) { p in
-                        CoachTallPromptButton(
-                            title: p.text,
-                            leadingSystemImage: p.icon,
-                            isEnabled: startersEnabled,
-                            accessibilityLabelOverride: "Starter: \(p.text)",
-                            action: { onPrompt(p) }
-                        )
-                        .transition(tagAppearTransition)
-                    }
-                }
-                .padding(.horizontal, MangoxSpacing.md.rawValue)
-                .padding(.bottom, MangoxSpacing.md.rawValue)
-                .animation(
-                    accessibilityReduceMotion ? .easeInOut(duration: 0.18) : .smooth(duration: 0.38),
-                    value: prompts.map(\.id)
-                )
-            }
-        }
-        .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
-        .mangoxSurface(
-            .flatCustom(fill: AppColor.bg2, border: AppColor.mango.opacity(0.28)),
-            shape: .rounded(MangoxRadius.sharp.rawValue)
-        )
-        .accessibilityElement(children: .contain)
     }
 }
 

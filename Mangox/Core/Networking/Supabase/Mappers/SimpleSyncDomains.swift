@@ -199,14 +199,12 @@ struct CustomWorkoutTemplateSyncDomain: SupabaseSyncDomain {
 
         guard !remoteRows.isEmpty else { return }
 
+        let remoteIDs = remoteRows.map(\.id)
+        let localByID = try fetchLocalTemplates(ids: remoteIDs, context: context)
+
         var didChange = false
         for remote in remoteRows {
-            let capturedID = remote.id
-            var descriptor = FetchDescriptor<CustomWorkoutTemplate>(
-                predicate: #Predicate { $0.id == capturedID }
-            )
-            descriptor.fetchLimit = 1
-            let existing = try context.fetch(descriptor).first
+            let existing = localByID[remote.id]
 
             if let existing {
                 guard remote.updated_at > existing.createdAt else { continue }
@@ -229,6 +227,17 @@ struct CustomWorkoutTemplateSyncDomain: SupabaseSyncDomain {
         if didChange {
             try context.save()
         }
+    }
+
+    @MainActor
+    private func fetchLocalTemplates(ids: [UUID], context: ModelContext) throws -> [UUID: CustomWorkoutTemplate] {
+        guard !ids.isEmpty else { return [:] }
+        let capturedIDs = ids
+        let descriptor = FetchDescriptor<CustomWorkoutTemplate>(
+            predicate: #Predicate { capturedIDs.contains($0.id) }
+        )
+        let templates = try context.fetch(descriptor)
+        return Dictionary(uniqueKeysWithValues: templates.map { ($0.id, $0) })
     }
 
     private struct PulledTemplateRow: Decodable, Sendable {

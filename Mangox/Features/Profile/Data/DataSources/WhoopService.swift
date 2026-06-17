@@ -2,7 +2,6 @@
 import AuthenticationServices
 import Foundation
 import os.log
-import Security
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
@@ -58,7 +57,7 @@ final class WhoopService: WhoopServiceProtocol {
         }
     }
 
-    private struct Session: Codable {
+    private struct Session: Codable, OAuthSessionPayload {
         var accessToken: String
         var refreshToken: String
         var expiresAt: Int
@@ -170,8 +169,7 @@ final class WhoopService: WhoopServiceProtocol {
     weak var linkedOAuthBridge: LinkedOAuthSessionBridge?
 
     var linkedAccountLocalSavedAt: Date? {
-        let t = UserDefaults.standard.double(forKey: Self.localSavedAtKey)
-        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+        sessionStore.linkedAccountLocalSavedAt
     }
 
     var linkedOAuthProviderUserID: String? {
@@ -194,10 +192,13 @@ final class WhoopService: WhoopServiceProtocol {
         return d
     }()
 
-    private var session: Session?
+    private let sessionStore: OAuthSessionStore<Session>
+    private var session: Session? {
+        get { sessionStore.session }
+        set { sessionStore.setSession(newValue) }
+    }
     private var authSession: ASWebAuthenticationSession?
     private var pendingOAuthState: String?
-    private var refreshTask: Task<String, Error>?
 
     init() {
         self.clientID = Self.infoValue(for: "WHOOP_CLIENT_ID")
@@ -206,8 +207,16 @@ final class WhoopService: WhoopServiceProtocol {
             for: "WHOOP_REDIRECT_URI",
             fallback: "mangox://localhost/whoop-auth"
         )
+        self.sessionStore = OAuthSessionStore(
+            keychainAccount: Self.keychainAccount,
+            localSavedAtKey: Self.localSavedAtKey
+        )
         self.urlSession = Self.makeSession()
-        restoreSession()
+        sessionStore.restore(decoder: decoder, onRestored: { [weak self] restored in
+            self?.applySession(restored)
+        }, onFailure: { error in
+            whoopLogger.error("Failed to restore WHOOP session: \(error.localizedDescription)")
+        })
     }
 
     /// When true, Mangox writes WHOOP max HR (body API) and resting HR (recovery) into `HeartRateZone` if the user has not set manual overrides.
@@ -461,15 +470,14 @@ final class WhoopService: WhoopServiceProtocol {
         isConnected = false
         lastError = nil
         lastSuccessfulRefreshAt = nil
-        _ = try? WhoopKeychainStorage.delete(account: Self.keychainAccount)
-        UserDefaults.standard.removeObject(forKey: Self.localSavedAtKey)
+        sessionStore.deleteKeychain()
+        sessionStore.clearLocalSavedAt()
         let bridge = linkedOAuthBridge
         Task { await bridge?.deleteCloudSession(provider: .whoop) }
     }
 
     func exportSessionJSONForCloudBackup() -> Data? {
-        guard let session else { return nil }
-        return try? JSONEncoder().encode(session)
+        sessionStore.exportJSON()
     }
 
     func restoreSessionFromCloudIfNeeded(sessionJSON: Data, remoteUpdatedAt: Date) {
@@ -480,7 +488,7 @@ final class WhoopService: WhoopServiceProtocol {
             let restored = try JSONDecoder().decode(Session.self, from: sessionJSON)
             try persistSession(restored, notifyCloud: false)
             applySession(restored)
-            markLinkedAccountSaved(at: remoteUpdatedAt)
+            sessionStore.markLinkedAccountSaved(at: remoteUpdatedAt)
             lastError = nil
             whoopLogger.info("WHOOP session restored from cloud backup")
             let now = Int(Date().timeIntervalSince1970)
@@ -627,39 +635,30 @@ final class WhoopService: WhoopServiceProtocol {
     }
 
     private func validAccessToken() async throws -> String {
-        guard let current = session else {
-            throw WhoopError.tokenExchangeFailed("No WHOOP session. Connect your account first.")
-        }
-
-        let now = Int(Date().timeIntervalSince1970)
-        if current.expiresAt - now > 90 {
-            return current.accessToken
-        }
-
-        if let existing = refreshTask {
-            return try await existing.value
-        }
-
-        let task = Task<String, Error> { [weak self] in
-            guard let self, var current = self.session else {
-                throw WhoopError.tokenExchangeFailed("Session lost during refresh.")
+        let bridge = linkedOAuthBridge
+        return try await sessionStore.validAccessToken(
+            noSessionError: WhoopError.tokenExchangeFailed("No WHOOP session. Connect your account first."),
+            sessionLostError: WhoopError.tokenExchangeFailed("Session lost during refresh."),
+            refresh: { [weak self] refreshToken in
+                guard let self else {
+                    throw WhoopError.tokenExchangeFailed("Session lost during refresh.")
+                }
+                let refreshed = try await self.requestToken(
+                    grantType: "refresh_token",
+                    refreshToken: refreshToken
+                )
+                guard let newRefresh = refreshed.refresh_token, !newRefresh.isEmpty else {
+                    throw WhoopError.tokenExchangeFailed("Refresh response missing refresh_token.")
+                }
+                return self.mapSession(refreshed, refreshToken: newRefresh, previous: self.session)
+            },
+            onRefreshed: { [weak self] session in
+                self?.applySession(session)
+            },
+            onCloudNotify: {
+                Task { await bridge?.pushProviderToCloud(.whoop) }
             }
-            let refreshed = try await self.requestToken(
-                grantType: "refresh_token",
-                refreshToken: current.refreshToken
-            )
-            guard let newRefresh = refreshed.refresh_token, !newRefresh.isEmpty else {
-                throw WhoopError.tokenExchangeFailed("Refresh response missing refresh_token.")
-            }
-            current = self.mapSession(refreshed, refreshToken: newRefresh, previous: current)
-            try self.persistSession(current)
-            self.applySession(current)
-            return current.accessToken
-        }
-
-        refreshTask = task
-        defer { refreshTask = nil }
-        return try await task.value
+        )
     }
 
     private func mapSession(
@@ -784,29 +783,9 @@ final class WhoopService: WhoopServiceProtocol {
     }
 
     private func persistSession(_ session: Session, notifyCloud: Bool = true) throws {
-        let data = try JSONEncoder().encode(session)
-        try WhoopKeychainStorage.save(data: data, account: Self.keychainAccount)
-        if notifyCloud {
-            markLinkedAccountSaved(at: Date())
-            let bridge = linkedOAuthBridge
+        let bridge = linkedOAuthBridge
+        try sessionStore.persist(session, notifyCloud: notifyCloud) {
             Task { await bridge?.pushProviderToCloud(.whoop) }
-        }
-    }
-
-    private func markLinkedAccountSaved(at date: Date) {
-        UserDefaults.standard.set(date.timeIntervalSince1970, forKey: Self.localSavedAtKey)
-    }
-
-    private func restoreSession() {
-        do {
-            guard let data = try WhoopKeychainStorage.read(account: Self.keychainAccount) else {
-                return
-            }
-            let restored = try JSONDecoder().decode(Session.self, from: data)
-            applySession(restored)
-        } catch {
-            whoopLogger.error("Failed to restore WHOOP session: \(error.localizedDescription)")
-            _ = try? WhoopKeychainStorage.delete(account: Self.keychainAccount)
         }
     }
 
@@ -933,64 +912,3 @@ private final class WhoopWebAuthPresentationContextProvider: NSObject,
     }
 }
 
-// MARK: - Keychain
-
-private enum WhoopKeychainStorage {
-    enum KeychainError: Error {
-        case operationFailed(OSStatus)
-    }
-
-    static func save(data: Data, account: String) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: account,
-        ]
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-        ]
-        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if updateStatus == errSecSuccess {
-            return
-        }
-        if updateStatus != errSecItemNotFound {
-            throw KeychainError.operationFailed(updateStatus)
-        }
-        var insert = query
-        insert[kSecValueData as String] = data
-        insert[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        let addStatus = SecItemAdd(insert as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
-            throw KeychainError.operationFailed(addStatus)
-        }
-    }
-
-    static func read(account: String) throws -> Data? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        if status == errSecItemNotFound {
-            return nil
-        }
-        guard status == errSecSuccess else {
-            throw KeychainError.operationFailed(status)
-        }
-        return item as? Data
-    }
-
-    static func delete(account: String) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: account,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw KeychainError.operationFailed(status)
-        }
-    }
-}

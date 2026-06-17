@@ -272,6 +272,16 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
     /// Duration of the current ride in seconds (excludes paused time).
     var rideDuration: TimeInterval = 0
 
+    /// Pause-aware timing inputs for `SessionElapsedLabel` and other view-layer clocks.
+    var sessionElapsedTiming: SessionElapsedTiming? {
+        guard let rideStartDate else { return nil }
+        return SessionElapsedTiming(
+            startDate: rideStartDate,
+            totalPausedDuration: totalPausedDuration,
+            pauseStartedAt: lastPauseStart
+        )
+    }
+
     /// Average speed in km/h for the current ride.
     var averageSpeed: Double = 0
 
@@ -985,8 +995,12 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
         outdoorLocationPreviewActive = false
 
         applyLocationSamplingPolicy()
-        applyBackgroundLocationPolicy(to: clManager!)
-        clManager?.startUpdatingLocation()
+        guard let clManager else {
+            logger.error("startRecording called before LocationManager.setup()")
+            return
+        }
+        applyBackgroundLocationPolicy(to: clManager)
+        clManager.startUpdatingLocation()
 
         startGpsStaleMonitoringIfNeeded()
         applyHighFrequencySensorsPolicy()
@@ -1175,34 +1189,40 @@ final class LocationManager: NSObject, LocationServiceProtocol, MapCameraService
 
     // MARK: - GPX Export
 
-    /// Generate GPX XML string from recorded locations.
-    func exportGPX() -> String {
-        let trackPointsBody: String
-        if let pendingRecordedTrackPointsURL,
-            let data = try? Data(contentsOf: pendingRecordedTrackPointsURL),
-            let contents = String(data: data, encoding: .utf8)
-        {
-            trackPointsBody = contents
-        } else {
-            trackPointsBody = ""
+    /// Stream recorded track points into a GPX file (avoids loading the full track into memory).
+    func exportGPX(to destination: URL) throws {
+        FileManager.default.createFile(atPath: destination.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: destination)
+        defer { try? handle.close() }
+
+        func write(_ string: String) throws {
+            guard let data = string.data(using: .utf8) else { return }
+            try handle.write(contentsOf: data)
         }
-        var gpx = """
+
+        try write("""
             <?xml version="1.0" encoding="UTF-8"?>
             <gpx version="1.1" creator="Mangox" xmlns="http://www.topografix.com/GPX/1/1">
               <trk>
                 <name>Outdoor Ride</name>
                 <trkseg>
 
-            """
-        gpx += trackPointsBody
+            """)
 
-        gpx += """
+        if let pendingRecordedTrackPointsURL,
+           let bodyHandle = try? FileHandle(forReadingFrom: pendingRecordedTrackPointsURL) {
+            defer { try? bodyHandle.close() }
+            while true {
+                guard let chunk = try bodyHandle.read(upToCount: 65_536), !chunk.isEmpty else { break }
+                try handle.write(contentsOf: chunk)
+            }
+        }
+
+        try write("""
                 </trkseg>
               </trk>
             </gpx>
-            """
-
-        return gpx
+            """)
     }
 
     private func persistRideCheckpointIfNeeded(force: Bool) {

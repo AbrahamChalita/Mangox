@@ -2,9 +2,9 @@ import AppIntents
 import Foundation
 
 private enum MangoxIntentDeepLink {
-    static let indoorRide = URL(string: "mangox://ride/indoor")!
-    static let outdoorRide = URL(string: "mangox://ride/outdoor")!
-    static let coach = URL(string: "mangox://coach")!
+    static let indoorRide = URL(string: "mangox://ride/indoor")
+    static let outdoorRide = URL(string: "mangox://ride/outdoor")
+    static let coach = URL(string: "mangox://coach")
 }
 
 struct OpenIndoorRideIntent: AppIntent {
@@ -14,7 +14,10 @@ struct OpenIndoorRideIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & OpensIntent {
-        .result(opensIntent: OpenURLIntent(MangoxIntentDeepLink.indoorRide))
+        guard let url = MangoxIntentDeepLink.indoorRide else {
+            return .result()
+        }
+        return .result(opensIntent: OpenURLIntent(url))
     }
 }
 
@@ -25,7 +28,10 @@ struct OpenOutdoorRideIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & OpensIntent {
-        .result(opensIntent: OpenURLIntent(MangoxIntentDeepLink.outdoorRide))
+        guard let url = MangoxIntentDeepLink.outdoorRide else {
+            return .result()
+        }
+        return .result(opensIntent: OpenURLIntent(url))
     }
 }
 
@@ -36,7 +42,10 @@ struct OpenCoachIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & OpensIntent {
-        .result(opensIntent: OpenURLIntent(MangoxIntentDeepLink.coach))
+        guard let url = MangoxIntentDeepLink.coach else {
+            return .result()
+        }
+        return .result(opensIntent: OpenURLIntent(url))
     }
 }
 

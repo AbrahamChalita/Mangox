@@ -1,4 +1,4 @@
-// Features/Indoor/Domain/Entities/CyclingMetrics.swift
+// Core/Domain/CyclingMetrics.swift
 import Foundation
 
 enum HRSource: String, Sendable {

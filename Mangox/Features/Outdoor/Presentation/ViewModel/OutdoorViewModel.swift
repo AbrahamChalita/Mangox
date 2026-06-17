@@ -422,13 +422,45 @@ final class OutdoorViewModel {
         prefs: RidePreferences,
         locationManager: LocationServiceProtocol
     ) async {
-        await liveActivityService.syncRecording(
+        let nextTurn: String?
+        if navigationService.mode == .turnByTurn, let turn = navigationService.nextTurn {
+            nextTurn = turn.instruction
+        } else if navigationService.mode == .followRoute,
+            let hint = navigationService.followRouteHint
+        {
+            nextTurn = hint.instruction
+        } else {
+            nextTurn = nil
+        }
+
+        let modeLabel: String
+        switch navigationService.mode {
+        case .freeRide: modeLabel = "Outdoor"
+        case .followRoute: modeLabel = "Route"
+        case .turnByTurn: modeLabel = "Navigate"
+        }
+
+        let hr = max(0, bleService.metrics.heartRate)
+        let power = max(0, bleService.smoothedPower)
+        let cadence = bleService.metrics.cadence
+
+        let snapshot = OutdoorLiveActivitySnapshot(
+            isEnabled: prefs.outdoorLiveActivityEnabled,
             isRecording: isRecording,
-            prefs: prefs,
-            navigationService: navigationService,
-            locationManager: locationManager,
-            bleService: bleService
+            useImperial: prefs.isImperial,
+            modeLabel: modeLabel,
+            nextTurnShort: nextTurn,
+            speedKmh: locationManager.speed,
+            distanceM: locationManager.totalDistance,
+            durationSeconds: locationManager.rideDuration,
+            heartRateBpm: hr,
+            powerWatts: power,
+            cadenceRpm: cadence,
+            isAutoPaused: locationManager.isAutoPaused,
+            isManuallyPaused: false  // TODO: wire manual pause
         )
+
+        await liveActivityService.syncOutdoorRecording(snapshot: snapshot)
     }
 
     func endLiveActivity() async {

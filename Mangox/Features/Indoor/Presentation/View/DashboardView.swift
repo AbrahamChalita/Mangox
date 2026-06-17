@@ -516,79 +516,48 @@ struct DashboardView: View {
                 || workoutManager.state == .autoPaused)
 
         return VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 0) {
-                headerLeadingControl
-                    .frame(width: headerBarSideSlotWidth, alignment: .leading)
-
-                VStack(alignment: .center, spacing: 2) {
-                    Text(workoutManager.formattedElapsed)
-                        .font(
-                            DashboardViewFontToken.mono(
-                                size: dynamicTypeSize.isAccessibilitySize
-                                    ? 22
-                                    : (isActiveRide ? 32 : 26),
-                                weight: .bold
-                            )
+            SessionHeaderBar(
+                timing: workoutManager.sessionElapsedTiming,
+                elapsedPlaceholder: AppFormat.duration(0),
+                elapsedStyle: SessionElapsedStyle(
+                    font: DashboardViewFontToken.mono(
+                        size: dynamicTypeSize.isAccessibilitySize
+                            ? 22
+                            : (isActiveRide ? 32 : 26),
+                        weight: .bold
+                    ),
+                    foregroundStyle: isActiveRide ? AppColor.fg0 : AppColor.fg2,
+                    tracking: 0.4,
+                    minimumScaleFactor: 0.75
+                ),
+                statusSubtitle: headerSessionVisual?.subtitle,
+                modeBadge: SessionModeBadge(dotColor: AppColor.success, label: "INDOOR"),
+                sideSlotWidth: headerBarSideSlotWidth,
+                elapsedAccessibilityLabel: String(localized: "indoor.header.a11y.elapsed"),
+                horizontalPadding: MangoxSpacing.page,
+                topPadding: guidedDuringRide ? 8 : 10,
+                bottomPadding: 6,
+                leading: { headerLeadingControl },
+                trailing: {
+                    HStack(spacing: 12) {
+                        DeviceStatusBadge(
+                            icon: "bicycle",
+                            state: viewModel.trainerLinkDisplayState,
+                            fallbackName: "Trainer",
+                            isDataStale: viewModel.isTrainerLinkDataStale,
+                            iconOnly: true,
+                            bare: true
                         )
-                        .foregroundStyle(
-                            isActiveRide
-                                ? AppColor.fg0
-                                : AppColor.fg2
+                        DeviceStatusBadge(
+                            icon: "heart.fill",
+                            state: viewModel.hrConnectionState,
+                            fallbackName: "HR",
+                            iconOnly: true,
+                            bare: true
                         )
-                        .monospacedDigit()
-                        .tracking(0.4)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .multilineTextAlignment(.center)
-                        .accessibilityLabel(String(localized: "indoor.header.a11y.elapsed"))
-                        .accessibilityValue(workoutManager.formattedElapsed)
-
-                    if let sub = headerSessionVisual?.subtitle {
-                        Text(sub)
-                            .mangoxFont(.micro)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(AppColor.yellow.opacity(0.95))
-                            .tracking(0.8)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity)
                     }
-
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(AppColor.success)
-                            .frame(width: 5, height: 5)
-                        Text("INDOOR")
-                            .mangoxFont(.micro)
-                            .fontWeight(.bold)
-                            .foregroundStyle(AppColor.fg3)
-                            .tracking(1.0)
-                    }
-                    .padding(.top, 2)
                 }
-                .frame(maxWidth: .infinity)
-
-                HStack(spacing: 12) {
-                    DeviceStatusBadge(
-                        icon: "bicycle",
-                        state: viewModel.trainerLinkDisplayState,
-                        fallbackName: "Trainer",
-                        isDataStale: viewModel.isTrainerLinkDataStale,
-                        iconOnly: true,
-                        bare: true
-                    )
-                    DeviceStatusBadge(
-                        icon: "heart.fill",
-                        state: viewModel.hrConnectionState,
-                        fallbackName: "HR",
-                        iconOnly: true,
-                        bare: true
-                    )
-                }
-                .frame(width: headerBarSideSlotWidth, alignment: .trailing)
-            }
-            .padding(.horizontal, MangoxSpacing.page)
-            .padding(.top, guidedDuringRide ? 8 : 10)
-            .padding(.bottom, 6)
+            )
 
             if isActiveRide,
                 indoorSessionIntentSubtitle != nil || headerPinnedGoalLine != nil
@@ -950,13 +919,12 @@ struct DashboardView: View {
     private func compactDetailsPowerSnapshotCard() -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text("\(smoothedWatts)")
-                    .font(DashboardViewFontToken.mono(size: 34, weight: .black))
-                    .foregroundStyle(zone.color)
-                    .contentTransition(.numericText())
-                Text("W")
-                    .font(.title3)
-                    .foregroundStyle(AppColor.fg3)
+                SessionPowerLabel(
+                    power: smoothedWatts,
+                    unit: "W",
+                    valueFont: DashboardViewFontToken.mono(size: 34, weight: .black)
+                )
+                .equatable()
                 Spacer(minLength: 0)
                 Text(zone.name.uppercased())
                     .mangoxFont(.micro)

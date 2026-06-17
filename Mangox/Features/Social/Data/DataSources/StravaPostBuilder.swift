@@ -225,7 +225,10 @@ enum StravaPostBuilder {
     ) -> PlatformImage? {
         #if canImport(UIKit)
         let cardSize = CGSize(width: 1080, height: 1350)
-        let renderer = UIGraphicsImageRenderer(size: cardSize)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: cardSize, format: format)
         return renderer.image { ctx in
             drawCard(
                 in: ctx.cgContext,
@@ -474,6 +477,7 @@ private extension StravaPostBuilder {
             drawPowerSparkline(
                 samples: sortedSamples,
                 ftp: PowerZone.ftp,
+                avgPower: workout.avgPower,
                 in: CGRect(x: pad, y: cursorY, width: W - pad * 2, height: sparkH),
                 cgCtx: cgCtx
             )
@@ -655,6 +659,7 @@ private extension StravaPostBuilder {
     static func drawPowerSparkline(
         samples: [WorkoutSampleData],
         ftp: Int,
+        avgPower: Double,
         in rect: CGRect,
         cgCtx: CGContext
     ) {
@@ -748,8 +753,7 @@ private extension StravaPostBuilder {
         }
 
         // Avg power reference line — slightly more visible, orange tint
-        let avgPower = samples.reduce(0) { $0 + $1.power } / max(samples.count, 1)
-        let avgNorm = CGFloat((Double(avgPower) - chartMin) / (chartMax - chartMin))
+        let avgNorm = CGFloat((avgPower - chartMin) / (chartMax - chartMin))
         let avgY = baseY - avgNorm * H
         if avgY >= rect.minY && avgY <= rect.maxY {
             cgCtx.saveGState()
@@ -1083,10 +1087,14 @@ private extension StravaPostBuilder {
         }
     }
 
+    static let cardDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        return formatter
+    }()
+
     static func formattedDate(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "MMM d, yyyy"
-        return f.string(from: date)
+        cardDateFormatter.string(from: date)
     }
 
     static func uiColor(from swiftUIColor: Color) -> UIColor { UIColor(swiftUIColor) }

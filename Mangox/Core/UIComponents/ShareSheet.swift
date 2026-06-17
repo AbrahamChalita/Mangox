@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import LinkPresentation
 
 // MARK: - Workout File Activity Item Source
 
@@ -80,7 +81,6 @@ final class WorkoutFileActivityItem: NSObject, UIActivityItemSource {
     }
 
     /// Provide a proper filename with extension for apps that use the LPLinkMetadata path.
-    @available(iOS 13.0, *)
     func activityViewControllerLinkMetadata(
         _ activityViewController: UIActivityViewController
     ) -> LPLinkMetadata? {
@@ -208,12 +208,6 @@ struct ShareSheet: UIViewControllerRepresentable {
         // No dynamic updates needed
     }
 }
-
-// MARK: - LinkPresentation import
-
-import LinkPresentation
-
-// MARK: - Preview
 
 #Preview {
     ShareSheet(activityItems: [URL(fileURLWithPath: "/tmp/test.tcx")])

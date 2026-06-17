@@ -108,9 +108,12 @@ extension StravaService {
 
     func fetchActivityDetail(id: Int) async throws -> SummaryActivity {
         let token = try await validAccessToken()
-        guard let url = URL(string: "https://www.strava.com/api/v3/activities/\(id)?include_all_efforts=false") else {
-            throw URLError(.badURL)
-        }
+        var components = URLComponents(
+            url: Self.apiBase.appending(path: "activities/\(id)"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "include_all_efforts", value: "false")]
+        guard let url = components.url else { throw URLError(.badURL) }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -136,9 +139,15 @@ extension StravaService {
         if isRateLimitTight { return nil }
         let token = try await validAccessToken()
         let keys = "time,distance,heartrate,velocity_smooth,cadence,watts,altitude,temp"
-        guard let url = URL(string: "https://www.strava.com/api/v3/activities/\(id)/streams?keys=\(keys)&key_by_type=true") else {
-            return nil
-        }
+        var components = URLComponents(
+            url: Self.apiBase.appending(path: "activities/\(id)/streams"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "keys", value: keys),
+            URLQueryItem(name: "key_by_type", value: "true"),
+        ]
+        guard let url = components.url else { return nil }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"

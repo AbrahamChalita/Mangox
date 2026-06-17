@@ -54,17 +54,15 @@ struct WorkoutSyncDomain: SupabaseSyncDomain {
 
         guard !remoteRows.isEmpty else { return }
 
+        let completedRemotes = remoteRows.filter { $0.status == "completed" && $0.client_id != nil }
+        let clientIDs = completedRemotes.compactMap(\.client_id)
+        let localByID = try fetchLocalWorkouts(ids: clientIDs, context: context)
+
         var didChange = false
-        for remote in remoteRows {
-            guard remote.status == "completed" else { continue }
+        for remote in completedRemotes {
             guard let clientID = remote.client_id else { continue }
 
-            let capturedID = clientID
-            var descriptor = FetchDescriptor<Workout>(
-                predicate: #Predicate { $0.id == capturedID }
-            )
-            descriptor.fetchLimit = 1
-            let existing = try context.fetch(descriptor).first
+            let existing = localByID[clientID]
 
             if let existing {
                 guard remote.updated_at > existing.updatedAt else { continue }
@@ -102,6 +100,17 @@ struct WorkoutSyncDomain: SupabaseSyncDomain {
     }
 
     // MARK: - Pull helpers
+
+    @MainActor
+    private func fetchLocalWorkouts(ids: [UUID], context: ModelContext) throws -> [UUID: Workout] {
+        guard !ids.isEmpty else { return [:] }
+        let capturedIDs = ids
+        let descriptor = FetchDescriptor<Workout>(
+            predicate: #Predicate { capturedIDs.contains($0.id) }
+        )
+        let workouts = try context.fetch(descriptor)
+        return Dictionary(uniqueKeysWithValues: workouts.map { ($0.id, $0) })
+    }
 
     @MainActor
     private func shouldPullChildren(remote: PulledWorkoutRow, local: Workout) -> Bool {

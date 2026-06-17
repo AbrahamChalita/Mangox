@@ -7,6 +7,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.launchOverlayVisible) private var launchOverlayVisible
+    @Environment(\.scenePhase) private var scenePhase
 
     let di: DIContainer
     @State private var selectedTab = 0
@@ -16,7 +17,6 @@ struct ContentView: View {
     @State private var statsPath = NavigationPath()
     @State private var settingsPath = NavigationPath()
     @State private var loadedSecondaryTabs: Set<Int> = []
-    @State private var prewarmSecondaryTabRoots = false
 
     private var isInSubview: Bool {
         !homePath.isEmpty || !calendarPath.isEmpty || !coachPath.isEmpty || !statsPath.isEmpty
@@ -28,21 +28,14 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            if prewarmSecondaryTabRoots {
-                SecondaryTabRootsPrewarm(di: di)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .opacity(0.001)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-
             TabView(selection: $selectedTab) {
                     Tab("Home", systemImage: "house.fill", value: 0) {
                     NavigationStack(path: $homePath) {
                         HomeView(
                             navigationPath: $homePath,
                             selectedTab: $selectedTab,
-                            viewModel: di.makeHomeViewModel()
+                            viewModel: di.makeHomeViewModel(),
+                            stravaService: di.stravaService
                         )
                         .toolbar(Visibility.hidden, for: ToolbarPlacement.navigationBar)
                         .navigationDestination(for: AppRoute.self) { route in
@@ -143,14 +136,31 @@ struct ContentView: View {
             di.locationService.warmUpLocationIfAuthorized()
             di.locationService.restoreRecordingIfNeeded()
         }
-        .task(id: launchOverlayVisible) {
-            await MangoxDebugPerformance.runInterval("Content.tabPrewarm") {
-                await runSecondaryTabPrewarmTask()
-            }
-        }
         .onChange(of: di.locationService.authorizationStatus) { _, newStatus in
             if shouldWarmLocation(for: newStatus) {
                 di.locationService.warmUpLocationIfAuthorized()
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active:
+                FitnessSettingsSnapshotBackfill.runIfNeeded()
+                TrainingPlanProgressCleanupMigration.runIfNeeded()
+                TrainingNotificationsScheduler.evaluateMissedKeyIfNeeded()
+                TrainingNotificationsScheduler.rescheduleFTPReminder()
+                WorkoutRAGIndex.scheduleBackgroundSync()
+                if di.authState.isSignedIn {
+                    Task {
+                        await di.syncCoordinator.syncNow()
+                        await di.externalWebhookSignalService.consumePendingSignals()
+                    }
+                }
+            case .background:
+                di.locationService.persistRecordingCheckpointNow()
+                di.persistIndoorRecordingCheckpointNow()
+                TrainingNotificationsScheduler.rescheduleEveningPreview()
+            default:
+                break
             }
         }
         .onOpenURL { url in
@@ -211,46 +221,31 @@ struct ContentView: View {
         }
     }
 
-    private func runSecondaryTabPrewarmTask() async {
-        if launchOverlayVisible {
-            prewarmSecondaryTabRoots = false
-        } else if prewarmSecondaryTabRoots {
-            try? await Task.sleep(for: .milliseconds(400))
-            prewarmSecondaryTabRoots = false
-        } else {
-            // Keep secondary-root prewarm off the launch critical path. Mount it only
-            // after the shell is visible so Coach/Settings setup does not compete with first render.
-            try? await Task.sleep(for: .milliseconds(650))
-            prewarmSecondaryTabRoots = true
-            try? await Task.sleep(for: .milliseconds(500))
-            prewarmSecondaryTabRoots = false
-        }
-    }
-
     private func isRideLiveActivityURL(_ url: URL) -> Bool {
         isOutdoorLiveActivityURL(url) || isIndoorLiveActivityURL(url)
     }
 
-    private func isSupabaseAuthCallbackURL(_ url: URL) -> Bool {
+    private func isMangoxURL(_ url: URL, host: String) -> Bool {
         guard url.scheme?.lowercased() == "mangox" else { return false }
-        return url.host?.lowercased() == "auth-callback"
+        return url.host?.lowercased() == host
+    }
+
+    private func isSupabaseAuthCallbackURL(_ url: URL) -> Bool {
+        isMangoxURL(url, host: "auth-callback")
     }
 
     private func isCoachURL(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == "mangox" else { return false }
-        return url.host?.lowercased() == "coach"
+        isMangoxURL(url, host: "coach")
     }
 
     private func isOutdoorLiveActivityURL(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == "mangox" else { return false }
-        guard url.host?.lowercased() == "ride" else { return false }
+        guard isMangoxURL(url, host: "ride") else { return false }
         let path = url.path.lowercased()
         return path == "/outdoor/live" || path == "/outdoor"
     }
 
     private func isIndoorLiveActivityURL(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == "mangox" else { return false }
-        guard url.host?.lowercased() == "ride" else { return false }
+        guard isMangoxURL(url, host: "ride") else { return false }
         let path = url.path.lowercased()
         return path == "/indoor/live" || path == "/indoor"
     }

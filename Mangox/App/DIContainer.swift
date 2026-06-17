@@ -58,12 +58,23 @@ final class DIContainer {
     let loggedActivityRepository: LoggedActivityRepository
     let syncExternalCyclingWorkouts: SyncExternalCyclingWorkoutsUseCase
 
-    // MARK: - Cloud sync (Supabase)
+    // MARK: - Cloud sync (Supabase) — lazily initialized on first access
 
     let authState: AuthState
     let linkedOAuthBridge: LinkedOAuthSessionBridge
-    let syncCoordinator: SyncCoordinator
-    let externalWebhookSignalService: ExternalWebhookSignalService
+    private var _syncCoordinator: SyncCoordinator?
+    private var _externalWebhookSignalService: ExternalWebhookSignalService?
+    private var syncStackConfigured = false
+
+    var syncCoordinator: SyncCoordinator {
+        ensureSyncStack()
+        return _syncCoordinator!
+    }
+
+    var externalWebhookSignalService: ExternalWebhookSignalService {
+        ensureSyncStack()
+        return _externalWebhookSignalService!
+    }
 
     // MARK: - ViewModels (lazily vended; each VM owns its own lifecycle)
 
@@ -130,8 +141,8 @@ final class DIContainer {
     }
 
     private func configureIndoorWorkoutSyncCallback(_ vm: IndoorViewModel) {
-        vm.workoutManager.onLocalChange = { [weak syncCoordinator] in
-            syncCoordinator?.notifyLocalChange()
+        vm.workoutManager.onLocalChange = { [weak self] in
+            self?.syncCoordinator.notifyLocalChange()
         }
     }
 
@@ -263,8 +274,31 @@ final class DIContainer {
         )
         loggedActivityRepository = activityRepo
 
-        syncCoordinator = SyncCoordinator(
-            auth: auth,
+        let externalCyclingWorkouts = SyncExternalCyclingWorkoutsUseCase(
+            stravaService: strava,
+            whoopService: whoop,
+            workoutRepository: workoutPersistenceRepository,
+            trainingPlanLookupService: trainingPlanLookupService,
+            trainingPlanPersistenceRepository: trainingPlanPersistenceRepository,
+            modelContext: PersistenceContainer.shared.mainContext
+        )
+        syncExternalCyclingWorkouts = externalCyclingWorkouts
+
+        _pendingActivityRepo = activityRepo
+        _pendingWorkoutRepo = workoutPersistenceRepository as? WorkoutPersistenceRepository
+        _pendingExternalCyclingWorkouts = externalCyclingWorkouts
+    }
+
+    private var _pendingActivityRepo: LoggedActivityRepositoryImpl?
+    private var _pendingWorkoutRepo: WorkoutPersistenceRepository?
+    private var _pendingExternalCyclingWorkouts: SyncExternalCyclingWorkoutsUseCase?
+
+    private func ensureSyncStack() {
+        guard !syncStackConfigured else { return }
+        syncStackConfigured = true
+
+        let coordinator = SyncCoordinator(
+            auth: authState,
             context: PersistenceContainer.shared.mainContext,
             domains: [
                 ProfileSyncDomain(),
@@ -280,33 +314,21 @@ final class DIContainer {
             ],
             linkedOAuthBridge: linkedOAuthBridge
         )
+        _syncCoordinator = coordinator
 
-        // Wire local-change notifications from the repo to the sync coordinator.
-        // Done after syncCoordinator is initialized so the capture is valid.
-        activityRepo.setOnLocalChange { [weak syncCoordinator] in
-            syncCoordinator?.notifyLocalChange()
+        _pendingActivityRepo?.setOnLocalChange { [weak coordinator] in
+            coordinator?.notifyLocalChange()
+        }
+        _pendingWorkoutRepo?.setOnLocalChange { [weak coordinator] in
+            coordinator?.notifyLocalChange()
         }
 
-        if let workoutRepo = workoutPersistenceRepository as? WorkoutPersistenceRepository {
-            workoutRepo.setOnLocalChange { [weak syncCoordinator] in
-                syncCoordinator?.notifyLocalChange()
-            }
+        if let externalCyclingWorkouts = _pendingExternalCyclingWorkouts {
+            _externalWebhookSignalService = ExternalWebhookSignalService(
+                userId: { [authState] in authState.userId },
+                whoopService: whoopService,
+                syncExternalCyclingWorkouts: externalCyclingWorkouts
+            )
         }
-
-        let externalCyclingWorkouts = SyncExternalCyclingWorkoutsUseCase(
-            stravaService: strava,
-            whoopService: whoop,
-            workoutRepository: workoutPersistenceRepository,
-            trainingPlanLookupService: trainingPlanLookupService,
-            trainingPlanPersistenceRepository: trainingPlanPersistenceRepository,
-            modelContext: PersistenceContainer.shared.mainContext
-        )
-        syncExternalCyclingWorkouts = externalCyclingWorkouts
-
-        externalWebhookSignalService = ExternalWebhookSignalService(
-            userId: { [weak auth] in auth?.userId },
-            whoopService: whoop,
-            syncExternalCyclingWorkouts: externalCyclingWorkouts
-        )
     }
 }

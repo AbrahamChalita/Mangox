@@ -37,6 +37,7 @@ protocol LocationServiceProtocol: AnyObject {
     var totalDistance: Double { get }
     var totalElevationGain: Double { get }
     var rideDuration: TimeInterval { get }
+    var sessionElapsedTiming: SessionElapsedTiming? { get }
     var averageSpeed: Double { get }
     var maxSpeed: Double { get }
     var isAutoPaused: Bool { get }

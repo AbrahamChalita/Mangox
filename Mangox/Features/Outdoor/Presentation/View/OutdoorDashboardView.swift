@@ -1506,10 +1506,7 @@ struct OutdoorDashboardView: View {
         let labelMuted = Color.white.opacity(0.38)
         let tileFont: CGFloat = 28
         let recording = ls.isRecording
-        let timePrimary: String =
-            recording
-            ? AppFormat.duration(ls.rideDuration)
-            : "0:00"
+        let elapsedTiming = ls.sessionElapsedTiming
         let distPrimary: String = AppFormat.distanceString(
             ls.totalDistance, imperial: isImperial)
         let elevPrimary = AppFormat.elevationString(
@@ -1541,7 +1538,7 @@ struct OutdoorDashboardView: View {
                     .frame(maxWidth: .infinity)
                 Spacer(minLength: 10)
                 bikeComputerCoreMetricsGrid(
-                    timePrimary: timePrimary,
+                    elapsedTiming: elapsedTiming,
                     distPrimary: distPrimary,
                     elevPrimary: elevPrimary,
                     avgPrimary: avgPrimary,
@@ -1551,7 +1548,7 @@ struct OutdoorDashboardView: View {
                 bikeComputerSensorStrip()
             } else {
                 bikeComputerCoreMetricsGrid(
-                    timePrimary: timePrimary,
+                    elapsedTiming: elapsedTiming,
                     distPrimary: distPrimary,
                     elevPrimary: elevPrimary,
                     avgPrimary: avgPrimary,
@@ -1677,7 +1674,7 @@ struct OutdoorDashboardView: View {
     }
 
     private func bikeComputerCoreMetricsGrid(
-        timePrimary: String,
+        elapsedTiming: SessionElapsedTiming?,
         distPrimary: String,
         elevPrimary: String,
         avgPrimary: String,
@@ -1686,10 +1683,10 @@ struct OutdoorDashboardView: View {
     ) -> some View {
         VStack(spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
-                bikeComputerMetricSquare(
+                bikeComputerElapsedSquare(
                     title: "TIME",
-                    primary: timePrimary,
-                    unit: nil,
+                    timing: elapsedTiming,
+                    placeholder: "0:00",
                     valueFontSize: tileFont
                 )
                 bikeComputerMetricSquare(
@@ -1783,6 +1780,41 @@ struct OutdoorDashboardView: View {
             offCourseBanner(surface: .bikeComputerDark, chromeStyle: .bikeComputerSheet)
         }
         // Weak GPS is folded into `compactNavCardRow` via `navCardGpsLine` so it doesn’t stack as a second full-width bar.
+    }
+
+    private func bikeComputerElapsedSquare(
+        title: String,
+        timing: SessionElapsedTiming?,
+        placeholder: String,
+        valueFontSize: CGFloat
+    ) -> some View {
+        VStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Color.white.opacity(0.38))
+                .tracking(0.6)
+            SessionElapsedLabel(
+                timing: timing,
+                placeholder: placeholder,
+                style: SessionElapsedStyle(
+                    font: .system(size: valueFontSize, weight: .bold, design: .monospaced),
+                    foregroundStyle: .white.opacity(0.92),
+                    minimumScaleFactor: 0.55
+                ),
+                accessibilityLabel: "Elapsed time"
+            )
+        }
+        .frame(maxWidth: .infinity, minHeight: 78, alignment: .center)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+        )
     }
 
     private func bikeComputerMetricSquare(
@@ -2704,9 +2736,8 @@ struct OutdoorDashboardView: View {
                     label: "SPEED",
                     isPrimary: true
                 )
-                metricCell(
-                    value: AppFormat.duration(ls.rideDuration),
-                    unit: "",
+                durationMetricCell(
+                    timing: ls.sessionElapsedTiming,
                     label: "DURATION",
                     isPrimary: true
                 )
@@ -2745,6 +2776,36 @@ struct OutdoorDashboardView: View {
     }
 
     // MARK: - Metric Cell
+
+    private func durationMetricCell(
+        timing: SessionElapsedTiming?,
+        label: String,
+        isPrimary: Bool
+    ) -> some View {
+        VStack(spacing: 2) {
+            SessionElapsedLabel(
+                timing: timing,
+                placeholder: AppFormat.duration(0),
+                style: SessionElapsedStyle(
+                    font: .system(size: isPrimary ? 36 : 22, weight: .bold, design: .monospaced),
+                    foregroundStyle: .white
+                ),
+                accessibilityLabel: "Elapsed time"
+            )
+            Text(label)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white.opacity(0.35))
+                .tracking(1.0)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, isPrimary ? 14 : 10)
+        .background(Color.white.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+        )
+    }
 
     private func metricCell(value: String, unit: String, label: String, isPrimary: Bool)
         -> some View
@@ -2900,9 +2961,8 @@ struct OutdoorDashboardView: View {
 
             // Duration + Distance
             HStack(spacing: 12) {
-                metricCell(
-                    value: AppFormat.duration(ls.rideDuration),
-                    unit: "",
+                durationMetricCell(
+                    timing: ls.sessionElapsedTiming,
                     label: "DURATION",
                     isPrimary: false
                 )

@@ -1,7 +1,6 @@
 // Features/Social/Data/DataSources/StravaService.swift
 import Foundation
 import AuthenticationServices
-import Security
 import os.log
 #if canImport(UIKit)
 import UIKit
@@ -30,7 +29,7 @@ final class StravaService: StravaServiceProtocol {
     /// A bike from the athlete profile (`gear_id` on activities). See `GET /athlete`.
     typealias AthleteBike = StravaAthleteBike
 
-    private struct Session: Codable {
+    private struct Session: Codable, OAuthSessionPayload {
         var accessToken: String
         var refreshToken: String
         var expiresAt: Int
@@ -274,8 +273,8 @@ final class StravaService: StravaServiceProtocol {
     }
 
     private static let authorizeURL = URL(string: "https://www.strava.com/oauth/authorize")!
-    /// Strava API v3 base. OAuth endpoints stay on www.strava.com too.
-    private static let apiBase = URL(string: "https://www.strava.com/api/v3")!
+    /// Strava API v3 base (migrated host per Strava 2027 deadline). OAuth stays on www.strava.com.
+    static let apiBase = URL(string: "https://www.api-v3.strava.com")!
     private static let uploadURL = apiBase.appending(path: "uploads")
     private static let athleteURL = apiBase.appending(path: "athlete")
     static let athleteActivitiesURL = apiBase.appending(path: "athlete/activities")
@@ -285,8 +284,7 @@ final class StravaService: StravaServiceProtocol {
     weak var linkedOAuthBridge: LinkedOAuthSessionBridge?
 
     var linkedAccountLocalSavedAt: Date? {
-        let t = UserDefaults.standard.double(forKey: Self.localSavedAtKey)
-        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+        sessionStore.linkedAccountLocalSavedAt
     }
 
     var linkedOAuthProviderUserID: String? {
@@ -303,14 +301,13 @@ final class StravaService: StravaServiceProtocol {
     private let presentationContextProvider = WebAuthenticationPresentationContextProvider()
     let urlSession: URLSession
 
-    private var session: Session?
+    private let sessionStore: OAuthSessionStore<Session>
+    private var session: Session? {
+        get { sessionStore.session }
+        set { sessionStore.setSession(newValue) }
+    }
     private var authSession: ASWebAuthenticationSession?
     private var pendingOAuthState: String?
-
-    /// Serializes concurrent token refresh attempts to prevent race conditions.
-    /// Without this, two simultaneous API calls could both detect an expired
-    /// token and both call `requestToken(refreshToken:)`, invalidating each other.
-    private var refreshTask: Task<String, Error>?
 
     /// Latest seen 15-minute rate-limit usage. Updated lazily from `X-RateLimit-Usage` headers
     /// on Activities API responses; nil until any call has completed.
@@ -333,8 +330,16 @@ final class StravaService: StravaServiceProtocol {
         self.clientID = Self.infoValue(for: "STRAVA_CLIENT_ID")
         self.clientSecret = ""
         self.redirectURIString = Self.infoValue(for: "STRAVA_REDIRECT_URI", fallback: "mangox://localhost/strava-auth")
+        self.sessionStore = OAuthSessionStore(
+            keychainAccount: Self.keychainAccount,
+            localSavedAtKey: Self.localSavedAtKey
+        )
         self.urlSession = Self.makeSession()
-        restoreSession()
+        sessionStore.restore(decoder: Self.decoder, onRestored: { [weak self] restored in
+            self?.applySession(restored)
+        }, onFailure: { error in
+            stravaLogger.error("Failed to restore Strava session: \(error.localizedDescription)")
+        })
     }
 
     /// Builds a stable `external_id` for Strava (unique per Mangox workout). Helps dedupe and support.
@@ -480,15 +485,14 @@ final class StravaService: StravaServiceProtocol {
         athleteProfileImageURL = nil
         isConnected = false
         lastError = nil
-        _ = try? KeychainStorage.delete(account: Self.keychainAccount)
-        UserDefaults.standard.removeObject(forKey: Self.localSavedAtKey)
+        sessionStore.deleteKeychain()
+        sessionStore.clearLocalSavedAt()
         let bridge = linkedOAuthBridge
         Task { await bridge?.deleteCloudSession(provider: .strava) }
     }
 
     func exportSessionJSONForCloudBackup() -> Data? {
-        guard let session else { return nil }
-        return try? JSONEncoder().encode(session)
+        sessionStore.exportJSON()
     }
 
     func restoreSessionFromCloudIfNeeded(sessionJSON: Data, remoteUpdatedAt: Date) {
@@ -499,7 +503,7 @@ final class StravaService: StravaServiceProtocol {
             let restored = try JSONDecoder().decode(Session.self, from: sessionJSON)
             try persistSession(restored, notifyCloud: false)
             applySession(restored)
-            markLinkedAccountSaved(at: remoteUpdatedAt)
+            sessionStore.markLinkedAccountSaved(at: remoteUpdatedAt)
             lastError = nil
             stravaLogger.info("Strava session restored from cloud backup")
             let now = Int(Date().timeIntervalSince1970)
@@ -837,38 +841,27 @@ final class StravaService: StravaServiceProtocol {
     }
 
     func validAccessToken() async throws -> String {
-        guard let current = session else {
-            throw StravaError.tokenExchangeFailed("No Strava session. Connect your account first.")
-        }
-
-        let now = Int(Date().timeIntervalSince1970)
-        if current.expiresAt - now > 90 {
-            return current.accessToken
-        }
-
-        // Serialize concurrent refresh attempts — if a refresh is already in
-        // flight, await its result instead of starting a second one.
-        if let existing = refreshTask {
-            return try await existing.value
-        }
-
-        let task = Task<String, Error> { [weak self] in
-            guard let self, var current = self.session else {
-                throw StravaError.tokenExchangeFailed("Session lost during refresh.")
+        let bridge = linkedOAuthBridge
+        return try await sessionStore.validAccessToken(
+            noSessionError: StravaError.tokenExchangeFailed("No Strava session. Connect your account first."),
+            sessionLostError: StravaError.tokenExchangeFailed("Session lost during refresh."),
+            refresh: { [weak self] refreshToken in
+                guard let self else {
+                    throw StravaError.tokenExchangeFailed("Session lost during refresh.")
+                }
+                let refreshed = try await self.requestToken(
+                    grantType: "refresh_token",
+                    refreshToken: refreshToken
+                )
+                return self.mapSession(refreshed, previous: self.session)
+            },
+            onRefreshed: { [weak self] session in
+                self?.applySession(session)
+            },
+            onCloudNotify: {
+                Task { await bridge?.pushProviderToCloud(.strava) }
             }
-            let refreshed = try await self.requestToken(
-                grantType: "refresh_token",
-                refreshToken: current.refreshToken
-            )
-            current = self.mapSession(refreshed, previous: current)
-            try self.persistSession(current)
-            self.applySession(current)
-            return current.accessToken
-        }
-
-        refreshTask = task
-        defer { refreshTask = nil }
-        return try await task.value
+        )
     }
 
     private func createUpload(
@@ -1109,29 +1102,9 @@ final class StravaService: StravaServiceProtocol {
     }
 
     private func persistSession(_ session: Session, notifyCloud: Bool = true) throws {
-        let data = try JSONEncoder().encode(session)
-        try KeychainStorage.save(data: data, account: Self.keychainAccount)
-        if notifyCloud {
-            markLinkedAccountSaved(at: Date())
-            let bridge = linkedOAuthBridge
+        let bridge = linkedOAuthBridge
+        try sessionStore.persist(session, notifyCloud: notifyCloud) {
             Task { await bridge?.pushProviderToCloud(.strava) }
-        }
-    }
-
-    private func markLinkedAccountSaved(at date: Date) {
-        UserDefaults.standard.set(date.timeIntervalSince1970, forKey: Self.localSavedAtKey)
-    }
-
-    private func restoreSession() {
-        do {
-            guard let data = try KeychainStorage.read(account: Self.keychainAccount) else {
-                return
-            }
-            let restored = try Self.decoder.decode(Session.self, from: data)
-            applySession(restored)
-        } catch {
-            stravaLogger.error("Failed to restore Strava session: \(error.localizedDescription)")
-            _ = try? KeychainStorage.delete(account: Self.keychainAccount)
         }
     }
 
@@ -1232,70 +1205,3 @@ private final class WebAuthenticationPresentationContextProvider: NSObject, ASWe
     }
 }
 
-private enum KeychainStorage {
-    enum KeychainError: Error {
-        case operationFailed(OSStatus)
-    }
-
-    static func save(data: Data, account: String) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: account,
-        ]
-
-        // Include kSecAttrAccessible in the attributes (not the query) so that
-        // SecItemUpdate matches any existing item regardless of its current
-        // accessibility and upgrades it to ThisDeviceOnly on write.
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-        ]
-
-        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if updateStatus == errSecSuccess {
-            return
-        }
-
-        if updateStatus != errSecItemNotFound {
-            throw KeychainError.operationFailed(updateStatus)
-        }
-
-        var insert = query
-        insert[kSecValueData as String] = data
-        insert[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        let addStatus = SecItemAdd(insert as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
-            throw KeychainError.operationFailed(addStatus)
-        }
-    }
-
-    static func read(account: String) throws -> Data? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        if status == errSecItemNotFound {
-            return nil
-        }
-        guard status == errSecSuccess else {
-            throw KeychainError.operationFailed(status)
-        }
-        return item as? Data
-    }
-
-    static func delete(account: String) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: account,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw KeychainError.operationFailed(status)
-        }
-    }
-}

@@ -95,8 +95,15 @@ final class SyncCoordinator {
             }
         }
         // Restore Strava/WHOOP tokens before other pulls so a fresh install can import.
-        let linkedOAuth = domains.filter { $0.name == "linked_oauth_accounts" }
-        let otherDomains = domains.filter { $0.name != "linked_oauth_accounts" }
+        var linkedOAuth: [SupabaseSyncDomain] = []
+        var otherDomains: [SupabaseSyncDomain] = []
+        for domain in domains {
+            if domain.name == "linked_oauth_accounts" {
+                linkedOAuth.append(domain)
+            } else {
+                otherDomains.append(domain)
+            }
+        }
         for domain in linkedOAuth + otherDomains {
             do {
                 try await domain.pull(userId: userId, client: client, context: context)

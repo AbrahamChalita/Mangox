@@ -1,4 +1,4 @@
-// Keep MangoxRideAttributes identical to Mangox/Features/Outdoor/RideLiveActivity/MangoxRideAttributes.swift
+// Keep MangoxRideAttributes identical to Mangox/Core/LiveActivity/MangoxRideAttributes.swift
 
 import ActivityKit
 import SwiftUI

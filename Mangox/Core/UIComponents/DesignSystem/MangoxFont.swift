@@ -17,95 +17,54 @@ enum MangoxFont {
     case label
     case micro
 
+    private struct Spec {
+        let size: CGFloat
+        let weight: Font.Weight
+        let textStyle: Font.TextStyle
+        let usesUI: Bool
+    }
+
+    private static let specs: [MangoxFont: Spec] = [
+        .heroTitle: Spec(size: 24, weight: .bold, textStyle: .title, usesUI: true),
+        .heroValue: Spec(size: 52, weight: .light, textStyle: .largeTitle, usesUI: false),
+        .largeValue: Spec(size: 28, weight: .light, textStyle: .title, usesUI: false),
+        .value: Spec(size: 22, weight: .regular, textStyle: .title2, usesUI: false),
+        .compactValue: Spec(size: 20, weight: .regular, textStyle: .title3, usesUI: false),
+        .title: Spec(size: 17, weight: .medium, textStyle: .headline, usesUI: true),
+        .bodyBold: Spec(size: 15, weight: .medium, textStyle: .subheadline, usesUI: true),
+        .body: Spec(size: 14, weight: .regular, textStyle: .body, usesUI: true),
+        .callout: Spec(size: 13, weight: .medium, textStyle: .callout, usesUI: true),
+        .caption: Spec(size: 11, weight: .regular, textStyle: .caption, usesUI: false),
+        .label: Spec(size: 10, weight: .regular, textStyle: .caption2, usesUI: false),
+        .micro: Spec(size: 9, weight: .regular, textStyle: .caption2, usesUI: false),
+    ]
+
+    private var spec: Spec {
+        Self.specs[self]!
+    }
+
     var value: Font {
-        switch self {
-        case .heroTitle:
-            return MangoxFontResolver.ui(size: 24, weight: .bold)
-        case .heroValue:
-            return MangoxFontResolver.mono(size: 52, weight: .light)
-        case .largeValue:
-            return MangoxFontResolver.mono(size: 28, weight: .light)
-        case .value:
-            return MangoxFontResolver.mono(size: 22, weight: .regular)
-        case .compactValue:
-            return MangoxFontResolver.mono(size: 20, weight: .regular)
-        case .title:
-            return MangoxFontResolver.ui(size: 17, weight: .medium)
-        case .bodyBold:
-            return MangoxFontResolver.ui(size: 15, weight: .medium)
-        case .body:
-            return MangoxFontResolver.ui(size: 14, weight: .regular)
-        case .callout:
-            return MangoxFontResolver.ui(size: 13, weight: .medium)
-        case .caption:
-            return MangoxFontResolver.mono(size: 11, weight: .regular)
-        case .label:
-            return MangoxFontResolver.mono(size: 10, weight: .regular)
-        case .micro:
-            return MangoxFontResolver.mono(size: 9, weight: .regular)
+        let spec = spec
+        if spec.usesUI {
+            return MangoxFontResolver.ui(size: spec.size, weight: spec.weight)
         }
+        return MangoxFontResolver.mono(size: spec.size, weight: spec.weight)
     }
 
     /// Returns a Dynamic Type-scaled font while retaining the custom typeface.
     func scaled(relativeTo style: Font.TextStyle? = nil) -> Font {
-        let textStyle = style ?? self.textStyle
-        let scaledSize = MangoxFontScaler.scaledSize(base: scaledBaseSize, relativeTo: textStyle)
-        if usesUIFont {
-            return MangoxFontResolver.ui(size: scaledSize, weight: weight)
+        let spec = spec
+        let textStyle = style ?? spec.textStyle
+        let scaledSize = MangoxFontScaler.scaledSize(base: spec.size, relativeTo: textStyle)
+        if spec.usesUI {
+            return MangoxFontResolver.ui(size: scaledSize, weight: spec.weight)
         }
-        return MangoxFontResolver.mono(size: scaledSize, weight: weight)
-    }
-
-    private var scaledBaseSize: CGFloat {
-        switch self {
-        case .heroTitle: return 24
-        case .heroValue: return 52
-        case .largeValue: return 28
-        case .value: return 22
-        case .compactValue: return 20
-        case .title: return 17
-        case .bodyBold: return 15
-        case .body: return 14
-        case .callout: return 13
-        case .caption: return 11
-        case .label: return 10
-        case .micro: return 9
-        }
-    }
-
-    private var usesUIFont: Bool {
-        switch self {
-        case .heroTitle, .title, .bodyBold, .body, .callout:
-            return true
-        default:
-            return false
-        }
-    }
-
-    private var weight: Font.Weight {
-        switch self {
-        case .heroValue, .largeValue: return .light
-        case .title, .bodyBold, .callout: return .medium
-        default: return .regular
-        }
+        return MangoxFontResolver.mono(size: scaledSize, weight: spec.weight)
     }
 
     /// The text style this font maps to for Dynamic Type scaling.
     var textStyle: Font.TextStyle {
-        switch self {
-        case .heroTitle: return .title
-        case .heroValue: return .largeTitle
-        case .largeValue: return .title
-        case .value: return .title2
-        case .compactValue: return .title3
-        case .title: return .headline
-        case .bodyBold: return .subheadline
-        case .body: return .body
-        case .callout: return .callout
-        case .caption: return .caption
-        case .label: return .caption2
-        case .micro: return .caption2
-        }
+        spec.textStyle
     }
 }
 

@@ -31,7 +31,7 @@ The app target remains a **single Swift module** (`Mangox`) so nothing breaks at
 | **`MangoxTests/`** | Unit and integration tests (~84 test methods). |
 | **`MangoxUITests/`** | UI tests (~34 test methods). |
 | **`Docs/`** | Product and engineering notes (see `PRECISION_COACH.md` for coach math tools). |
-| **`backend/`** | TypeScript helper package for coach parsing and schema utilities. |
+| **`supabase/functions/`** | Supabase Edge Functions (TypeScript / Deno): OAuth token exchange, external webhooks. |
 
 **Assets**, **Info.plist**, **PrivacyInfo**, **entitlements** stay at `Mangox/` root.
 

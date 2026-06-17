@@ -62,8 +62,9 @@ struct StoryCardDebugView: View {
     }
 
     static func saveToDisk(_ image: UIImage) -> String? {
-        guard let data = image.pngData() else { return nil }
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        guard let data = image.pngData(),
+              let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        else { return nil }
         let url = dir.appendingPathComponent("story_debug.png")
         try? data.write(to: url)
         return url.path

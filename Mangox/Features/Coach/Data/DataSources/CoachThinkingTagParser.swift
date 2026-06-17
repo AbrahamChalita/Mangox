@@ -32,6 +32,117 @@ enum CoachThinkingTagParser {
         return (snap.visible, extra)
     }
 
+    // MARK: - Incremental streaming parser
+
+    /// Parser that resumes from the previous scan offset instead of re-scanning the entire buffer
+    /// on every token. This avoids the O(n²) work of `snapshot(streamBuffer:)` during streaming.
+    struct IncrementalParser: Sendable {
+        private var rawBuffer: String = ""
+        private var visible: String = ""
+        private var completedBlocks: [String] = []
+        /// Index where the next delta should be parsed from.
+        private var scanIndex: String.Index
+        /// When non-nil, we are inside a thinking tag that started before `scanIndex` and are
+        /// still looking for its closing tag.
+        private var pendingOpenTag: (openEnd: String.Index, closeTag: String)?
+
+        init() {
+            scanIndex = rawBuffer.startIndex
+        }
+
+        mutating func append(_ delta: String) -> StreamSnapshot {
+            rawBuffer.append(delta)
+            continueParsing()
+            return currentSnapshot
+        }
+
+        /// Current snapshot without appending new text.
+        var currentSnapshot: StreamSnapshot {
+            StreamSnapshot(visible: visible, completedBlocks: completedBlocks, openDraft: openDraft)
+        }
+
+        /// Resets the parser; use when a new turn starts.
+        mutating func reset() {
+            rawBuffer.removeAll()
+            visible.removeAll()
+            completedBlocks.removeAll()
+            scanIndex = rawBuffer.startIndex
+            pendingOpenTag = nil
+        }
+
+        private mutating func continueParsing() {
+            var i = scanIndex
+
+            if let pending = pendingOpenTag {
+                i = pending.openEnd
+                if let closeRange = rawBuffer[i...].range(
+                    of: pending.closeTag,
+                    options: .caseInsensitive
+                ) {
+                    let inner = String(rawBuffer[i..<closeRange.lowerBound])
+                    if let trimmed = normalizedBlock(inner) {
+                        completedBlocks.append(trimmed)
+                    }
+                    i = closeRange.upperBound
+                    pendingOpenTag = nil
+                    scanIndex = i
+                } else {
+                    // Still inside the open tag; wait for more data.
+                    return
+                }
+            }
+
+            while i < rawBuffer.endIndex {
+                guard let lt = rawBuffer[i...].firstIndex(of: "<") else {
+                    visible.append(contentsOf: rawBuffer[i..<rawBuffer.endIndex])
+                    scanIndex = rawBuffer.endIndex
+                    break
+                }
+                visible.append(contentsOf: rawBuffer[i..<lt])
+
+                let tail = rawBuffer[lt...]
+                if incompleteOpenPrefix(tail) {
+                    scanIndex = lt
+                    return
+                }
+
+                guard let match = matchOpenTag(tail) else {
+                    visible.append("<")
+                    i = rawBuffer.index(after: lt)
+                    continue
+                }
+
+                let openEnd = rawBuffer.index(lt, offsetBy: match.openLength)
+                guard openEnd <= rawBuffer.endIndex else { break }
+
+                if let closeRange = rawBuffer[openEnd...].range(
+                    of: match.closeTag,
+                    options: .caseInsensitive
+                ) {
+                    let inner = String(rawBuffer[openEnd..<closeRange.lowerBound])
+                    if let trimmed = normalizedBlock(inner) {
+                        completedBlocks.append(trimmed)
+                    }
+                    i = closeRange.upperBound
+                } else {
+                    // Open tag matched but close tag not yet received; save state and wait.
+                    pendingOpenTag = (openEnd: openEnd, closeTag: match.closeTag)
+                    scanIndex = lt
+                    return
+                }
+            }
+
+            scanIndex = i
+        }
+
+        private var openDraft: String? {
+            guard let pending = pendingOpenTag else { return nil }
+            let inner = String(rawBuffer[pending.openEnd..<rawBuffer.endIndex])
+            let draft = normalizedBlock(inner)
+            return (draft?.isEmpty ?? true) ? "…" : draft
+        }
+    }
+
     // MARK: - Core parse
 
     private static let closeByOpenPrefix: [(openPrefix: String, close: String)] = [

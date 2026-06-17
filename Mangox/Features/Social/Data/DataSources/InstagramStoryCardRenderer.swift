@@ -72,14 +72,6 @@ enum InstagramStoryCardRenderer {
     }
 
     @MainActor
-    static func renderAtmosphericBackgroundOnly(
-        dominantZone: PowerZone,
-        options: InstagramStoryCardOptions
-    ) -> UIImage {
-        renderBackgroundOnly(dominantZone: dominantZone, options: options)
-    }
-
-    @MainActor
     static func renderStickerLayer(
         fullCard: UIImage,
         scale: CGFloat = 0.84,
@@ -386,19 +378,19 @@ enum StoryCardDrawing {
         UIRectFill(CGRect(origin: .zero, size: size))
 
         let accent = StoryCardDesign.accentColor(for: options.accent, dominantZone: dominantZone)
-        fillRadial(
+        StoryCardPrimitives.fillRadial(
             center: CGPoint(x: size.width * 0.82, y: size.height * 0.88),
             radius: 340,
             color: accent.withAlphaComponent(options.visualStyle == .neonNight ? 0.36 : 0.24),
             cg: cg
         )
-        fillRadial(
+        StoryCardPrimitives.fillRadial(
             center: CGPoint(x: size.width * 0.20, y: size.height * 0.15),
             radius: 260,
             color: secondaryAtmosphereColor(for: options.visualStyle).withAlphaComponent(0.16),
             cg: cg
         )
-        fillRadial(
+        StoryCardPrimitives.fillRadial(
             center: CGPoint(x: size.width * 0.50, y: size.height * 0.48),
             radius: 560,
             color: StoryCardDesign.canvasSecondary.withAlphaComponent(0.16),
@@ -997,30 +989,6 @@ enum StoryCardDrawing {
         path.stroke()
     }
 
-    private static func fillRadial(center: CGPoint, radius: CGFloat, color: UIColor, cg: CGContext) {
-        var red: CGFloat = 0
-        var green: CGFloat = 0
-        var blue: CGFloat = 0
-        var alpha: CGFloat = 0
-        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        let colors = [
-            UIColor(red: red, green: green, blue: blue, alpha: alpha).cgColor,
-            UIColor(red: red, green: green, blue: blue, alpha: 0).cgColor,
-        ] as CFArray
-        guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) else { return }
-        cg.saveGState()
-        cg.setBlendMode(.screen)
-        cg.drawRadialGradient(
-            gradient,
-            startCenter: center,
-            startRadius: 0,
-            endCenter: center,
-            endRadius: radius,
-            options: [.drawsAfterEndLocation]
-        )
-        cg.restoreGState()
-    }
-
     private static func heroEyebrowText(
         routeName: String?,
         showRouteName: Bool,
@@ -1285,7 +1253,7 @@ enum StoryCardDrawing {
             cg.setFillColor(UIColor(red: 0.98, green: 0.84, blue: 0.44, alpha: 0.08).cgColor)
             cg.fill(CGRect(x: 0, y: 0, width: size.width, height: size.height))
         case .neonNight:
-            fillRadial(center: CGPoint(x: size.width * 0.5, y: size.height * 0.2), radius: 520, color: UIColor.systemPink.withAlphaComponent(0.18), cg: cg)
+            StoryCardPrimitives.fillRadial(center: CGPoint(x: size.width * 0.5, y: size.height * 0.2), radius: 520, color: UIColor.systemPink.withAlphaComponent(0.18), cg: cg)
         case .topoMap:
             drawTopoLines(size: size, accent: accent, cg: cg)
         case .analyst:
@@ -1343,7 +1311,7 @@ enum StoryCardDrawing {
     private static func drawHugeMetric(label: String, value: String, unit: String, y: CGFloat, accent: UIColor, width: CGFloat) {
         label.draw(at: CGPoint(x: sidePad, y: y), withAttributes: templateEyebrowAttrs(accent: accent))
         let maxValueWidth = width - sidePad * 2 - (unit.isEmpty ? 0 : 150)
-        let fontSize = fittingFontSize(
+        let fontSize = StoryCardPrimitives.fittingFontSize(
             for: value,
             startingAt: 150,
             minimum: 88,
@@ -1367,26 +1335,6 @@ enum StoryCardDrawing {
         }
     }
 
-    private static func fittingFontSize(
-        for text: String,
-        startingAt start: CGFloat,
-        minimum: CGFloat,
-        maxWidth: CGFloat
-    ) -> CGFloat {
-        var size = start
-        while size > minimum {
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: StoryCardFontToken.mono(size: size, weight: .heavy),
-                .kern: -5.0,
-            ]
-            if text.size(withAttributes: attrs).width <= maxWidth {
-                return size
-            }
-            size -= 4
-        }
-        return minimum
-    }
-
     private static func fittedAttributes(
         for text: String,
         fontProvider: (CGFloat) -> UIFont,
@@ -1396,7 +1344,7 @@ enum StoryCardDrawing {
         kern: CGFloat,
         foregroundColor: UIColor? = nil
     ) -> [NSAttributedString.Key: Any] {
-        let size = fittingFontSize(
+        let size = StoryCardPrimitives.fittingFontSize(
             for: text,
             fontProvider: fontProvider,
             startingAt: start,
@@ -1412,28 +1360,6 @@ enum StoryCardDrawing {
             attributes[.foregroundColor] = foregroundColor
         }
         return attributes
-    }
-
-    private static func fittingFontSize(
-        for text: String,
-        fontProvider: (CGFloat) -> UIFont,
-        startingAt start: CGFloat,
-        minimum: CGFloat,
-        maxWidth: CGFloat,
-        kern: CGFloat
-    ) -> CGFloat {
-        var size = start
-        while size > minimum {
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: fontProvider(size),
-                .kern: kern,
-            ]
-            if text.size(withAttributes: attrs).width <= maxWidth {
-                return size
-            }
-            size -= 2
-        }
-        return minimum
     }
 
     private static func truncatedText(
@@ -1596,28 +1522,22 @@ enum StoryCardDrawing {
         dominantZone: PowerZone
     ) -> [(zone: PowerZone, percentage: Double, color: UIColor)] {
         var counts: [Int: Int] = [:]
-        let samples = workout.samples
-        var totalWithPower = 0
-        for s in samples where s.power > 0 {
-            totalWithPower += 1
+        var powerValues: [Int] = []
+        powerValues.reserveCapacity(min(workout.samples.count, maxZoneDistributionSamples))
+
+        for sample in workout.samples where sample.power > 0 {
+            powerValues.append(sample.power)
         }
 
-        if totalWithPower == 0 {
+        if powerValues.isEmpty {
             counts[dominantZone.id] = 1
-        } else if totalWithPower <= maxZoneDistributionSamples {
-            for s in samples where s.power > 0 {
-                let zone = PowerZone.zone(for: s.power)
-                counts[zone.id, default: 0] += 1
-            }
         } else {
-            let step = max(1, (totalWithPower + maxZoneDistributionSamples - 1) / maxZoneDistributionSamples)
-            var streamIndex = 0
-            for s in samples where s.power > 0 {
-                if streamIndex % step == 0 {
-                    let zone = PowerZone.zone(for: s.power)
-                    counts[zone.id, default: 0] += 1
-                }
-                streamIndex += 1
+            let step = powerValues.count <= maxZoneDistributionSamples
+                ? 1
+                : max(1, (powerValues.count + maxZoneDistributionSamples - 1) / maxZoneDistributionSamples)
+            for (index, power) in powerValues.enumerated() where index % step == 0 {
+                let zone = PowerZone.zone(for: power)
+                counts[zone.id, default: 0] += 1
             }
         }
 

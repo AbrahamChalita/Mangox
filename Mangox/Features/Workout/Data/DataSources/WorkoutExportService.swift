@@ -135,7 +135,36 @@ enum WorkoutExportService {
         let laps = workout.laps.sorted { $0.lapNumber < $1.lapNumber }
         let hasRoute = routeService?.hasRoute == true
 
-        var xml = """
+        var lapSamplesBuckets: [[WorkoutSample]] = []
+        if laps.count > 1 {
+            lapSamplesBuckets = Array(repeating: [], count: laps.count)
+            var lapBounds: [(start: Int, end: Int)] = []
+            var runningStart = 0
+            for lap in laps {
+                let end = runningStart + Int(lap.duration)
+                lapBounds.append((start: runningStart, end: end))
+                runningStart = end
+            }
+            var lapIdx = 0
+            for sample in samples {
+                while lapIdx < lapBounds.count - 1 && sample.elapsedSeconds > lapBounds[lapIdx].end {
+                    lapIdx += 1
+                }
+                guard lapIdx < lapBounds.count else { continue }
+                let bound = lapBounds[lapIdx]
+                if sample.elapsedSeconds >= bound.start && sample.elapsedSeconds <= bound.end {
+                    lapSamplesBuckets[lapIdx].append(sample)
+                }
+            }
+        }
+
+        let url = exportDirectory()
+            .appendingPathComponent("mangox-\(workout.id.uuidString).tcx")
+
+        let writer = try ExportStreamWriter(url: url)
+        defer { try? writer.close() }
+
+        try writer.write("""
         <?xml version="1.0" encoding="UTF-8"?>
         <TrainingCenterDatabase
           xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"
@@ -151,28 +180,9 @@ enum WorkoutExportService {
                 <UnitId>0</UnitId>
                 <ProductID>0</ProductID>
               </Creator>\n
-        """
+        """)
 
         if laps.count > 1 {
-            // Multi-lap: emit each lap with its own track.
-            // Single-pass partitioning: iterate samples once, appending each to the correct lap.
-            var lapSamplesBuckets: [[WorkoutSample]] = Array(repeating: [], count: laps.count)
-            var lapBounds: [(start: Int, end: Int)] = []
-            var runningStart = 0
-            for lap in laps {
-                let end = runningStart + Int(lap.duration)
-                lapBounds.append((start: runningStart, end: end))
-                runningStart = end
-            }
-            for sample in samples {
-                for (idx, bound) in lapBounds.enumerated() {
-                    if sample.elapsedSeconds > bound.start && sample.elapsedSeconds <= bound.end {
-                        lapSamplesBuckets[idx].append(sample)
-                        break
-                    }
-                }
-            }
-
             var distanceOffset: Double = 0
             for (idx, lap) in laps.enumerated() {
                 let lapSamples = lapSamplesBuckets[idx]
@@ -182,13 +192,13 @@ enum WorkoutExportService {
                     durationSeconds: lap.duration
                 )
 
-                xml += tcxLap(
+                try writer.write(tcxLap(
                     startTime: lap.startTime,
                     durationSeconds: lap.duration,
                     distanceMeters: lap.distance,
                     calories: lapCalories,
                     avgHR: lap.avgHR > 0 ? Int(lap.avgHR.rounded()) : nil,
-                    maxHR: nil, // LapSplit doesn't track maxHR per lap
+                    maxHR: nil,
                     avgPower: Int(lap.avgPower.rounded()),
                     maxPower: lap.maxPower,
                     avgCadence: Int(lap.avgCadence.rounded()),
@@ -197,18 +207,17 @@ enum WorkoutExportService {
                     workout: workout,
                     routeService: hasRoute ? routeService : nil,
                     distanceOffset: distanceOffset
-                )
+                ))
 
                 distanceOffset += lap.distance
             }
         } else {
-            // Single lap: emit all samples in one lap
             let totalCalories = estimateCalories(
                 avgPower: workout.avgPower,
                 durationSeconds: workout.duration
             )
 
-            xml += tcxLap(
+            try writer.write(tcxLap(
                 startTime: workout.startDate,
                 durationSeconds: workout.duration,
                 distanceMeters: workout.distance,
@@ -223,23 +232,14 @@ enum WorkoutExportService {
                 workout: workout,
                 routeService: hasRoute ? routeService : nil,
                 distanceOffset: 0
-            )
+            ))
         }
 
-        xml += """
+        try writer.write("""
             </Activity>
           </Activities>
         </TrainingCenterDatabase>
-        """
-
-        let url = exportDirectory()
-            .appendingPathComponent("mangox-\(workout.id.uuidString).tcx")
-
-        do {
-            try xml.write(to: url, atomically: true, encoding: .utf8)
-        } catch {
-            throw WorkoutExportError.writeFailed(error.localizedDescription)
-        }
+        """)
 
         return url
     }
@@ -486,33 +486,32 @@ enum WorkoutExportService {
         guard !trackpoints.isEmpty else { throw WorkoutExportError.noTrackpoints }
 
         let metadata = gpxMetadata(workout: workout)
-
-        var gpx = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        gpx += "<gpx version=\"1.1\"\n"
-        gpx += "  creator=\"Mangox Indoor Cycling\"\n"
-        gpx += "  xmlns=\"http://www.topografix.com/GPX/1/1\"\n"
-        gpx += "  xmlns:gpxtpx=\"http://www.garmin.com/xmlschemas/TrackPointExtension/v2\"\n"
-        gpx += "  xmlns:pwr=\"http://www.garmin.com/xmlschemas/PowerExtension/v1\"\n"
-        gpx += "  xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n"
-        gpx += "  xsi:schemaLocation=\"http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd http://www.garmin.com/xmlschemas/TrackPointExtension/v2 http://www.garmin.com/xmlschemas/TrackPointExtensionv2.xsd http://www.garmin.com/xmlschemas/PowerExtension/v1 http://www.garmin.com/xmlschemas/PowerExtensionv1.xsd\">\n"
-        gpx += metadata
-        gpx += "  <trk>\n"
-        gpx += "    <name>\(routeName)</name>\n"
-        gpx += "    <type>cycling</type>\n"
-        gpx += "    <trkseg>\n"
-        gpx += trackpoints.joined(separator: "\n")
-        gpx += "\n    </trkseg>\n"
-        gpx += "  </trk>\n"
-        gpx += "</gpx>\n"
-
         let url = exportDirectory()
             .appendingPathComponent("mangox-\(workout.id.uuidString).gpx")
 
-        do {
-            try gpx.write(to: url, atomically: true, encoding: .utf8)
-        } catch {
-            throw WorkoutExportError.writeFailed(error.localizedDescription)
+        let writer = try ExportStreamWriter(url: url)
+        defer { try? writer.close() }
+
+        try writer.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+        try writer.write("<gpx version=\"1.1\"\n")
+        try writer.write("  creator=\"Mangox Indoor Cycling\"\n")
+        try writer.write("  xmlns=\"http://www.topografix.com/GPX/1/1\"\n")
+        try writer.write("  xmlns:gpxtpx=\"http://www.garmin.com/xmlschemas/TrackPointExtension/v2\"\n")
+        try writer.write("  xmlns:pwr=\"http://www.garmin.com/xmlschemas/PowerExtension/v1\"\n")
+        try writer.write("  xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n")
+        try writer.write("  xsi:schemaLocation=\"http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd http://www.garmin.com/xmlschemas/TrackPointExtension/v2 http://www.garmin.com/xmlschemas/TrackPointExtensionv2.xsd http://www.garmin.com/xmlschemas/PowerExtension/v1 http://www.garmin.com/xmlschemas/PowerExtensionv1.xsd\">\n")
+        try writer.write(metadata)
+        try writer.write("  <trk>\n")
+        try writer.write("    <name>\(routeName)</name>\n")
+        try writer.write("    <type>cycling</type>\n")
+        try writer.write("    <trkseg>\n")
+        for trkpt in trackpoints {
+            try writer.write(trkpt)
+            try writer.write("\n")
         }
+        try writer.write("    </trkseg>\n")
+        try writer.write("  </trk>\n")
+        try writer.write("</gpx>\n")
 
         return url
     }
@@ -635,5 +634,27 @@ enum WorkoutExportService {
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "'", with: "&apos;")
+    }
+
+    private struct ExportStreamWriter {
+        private let handle: FileHandle
+
+        init(url: URL) throws {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+            handle = try FileHandle(forWritingTo: url)
+        }
+
+        func write(_ string: String) throws {
+            guard let data = string.data(using: .utf8) else { return }
+            do {
+                try handle.write(contentsOf: data)
+            } catch {
+                throw WorkoutExportError.writeFailed(error.localizedDescription)
+            }
+        }
+
+        func close() throws {
+            try handle.close()
+        }
     }
 }

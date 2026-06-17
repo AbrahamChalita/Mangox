@@ -60,7 +60,7 @@ struct ChatProviderConfiguration: Equatable {
     var effectiveModel: String { "Managed coach" }
 }
 
-protocol ChatProviderAdapter {
+protocol ChatProviderAdapter: Sendable {
     func streamChat(
         request: ChatRequest,
         configuration: ChatProviderConfiguration,
@@ -148,6 +148,8 @@ private struct MangoxBackendChatProvider: ChatProviderAdapter {
                                 throw URLError(.badServerResponse)
                             }
 
+                            var isSearchingWeb = false
+
                             for try await line in bytes.lines {
                                 if Task.isCancelled { throw CancellationError() }
                                 guard line.hasPrefix("data: ") else { continue }
@@ -159,19 +161,39 @@ private struct MangoxBackendChatProvider: ChatProviderAdapter {
                                 switch event.type {
                                 case "status":
                                     if let status = event.status {
+                                        let nowSearching = status.localizedCaseInsensitiveContains("search")
+                                        if nowSearching && !isSearchingWeb {
+                                            isSearchingWeb = true
+                                            continuation.yield(.searchStarted)
+                                        } else if !nowSearching && isSearchingWeb {
+                                            isSearchingWeb = false
+                                            continuation.yield(.searchCompleted)
+                                        }
                                         continuation.yield(.status(status))
                                     }
                                 case "delta":
+                                    if isSearchingWeb {
+                                        isSearchingWeb = false
+                                        continuation.yield(.searchCompleted)
+                                    }
                                     if let delta = event.delta {
                                         receivedStreamPayload = true
                                         continuation.yield(.textDelta(delta))
                                     }
                                 case "reasoning_delta":
+                                    if isSearchingWeb {
+                                        isSearchingWeb = false
+                                        continuation.yield(.searchCompleted)
+                                    }
                                     if let delta = event.delta {
                                         receivedStreamPayload = true
                                         continuation.yield(.reasoningDelta(delta))
                                     }
                                 case "final":
+                                    if isSearchingWeb {
+                                        isSearchingWeb = false
+                                        continuation.yield(.searchCompleted)
+                                    }
                                     if let message = event.message {
                                         receivedStreamPayload = true
                                         if !message.toolCalls.isEmpty {
@@ -180,6 +202,10 @@ private struct MangoxBackendChatProvider: ChatProviderAdapter {
                                         continuation.yield(.completed(message))
                                     }
                                 case "error":
+                                    if isSearchingWeb {
+                                        isSearchingWeb = false
+                                        continuation.yield(.searchCompleted)
+                                    }
                                     receivedStreamPayload = true
                                     continuation.yield(.failed(event.error ?? "Streaming failed"))
                                 case "done", "meta":

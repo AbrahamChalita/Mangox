@@ -103,6 +103,7 @@ enum WorkoutOrigin: String, Codable {
     case imported
 }
 
+/// Allowed values must match `workouts_import_format_check` (see supabase/migrations).
 enum WorkoutImportFormat: String, Codable {
     case tcx
     case fit

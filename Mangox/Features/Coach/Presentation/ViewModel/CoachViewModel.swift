@@ -56,6 +56,10 @@ final class CoachViewModel {
         coach.canSendCoachMessage(text, isPro: isPro, forcePlanIntake: forcePlanIntake, hasImage: hasImage)
     }
 
+    func canBeginTurn() -> Bool {
+        coach.canBeginTurn()
+    }
+
     func remainingFreeMessages(isPro: Bool) -> Int {
         guard !isPro else { return Int.max }
         return max(0, AIService.freeDailyLimit - todayMessageCount)

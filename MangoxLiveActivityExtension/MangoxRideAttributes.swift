@@ -1,1 +1,1 @@
-../Mangox/Features/Outdoor/Data/DataSources/RideLiveActivity/MangoxRideAttributes.swift
+../Mangox/Core/LiveActivity/MangoxRideAttributes.swift

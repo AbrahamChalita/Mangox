@@ -260,31 +260,6 @@ struct SettingsView: View {
                             .padding(.horizontal, 16)
                         }
 
-                        #if DEBUG
-                        sectionLabel("Debug")
-                            .padding(.top, 24)
-                        settingsGroup {
-                            Button {
-                                navigationPath.append(AppRoute.storyCardDebug)
-                            } label: {
-                                HStack(spacing: 14) {
-                                    settingsIconBadge("photo.artframe", color: .orange)
-                                    Text("Story Card Debug")
-                                        .mangoxFontScaled(.bodyBold)
-                                        .foregroundStyle(.white.opacity(0.85))
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.22))
-                                }
-                                .contentShape(Rectangle())
-                                .padding(.vertical, 12)
-                                .padding(.horizontal, 16)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        #endif
-
                         Spacer().frame(height: 48)
                     }
                 }

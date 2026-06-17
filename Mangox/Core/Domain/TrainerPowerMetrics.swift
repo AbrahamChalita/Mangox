@@ -1,4 +1,4 @@
-// Features/Indoor/Domain/Entities/TrainerPowerMetrics.swift
+// Core/Domain/TrainerPowerMetrics.swift
 import Foundation
 
 /// Pure helpers for aggregating high-rate trainer power samples within one second.

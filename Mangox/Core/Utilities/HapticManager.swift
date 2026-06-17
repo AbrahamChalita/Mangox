@@ -1,7 +1,6 @@
 // Core/Utilities/HapticManager.swift
 import UIKit
 
-@Observable
 final class HapticManager {
     static let shared = HapticManager()
 

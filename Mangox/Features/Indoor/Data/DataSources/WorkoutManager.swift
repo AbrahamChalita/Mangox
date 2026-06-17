@@ -320,6 +320,16 @@ final class WorkoutManager {
     private var pausedWallClockDuration: TimeInterval = 0
     private var pauseStartedAtWallClock: Date?
 
+    /// Pause-aware timing inputs for `SessionElapsedLabel` and other view-layer clocks.
+    var sessionElapsedTiming: SessionElapsedTiming? {
+        guard let recordingStartWallClock else { return nil }
+        return SessionElapsedTiming(
+            startDate: recordingStartWallClock,
+            totalPausedDuration: pausedWallClockDuration,
+            pauseStartedAt: pauseStartedAtWallClock
+        )
+    }
+
     // nonisolated so deinit can access it without crossing actor boundaries.
     private nonisolated static let subscriberID = "WorkoutManager"
 
@@ -693,6 +703,15 @@ final class WorkoutManager {
         guard state == .recording || state == .autoPaused else { return }
 
         lastIngestedMetrics = metrics
+
+        // Auto-resume from auto-pause when power returns (checked here to avoid SwiftUI onChange diffs).
+        if state == .autoPaused {
+            if shouldResume(from: metrics) {
+                resume(fromUserControls: false)
+            }
+            return
+        }
+
         bufferedTrainerPackets.append(
             BufferedTrainerPacket(timestamp: metrics.lastUpdate ?? Date(), metrics: metrics)
         )
@@ -705,12 +724,6 @@ final class WorkoutManager {
         }
         if metrics.includesTotalDistanceInPacket {
             latestDistanceInWindow = metrics.totalDistance
-        }
-
-        // Auto-resume from auto-pause when power returns
-        // (this is checked here instead of in SwiftUI onChange to avoid unnecessary view diffs)
-        if state == .autoPaused, shouldResume(from: metrics) {
-            resume(fromUserControls: false)
         }
     }
 
@@ -1035,14 +1048,15 @@ final class WorkoutManager {
         }
 
         powerHistory.append(PowerSample(elapsed: sampleElapsed, power: telemetry.power))
-        if powerHistory.count > 120 {
-            powerHistory.removeFirst(powerHistory.count - 60)
+        if powerHistory.count > 60 {
+            let removed = powerHistory.removeFirst()
+            if removed.power == powerHistoryMax {
+                powerHistoryMax = max(powerHistory.max(by: { $0.power < $1.power })?.power ?? 100, 100)
+            }
         }
         let chartPeak = max(telemetry.power, telemetry.maxPower)
         if chartPeak > powerHistoryMax {
             powerHistoryMax = chartPeak
-        } else if powerHistory.count == 60 || chartPeak < powerHistoryMax {
-            powerHistoryMax = max(powerHistory.max(by: { $0.power < $1.power })?.power ?? 100, 100)
         }
 
         lapPowerSum += Double(telemetry.power)

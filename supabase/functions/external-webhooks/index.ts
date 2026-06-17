@@ -83,7 +83,10 @@ function handleStravaVerification(url: URL): Response {
   const expectedToken = Deno.env.get("STRAVA_WEBHOOK_VERIFY_TOKEN");
   const suppliedToken = url.searchParams.get("hub.verify_token");
 
-  if (expectedToken && suppliedToken !== expectedToken) {
+  if (!expectedToken) {
+    return json({ error: "Webhook verify token is not configured" }, 401);
+  }
+  if (suppliedToken !== expectedToken) {
     return json({ error: "Invalid Strava verify token" }, 401);
   }
   return json({ "hub.challenge": challenge ?? "" });
@@ -91,7 +94,9 @@ function handleStravaVerification(url: URL): Response {
 
 function validateSharedSecret(req: Request, url: URL): Response | null {
   const expected = Deno.env.get("MANGOX_WEBHOOK_SECRET");
-  if (!expected) return null;
+  if (!expected) {
+    return json({ error: "Webhook secret is not configured" }, 401);
+  }
 
   const supplied = req.headers.get("x-mangox-webhook-secret") ?? url.searchParams.get("secret");
   if (supplied !== expected) {

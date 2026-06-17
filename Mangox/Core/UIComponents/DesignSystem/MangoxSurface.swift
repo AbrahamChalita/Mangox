@@ -19,6 +19,27 @@ enum MangoxSurfaceShape {
     case rectangle
 }
 
+private struct MangoxSurfaceInsetShape: InsettableShape {
+    let shape: MangoxSurfaceShape
+
+    nonisolated func path(in rect: CGRect) -> Path {
+        switch shape {
+        case .rounded(let corner):
+            RoundedRectangle(cornerRadius: corner, style: .continuous).path(in: rect)
+        case .capsule:
+            Capsule().path(in: rect)
+        case .circle:
+            Circle().path(in: rect)
+        case .rectangle:
+            Rectangle().path(in: rect)
+        }
+    }
+
+    nonisolated func inset(by amount: CGFloat) -> MangoxSurfaceInsetShape {
+        MangoxSurfaceInsetShape(shape: shape)
+    }
+}
+
 private struct MangoxSurfaceModifier: ViewModifier {
     let surface: MangoxSurface
     let shape: MangoxSurfaceShape
@@ -44,40 +65,21 @@ private struct MangoxSurfaceModifier: ViewModifier {
         }
     }
 
+    private func shapeView(_ shape: MangoxSurfaceShape) -> MangoxSurfaceInsetShape {
+        MangoxSurfaceInsetShape(shape: shape)
+    }
+
     @ViewBuilder
     private func applyFrosted(content: Content, interactive: Bool) -> some View {
+        let borderColor = interactive ? AppColor.mango.opacity(0.35) : AppColor.hair2
         if reduceTransparency {
-            applyFlat(content: content, fill: AppColor.bg3, border: interactive ? AppColor.mango.opacity(0.35) : AppColor.hair2)
+            applyFlat(content: content, fill: AppColor.bg3, border: borderColor)
         } else {
-            switch shape {
-            case .rounded(let corner):
-                content
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: corner, style: .continuous))
-                    .background(AppColor.bg4.opacity(0.72), in: RoundedRectangle(cornerRadius: corner, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: corner, style: .continuous)
-                            .strokeBorder(interactive ? AppColor.mango.opacity(0.35) : AppColor.hair2, lineWidth: 1)
-                    )
-            case .capsule:
-                content
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .background(AppColor.bg4.opacity(0.72), in: Capsule())
-                    .overlay(
-                        Capsule().strokeBorder(interactive ? AppColor.mango.opacity(0.35) : AppColor.hair2, lineWidth: 1)
-                    )
-            case .circle:
-                content
-                    .background(.ultraThinMaterial, in: Circle())
-                    .background(AppColor.bg4.opacity(0.72), in: Circle())
-                    .overlay(
-                        Circle().strokeBorder(interactive ? AppColor.mango.opacity(0.35) : AppColor.hair2, lineWidth: 1)
-                    )
-            case .rectangle:
-                content
-                    .background(.ultraThinMaterial)
-                    .background(AppColor.bg4.opacity(0.72))
-                    .overlay(Rectangle().strokeBorder(interactive ? AppColor.mango.opacity(0.35) : AppColor.hair2, lineWidth: 1))
-            }
+            let insetShape = shapeView(shape)
+            content
+                .background(.ultraThinMaterial, in: insetShape)
+                .background(AppColor.bg4.opacity(0.72), in: insetShape)
+                .overlay(insetShape.strokeBorder(borderColor, lineWidth: 1))
         }
     }
 
@@ -86,102 +88,34 @@ private struct MangoxSurfaceModifier: ViewModifier {
         if reduceTransparency {
             applyFlat(content: content, fill: AppColor.bg2.opacity(0.92), border: AppColor.hair2)
         } else {
-            switch shape {
-            case .rounded(let corner):
-                content
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: corner, style: .continuous))
-                    .background(AppColor.bg3.opacity(0.62), in: RoundedRectangle(cornerRadius: corner, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: corner, style: .continuous)
-                            .strokeBorder(AppColor.hair2, lineWidth: 1)
-                    )
-            case .capsule:
-                content
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .background(AppColor.bg3.opacity(0.62), in: Capsule())
-                    .overlay(Capsule().strokeBorder(AppColor.hair2, lineWidth: 1))
-            case .circle:
-                content
-                    .background(.ultraThinMaterial, in: Circle())
-                    .background(AppColor.bg3.opacity(0.62), in: Circle())
-                    .overlay(Circle().strokeBorder(AppColor.hair2, lineWidth: 1))
-            case .rectangle:
-                content
-                    .background(.ultraThinMaterial)
-                    .background(AppColor.bg3.opacity(0.62))
-                    .overlay(Rectangle().strokeBorder(AppColor.hair2, lineWidth: 1))
-            }
+            let insetShape = shapeView(shape)
+            content
+                .background(.ultraThinMaterial, in: insetShape)
+                .background(AppColor.bg3.opacity(0.62), in: insetShape)
+                .overlay(insetShape.strokeBorder(AppColor.hair2, lineWidth: 1))
         }
     }
 
     @ViewBuilder
     private func applyFlat(content: Content, fill: Color, border: Color? = nil) -> some View {
-        switch shape {
-        case .rounded(let corner):
-            content
-                .background(fill, in: RoundedRectangle(cornerRadius: corner, style: .continuous))
-                .overlay {
-                    if let border {
-                        RoundedRectangle(cornerRadius: corner, style: .continuous)
-                            .strokeBorder(border, lineWidth: 1)
-                    }
+        let insetShape = shapeView(shape)
+        content
+            .background(fill, in: insetShape)
+            .overlay {
+                if let border {
+                    insetShape.strokeBorder(border, lineWidth: 1)
                 }
-        case .capsule:
-            content
-                .background(fill, in: Capsule())
-                .overlay {
-                    if let border {
-                        Capsule().strokeBorder(border, lineWidth: 1)
-                    }
-                }
-        case .circle:
-            content
-                .background(fill, in: Circle())
-                .overlay {
-                    if let border {
-                        Circle().strokeBorder(border, lineWidth: 1)
-                    }
-                }
-        case .rectangle:
-            content
-                .background(fill)
-                .overlay {
-                    if let border {
-                        Rectangle().strokeBorder(border, lineWidth: 1)
-                    }
-                }
-        }
+            }
     }
 
     @ViewBuilder
     private func applyFlatStyled(content: Content, fill: Color, border: AnyShapeStyle) -> some View {
-        switch shape {
-        case .rounded(let corner):
-            content
-                .background(fill, in: RoundedRectangle(cornerRadius: corner, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: corner, style: .continuous)
-                        .strokeBorder(border, lineWidth: 1)
-                }
-        case .capsule:
-            content
-                .background(fill, in: Capsule())
-                .overlay {
-                    Capsule().strokeBorder(border, lineWidth: 1)
-                }
-        case .circle:
-            content
-                .background(fill, in: Circle())
-                .overlay {
-                    Circle().strokeBorder(border, lineWidth: 1)
-                }
-        case .rectangle:
-            content
-                .background(fill)
-                .overlay {
-                    Rectangle().strokeBorder(border, lineWidth: 1)
-                }
-        }
+        let insetShape = shapeView(shape)
+        content
+            .background(fill, in: insetShape)
+            .overlay {
+                insetShape.strokeBorder(border, lineWidth: 1)
+            }
     }
 }
 

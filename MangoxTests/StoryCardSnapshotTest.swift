@@ -25,10 +25,6 @@ final class StoryCardSnapshotTest: XCTestCase {
 
         let data = try XCTUnwrap(image.pngData())
         XCTAssertGreaterThan(data.count, 1000)
-
-        let url = URL(fileURLWithPath: "/Users/abrahamch/Desktop/Projects/Mangox/story_card_debug.png")
-        try data.write(to: url)
-        print("✅ Wrote snapshot to \(url.path)")
     }
 
     func testStoryOptionsDecodeOldPreferencesWithNewDefaults() throws {

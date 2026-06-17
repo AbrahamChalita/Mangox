@@ -399,13 +399,27 @@ final class IndoorViewModel {
     }
 
     func syncLiveActivity(isRecording: Bool, prefs: RidePreferences) async {
-        await liveActivityService.syncIndoorRecording(
+        let unified = dataSourceService.snapshotUnifiedMetrics()
+        let hr = max(0, unified.heartRate)
+        let power = workoutManager.displayPower
+        let cadence = unified.cadence
+        let duration = Double(workoutManager.elapsedSeconds)
+
+        let snapshot = IndoorLiveActivitySnapshot(
+            isEnabled: prefs.indoorLiveActivityEnabled,
             isRecording: isRecording,
-            prefs: prefs,
-            workoutManager: workoutManager,
-            dataSourceService: dataSourceService,
-            bleService: bleService
+            useImperial: prefs.isImperial,
+            speedKmh: workoutManager.metricsSpeed,
+            distanceM: workoutManager.activeDistance,
+            durationSeconds: duration,
+            heartRateBpm: hr,
+            powerWatts: power,
+            cadenceRpm: cadence,
+            isAutoPaused: workoutManager.state == .autoPaused,
+            isManuallyPaused: workoutManager.state == .paused
         )
+
+        await liveActivityService.syncIndoorRecording(snapshot: snapshot)
     }
 
     func prepareWorkoutSession(

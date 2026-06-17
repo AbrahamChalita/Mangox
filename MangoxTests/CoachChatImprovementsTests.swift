@@ -90,6 +90,62 @@ import Testing
             Issue.record("Failed to find metric substrings in output")
         }
     }
+
+    @Test func canBeginTurn_reservesTurnSlot() {
+        let service = AIService()
+
+        #expect(service.canBeginTurn())
+        #expect(!service.canBeginTurn(), "A second synchronous reservation should fail while the first is pending")
+
+        // Simulate the async send starting: it should consume the reservation.
+        let messageCount = service.messages.count
+        #expect(messageCount == 0)
+    }
+
+    @Test func suggestsFreshConversation_usesGreaterThanWindowSize() {
+        let service = AIService()
+
+        // Exactly at the window size should not suggest a fresh conversation.
+        service.messages = (0..<service.contextWindowSize).map { _ in
+            ChatMessage.user("test")
+        }
+        #expect(!service.suggestsFreshConversation)
+
+        // One message over the window should trigger the banner.
+        service.messages.append(ChatMessage.user("overflow"))
+        #expect(service.suggestsFreshConversation)
+    }
+
+    @Test func incrementalParser_matchesFullParser() {
+        let raw = "Hello <thinking>secret reasoning</thinking> world."
+        let expected = CoachThinkingTagParser.snapshot(streamBuffer: raw)
+
+        var parser = CoachThinkingTagParser.IncrementalParser()
+        let chunkSize = 4
+        var index = raw.startIndex
+        while index < raw.endIndex {
+            let end = raw.index(index, offsetBy: min(chunkSize, raw.distance(from: index, to: raw.endIndex)))
+            let delta = String(raw[index..<end])
+            _ = parser.append(delta)
+            index = end
+        }
+
+        let incremental = parser.currentSnapshot
+        #expect(incremental.visible == expected.visible)
+        #expect(incremental.completedBlocks == expected.completedBlocks)
+    }
+
+    @Test func incrementalParser_handlesTagSplitAcrossDeltas() {
+        var parser = CoachThinkingTagParser.IncrementalParser()
+
+        let snap1 = parser.append("Hello <think")
+        #expect(snap1.visible == "Hello ")
+        #expect(snap1.openDraft == nil)
+
+        let snap2 = parser.append("ing>reasoning</thinking> world.")
+        #expect(snap2.visible == "Hello  world.")
+        #expect(snap2.completedBlocks == ["reasoning"])
+    }
 }
 
 private struct MetricHighlightAttributes {
