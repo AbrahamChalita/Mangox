@@ -3,6 +3,7 @@ import UIKit
 
 enum InstagramStoryCardRenderer {
     static let cardSize = CGSize(width: 1080, height: 1920)
+    static let thumbnailSize = CGSize(width: 216, height: 384)
 
     /// Instagram expects ~1080×1920 logical pixels; default `UIGraphicsImageRenderer` uses **device scale** (2–3×),
     /// which multiplies bitmap cost (~9× memory and CPU) without improving Stories output.
@@ -45,6 +46,49 @@ enum InstagramStoryCardRenderer {
                 personalRecordNames: personalRecordNames,
                 options: resolvedOptions,
                 sessionKind: resolvedSession,
+                whoopStrain: whoopStrain,
+                whoopRecovery: whoopRecovery,
+                aiTitle: aiTitle,
+                backgroundImage: backgroundImage
+            )
+        }
+    }
+
+    /// Renders directly into a small bitmap while preserving the 1080×1920 drawing coordinate space.
+    /// This avoids allocating a full Story image for every template carousel item.
+    @MainActor
+    static func renderThumbnail(
+        workout: Workout,
+        dominantZone: PowerZone,
+        routeName: String?,
+        totalElevationGain: Double,
+        personalRecordNames: [String] = [],
+        options: InstagramStoryCardOptions,
+        sessionKind: InstagramStoryCardSessionKind,
+        whoopStrain: Double? = nil,
+        whoopRecovery: Double? = nil,
+        aiTitle: String? = nil,
+        backgroundImage: UIImage? = nil
+    ) -> UIImage {
+        let renderer = UIGraphicsImageRenderer(
+            size: thumbnailSize,
+            format: storyRendererFormat(opaque: false)
+        )
+        return renderer.image { context in
+            context.cgContext.scaleBy(
+                x: thumbnailSize.width / cardSize.width,
+                y: thumbnailSize.height / cardSize.height
+            )
+            StoryCardDrawing.draw(
+                in: context.cgContext,
+                size: cardSize,
+                workout: workout,
+                dominantZone: dominantZone,
+                routeName: routeName,
+                totalElevationGain: totalElevationGain,
+                personalRecordNames: personalRecordNames,
+                options: options,
+                sessionKind: sessionKind,
                 whoopStrain: whoopStrain,
                 whoopRecovery: whoopRecovery,
                 aiTitle: aiTitle,
@@ -359,28 +403,27 @@ enum StoryCardDrawing {
         drawForegroundScrim(in: size, cg: cg)
     }
 
-    /// Draws a photo full-bleed. When `editorial` is true (custom user photos), applies a branded monotone grade
-    /// (`.color` blend with the accent — preserves luminance, takes the accent's hue/saturation) plus film grain,
-    /// and a lighter scrim so the grade reads. Preset JPGs (`editorial == false`) keep their art-directed color,
-    /// with a subtle grain pass to unify texture across background modes.
+    /// Draws a photo full-bleed. Custom photos keep their recognizable color and receive only a restrained
+    /// accent wash and scrim so text remains legible without turning the photo into a grainy monochrome texture.
     private static func drawPhotoBackground(_ image: UIImage, in size: CGSize, cg: CGContext, accent: UIColor, editorial: Bool) {
-        let prepared = ImageProcessing.prepareStoryBackground(from: image)
-        prepared.draw(in: CGRect(origin: .zero, size: size))
+        let drawable = ImageProcessing.isStoryPrepared(image)
+            ? image
+            : ImageProcessing.prepareStoryBackground(from: image)
+        drawable.draw(in: CGRect(origin: .zero, size: size))
 
         if editorial {
             cg.saveGState()
-            cg.setBlendMode(.color)
-            cg.setFillColor(accent.cgColor)
+            cg.setBlendMode(.softLight)
+            cg.setFillColor(accent.withAlphaComponent(0.12).cgColor)
             cg.fill(CGRect(origin: .zero, size: size))
             cg.restoreGState()
         }
 
         cg.saveGState()
-        cg.setFillColor(StoryCardDesign.canvasBackground.withAlphaComponent(editorial ? 0.52 : 0.70).cgColor)
+        cg.setFillColor(StoryCardDesign.canvasBackground.withAlphaComponent(editorial ? 0.24 : 0.48).cgColor)
         cg.fill(CGRect(origin: .zero, size: size))
         cg.restoreGState()
 
-        StoryCardPrimitives.applyFilmGrain(in: size, cg: cg, alpha: editorial ? 0.05 : 0.03)
     }
 
     private static func drawAtmosphericBackground(
@@ -412,7 +455,6 @@ enum StoryCardDrawing {
             cg: cg
         )
 
-        StoryCardPrimitives.applyFilmGrain(in: size, cg: cg, alpha: 0.04)
     }
 
     private static func drawForegroundScrim(in size: CGSize, cg: CGContext) {

@@ -19,6 +19,10 @@ struct InstagramStoryStudioView: View {
     @State private var showCustomizeSheet = false
     @State private var showCaptionSheet = false
     @State private var captionCopied = false
+    @State private var captionDraft = ""
+    @State private var captionReadyHint: String?
+    @State private var errorMessage: String?
+    @State private var successMessage: String?
     /// Coalesces rapid toggle changes so we do not re-rasterize 1080×1920 on every `storyOptions` mutation.
     @State private var previewRenderTask: Task<Void, Never>?
     /// Namespace for Liquid Glass morphing of side-rail controls (e.g. the remove-photo button appearing/disappearing).
@@ -150,9 +154,15 @@ struct InstagramStoryStudioView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
                 .allowsHitTesting(true)
+
+            feedbackOverlay
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.top, 72)
+                .padding(.horizontal, 16)
         }
         .preferredColorScheme(.dark)
         .onAppear {
+            captionDraft = viewModel.aiCaption ?? ""
             viewModel.applySessionRecommendedOptionsIfDefault(
                 workout: workout,
                 routeName: routeName,
@@ -165,28 +175,24 @@ struct InstagramStoryStudioView: View {
         .onChange(of: viewModel.storyOptions) { _, _ in
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             schedulePreviewRenderDebounced()
+            renderTemplateThumbnails()
         }
         .onChange(of: viewModel.aiTitle) { _, _ in
             renderPreviewImmediately()
+            renderTemplateThumbnails()
+        }
+        .onChange(of: viewModel.aiCaption) { _, caption in
+            captionDraft = caption ?? ""
+            if let caption, !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                presentCaptionReadyHint()
+            }
         }
         .onChange(of: viewModel.customBackgroundImage) { _, _ in
-            viewModel.invalidateTemplateThumbnails()
             renderTemplateThumbnails()
         }
         .onChange(of: selectedPhotoItem) { _, item in
             guard let item else { return }
-            Task { @MainActor in
-                if let data = try? await item.loadTransferable(type: Data.self),
-                   let raw = UIImage(data: data)
-                {
-                    let prepared = ImageProcessing.prepareStoryBackground(from: raw)
-                    viewModel.customBackgroundImage = prepared
-                    var opts = viewModel.storyOptions
-                    opts.backgroundSource = .custom
-                    viewModel.saveStoryOptions(opts)
-                }
-                renderPreviewImmediately()
-            }
+            Task { await loadSelectedPhoto(item) }
         }
         .task(id: workout.id) {
             viewModel.beginStoryCardTitleGenerationIfNeeded(
@@ -205,8 +211,9 @@ struct InstagramStoryStudioView: View {
         }
         .sheet(isPresented: binding(\.showShareFallback), onDismiss: {
             viewModel.shareVideoURL = nil
+            viewModel.shareFallbackCaption = nil
         }) {
-            ShareSheet(activityItems: viewModel.shareVideoURL.map { [$0] } ?? (viewModel.shareFallbackItems as [Any]))
+            ShareSheet(activityItems: fallbackShareItems)
         }
         .sheet(isPresented: $showCustomizeSheet) {
             customizeSheet
@@ -268,6 +275,26 @@ struct InstagramStoryStudioView: View {
                     }
                 }
 
+                if viewModel.storyOptions.backgroundSource == .custom,
+                   viewModel.customBackgroundImage == nil
+                {
+                    VStack(spacing: 8) {
+                        Image(systemName: "photo.badge.plus")
+                            .font(.title2)
+                        Text("Choose a photo")
+                            .font(MangoxFont.bodyBold.scaled())
+                        Text("Your photo stays on this device and is used only for this editing session.")
+                            .font(MangoxFont.caption.scaled())
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(AppColor.fg1)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(18)
+                    .frame(maxWidth: 250)
+                    .background(Color.black.opacity(0.72), in: .rect(cornerRadius: 16))
+                    .accessibilityElement(children: .combine)
+                }
+
                 if viewModel.isExportingVideo {
                     VStack(spacing: 12) {
                         ProgressView(value: viewModel.exportProgress)
@@ -318,15 +345,10 @@ struct InstagramStoryStudioView: View {
 
                 accentSwatchButton
 
+                captionToolbarButton
+
                 circularToolButton(systemName: "square.and.arrow.down", accessibilityLabel: A11yL10n.saveToPhotos) {
-                    viewModel.saveToPhotos(
-                        workout: workout,
-                        dominantZone: dominantZone,
-                        routeName: routeName,
-                        totalElevationGain: totalElevationGain,
-                        personalRecordNames: personalRecordNames
-                    )
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    Task { await saveStoryToPhotos() }
                 }
 
                 circularToolButton(systemName: "ellipsis", accessibilityLabel: "Customize story") {
@@ -355,6 +377,41 @@ struct InstagramStoryStudioView: View {
         .accessibilityValue(viewModel.storyOptions.accent.pickerTitle)
     }
 
+    @ViewBuilder
+    private var captionToolbarButton: some View {
+        if viewModel.isCaptionGenerating {
+            ProgressView()
+                .scaleEffect(0.7)
+                .tint(.white)
+                .frame(width: 44, height: 44)
+                .glassEffect(.regular, in: .circle)
+                .accessibilityLabel("Writing caption")
+        } else if let caption = viewModel.aiCaption,
+                  !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Menu {
+                Button {
+                    copyCaptionToClipboard(caption)
+                } label: {
+                    Label("Copy caption", systemImage: "doc.on.doc")
+                }
+                Button {
+                    captionDraft = caption
+                    showCaptionSheet = true
+                } label: {
+                    Label("Edit caption", systemImage: "pencil")
+                }
+            } label: {
+                Image(systemName: captionCopied ? "checkmark.bubble.fill" : "text.bubble.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(captionCopied ? mango : .white)
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive(), in: .circle)
+            }
+            .buttonStyle(MangoxPressStyle())
+            .accessibilityLabel("Caption actions")
+        }
+    }
+
     private func circularToolButton(
         systemName: String,
         accessibilityLabel: String,
@@ -378,6 +435,7 @@ struct InstagramStoryStudioView: View {
 
     private var sideRail: some View {
         let hasCustomBackgroundImage = viewModel.customBackgroundImage != nil
+        let glassNamespace = sideRailGlassNamespace
 
         return GlassEffectContainer(spacing: 10) {
             VStack(spacing: 10) {
@@ -391,7 +449,7 @@ struct InstagramStoryStudioView: View {
                         .foregroundStyle(hasCustomBackgroundImage ? mango : .white)
                         .frame(width: 44, height: 44)
                         .glassEffect(.regular.interactive(), in: .circle)
-                        .glassEffectID("photos", in: sideRailGlassNamespace)
+                        .glassEffectID("photos", in: glassNamespace)
                 }
                 .accessibilityLabel(hasCustomBackgroundImage ? "Change background photo" : "Add background photo")
 
@@ -410,7 +468,7 @@ struct InstagramStoryStudioView: View {
                             .foregroundStyle(AppColor.destructive)
                             .frame(width: 44, height: 44)
                             .glassEffect(.regular.tint(AppColor.destructive.opacity(0.22)).interactive(), in: .circle)
-                            .glassEffectID("remove-photo", in: sideRailGlassNamespace)
+                            .glassEffectID("remove-photo", in: glassNamespace)
                     }
                     .buttonStyle(MangoxPressStyle())
                     .transition(.scale.combined(with: .opacity))
@@ -438,7 +496,7 @@ struct InstagramStoryStudioView: View {
                     }
                     .frame(width: 44, height: 44)
                     .glassEffect(.regular.interactive(), in: .circle)
-                    .glassEffectID("regenerate", in: sideRailGlassNamespace)
+                    .glassEffectID("regenerate", in: glassNamespace)
                 }
                 .buttonStyle(MangoxPressStyle())
                 .disabled(viewModel.isTitleGenerating)
@@ -455,7 +513,7 @@ struct InstagramStoryStudioView: View {
                         .foregroundStyle(viewModel.storyOptions.showBrandBadge ? mango : .white)
                         .frame(width: 44, height: 44)
                         .glassEffect(.regular.interactive(), in: .circle)
-                        .glassEffectID("brand-badge", in: sideRailGlassNamespace)
+                        .glassEffectID("brand-badge", in: glassNamespace)
                 }
                 .buttonStyle(MangoxPressStyle())
                 .accessibilityLabel(A11yL10n.mangoxBrandBadge)
@@ -485,11 +543,11 @@ struct InstagramStoryStudioView: View {
                     }
                     .frame(width: 44, height: 44)
                     .glassEffect(.regular.interactive(), in: .circle)
-                    .glassEffectID("reels", in: sideRailGlassNamespace)
+                    .glassEffectID("reels", in: glassNamespace)
                 }
                 .buttonStyle(MangoxPressStyle())
                 .disabled(viewModel.isExportingVideo)
-                .accessibilityLabel("Export Reels video")
+                .accessibilityLabel("Create 3-second Story video")
             }
             .animation(MangoxMotion.exit, value: hasCustomBackgroundImage)
         }
@@ -512,17 +570,23 @@ struct InstagramStoryStudioView: View {
             } else if let caption = viewModel.aiCaption, !caption.isEmpty {
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    captionDraft = caption
                     showCaptionSheet = true
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "text.bubble.fill")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(mango)
-                        Text(captionPreviewSnippet(caption))
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Caption ready")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Color.white.opacity(0.62))
+                            Text(captionPreviewSnippet(caption))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
                         Image(systemName: "chevron.right")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(Color.white.opacity(0.5))
@@ -532,6 +596,19 @@ struct InstagramStoryStudioView: View {
                     .glassEffect(.regular.interactive(), in: .capsule)
                 }
                 .buttonStyle(MangoxPressStyle())
+                .contextMenu {
+                    Button {
+                        copyCaptionToClipboard(caption)
+                    } label: {
+                        Label("Copy caption", systemImage: "doc.on.doc")
+                    }
+                    Button {
+                        captionDraft = caption
+                        showCaptionSheet = true
+                    } label: {
+                        Label("Edit caption", systemImage: "pencil")
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -658,7 +735,7 @@ struct InstagramStoryStudioView: View {
                 Text(
                     viewModel.isSharing
                         ? (viewModel.storyOptions.carouselExport ? "Preparing slides…" : "Opening Instagram…")
-                        : (viewModel.storyOptions.carouselExport ? "Export Story Carousel" : "Share to Instagram Stories")
+                        : (viewModel.storyOptions.carouselExport ? "Share 3-Image Story Set" : "Share to Instagram Stories")
                 )
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
@@ -832,6 +909,9 @@ struct InstagramStoryStudioView: View {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         viewModel.customBackgroundImage = nil
                         selectedPhotoItem = nil
+                        var opts = viewModel.storyOptions
+                        opts.backgroundSource = .preset
+                        viewModel.saveStoryOptions(opts)
                         renderPreviewImmediately()
                     } label: {
                         Label("Remove Photo", systemImage: "trash.fill")
@@ -968,10 +1048,14 @@ struct InstagramStoryStudioView: View {
 
     private var sharingControls: some View {
         VStack(spacing: 12) {
-            Toggle("Layered share (gradient + movable card)", isOn: optionBinding(\.layeredShare))
+            Toggle("Movable card in Instagram", isOn: optionBinding(\.layeredShare))
                 .tint(mango)
-            Toggle("Carousel export (3 slides)", isOn: optionBinding(\.carouselExport))
+            Toggle("Share as 3-image set", isOn: optionBinding(\.carouselExport))
                 .tint(mango)
+            Text("Image sets and videos open the system share sheet so you can choose Instagram or save them.")
+                .font(MangoxFont.caption.scaled())
+                .foregroundStyle(AppColor.fg2)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1016,12 +1100,16 @@ struct InstagramStoryStudioView: View {
                         }
                     }
 
-                    if let caption = viewModel.aiCaption {
-                        Text(caption)
-                            .font(.system(size: 15))
+                    if !captionDraft.isEmpty {
+                        TextField("Write a caption", text: $captionDraft, axis: .vertical)
+                            .font(MangoxFont.body.scaled())
                             .foregroundStyle(AppColor.fg0)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
+                            .lineLimit(4...10)
+                            .padding(14)
+                            .background(AppColor.bg2, in: .rect(cornerRadius: 12))
+                            .onChange(of: captionDraft) { _, updatedCaption in
+                                viewModel.aiCaption = updatedCaption
+                            }
 
                         if viewModel.instagramCaptionUsesStatsFallback {
                             Text(
@@ -1034,13 +1122,7 @@ struct InstagramStoryStudioView: View {
 
                         HStack(spacing: 10) {
                             Button {
-                                UIPasteboard.general.string = caption
-                                captionCopied = true
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                Task {
-                                    try? await Task.sleep(for: .seconds(2))
-                                    captionCopied = false
-                                }
+                                copyCaptionToClipboard(captionDraft)
                             } label: {
                                 Label(
                                     captionCopied ? "Copied!" : "Copy",
@@ -1083,7 +1165,11 @@ struct InstagramStoryStudioView: View {
                             }
                         }
 
-                        captionDeepLinkSection(for: caption)
+                        captionDeepLinkSection(for: captionDraft)
+                        Text("When you share directly to Instagram, Mangox places this caption on your clipboard after the Story opens. Paste it with Instagram’s text tool.")
+                            .font(MangoxFont.caption.scaled())
+                            .foregroundStyle(AppColor.fg2)
+                            .fixedSize(horizontal: false, vertical: true)
                     } else if !viewModel.isCaptionGenerating {
                         Text(
                             OnDeviceCoachEngine.isOnDeviceWritingModelAvailable
@@ -1175,5 +1261,118 @@ struct InstagramStoryStudioView: View {
         }
         .buttonStyle(MangoxPressStyle())
         .accessibilityLabel("\(A11yL10n.openHashtag) — #\(tag)")
+    }
+
+    private var fallbackShareItems: [Any] {
+        var items: [Any]
+        if let videoURL = viewModel.shareVideoURL {
+            items = [videoURL]
+        } else {
+            items = viewModel.shareFallbackItems.map { $0 as Any }
+        }
+        if let caption = viewModel.shareFallbackCaption?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !caption.isEmpty
+        {
+            items.append(caption)
+        }
+        return items
+    }
+
+    @ViewBuilder
+    private var feedbackOverlay: some View {
+        if let errorMessage {
+            MangoxErrorBanner(
+                message: errorMessage,
+                severity: .error,
+                onDismiss: { self.errorMessage = nil }
+            )
+        } else if let successMessage {
+            MangoxErrorBanner(
+                message: successMessage,
+                severity: .info,
+                onDismiss: { self.successMessage = nil }
+            )
+        } else if let captionReadyHint {
+            MangoxErrorBanner(
+                message: captionReadyHint,
+                severity: .info,
+                onDismiss: { self.captionReadyHint = nil }
+            )
+        }
+    }
+
+    private func copyCaptionToClipboard(_ caption: String) {
+        let trimmed = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        UIPasteboard.general.string = trimmed
+        captionCopied = true
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        presentSuccess("Caption copied. Paste it in Instagram’s text tool after sharing.")
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            captionCopied = false
+        }
+    }
+
+    @MainActor
+    private func presentCaptionReadyHint() {
+        guard !showCaptionSheet else { return }
+        captionReadyHint = "Caption ready — tap the bubble to edit or copy before sharing."
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            if captionReadyHint?.hasPrefix("Caption ready") == true {
+                captionReadyHint = nil
+            }
+        }
+    }
+
+    @MainActor
+    private func loadSelectedPhoto(_ item: PhotosPickerItem) async {
+        defer { selectedPhotoItem = nil }
+        errorMessage = nil
+        do {
+            viewModel.customBackgroundImage = try await StoryMediaService.loadStoryBackground(from: item)
+            var options = viewModel.storyOptions
+            options.backgroundSource = .custom
+            viewModel.saveStoryOptions(options)
+            renderPreviewImmediately()
+            presentSuccess("Photo background added.")
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+    }
+
+    @MainActor
+    private func saveStoryToPhotos() async {
+        errorMessage = nil
+        do {
+            try await viewModel.saveToPhotos(
+                workout: workout,
+                dominantZone: dominantZone,
+                routeName: routeName,
+                totalElevationGain: totalElevationGain,
+                personalRecordNames: personalRecordNames
+            )
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            presentSuccess("Story card saved to Photos.")
+        } catch {
+            errorMessage = error.localizedDescription
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+    }
+
+    @MainActor
+    private func presentSuccess(_ message: String) {
+        successMessage = message
+        Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            if successMessage == message {
+                successMessage = nil
+            }
+        }
     }
 }

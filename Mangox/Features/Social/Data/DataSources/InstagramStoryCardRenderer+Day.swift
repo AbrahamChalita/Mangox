@@ -25,6 +25,31 @@ extension InstagramStoryCardRenderer {
             )
         }
     }
+
+    @MainActor
+    static func renderDaySummaryThumbnail(
+        summary: DaySummary,
+        options: DaySummaryCardOptions,
+        backgroundImage: UIImage? = nil
+    ) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: thumbnailSize, format: format)
+        return renderer.image { context in
+            context.cgContext.scaleBy(
+                x: thumbnailSize.width / cardSize.width,
+                y: thumbnailSize.height / cardSize.height
+            )
+            DaySummaryCardDrawing.draw(
+                in: context.cgContext,
+                size: cardSize,
+                summary: summary,
+                options: options,
+                backgroundImage: backgroundImage
+            )
+        }
+    }
 }
 
 // MARK: - Drawing Engine
@@ -108,13 +133,15 @@ private enum DaySummaryCardDrawing {
     // MARK: - Background
 
     private static func drawPhotoBackground(_ image: UIImage, size: CGSize, cg: CGContext, accent: UIColor) {
-        let prepared = ImageProcessing.prepareStoryBackground(from: image)
-        prepared.draw(in: CGRect(origin: .zero, size: size))
+        let drawable = ImageProcessing.isStoryPrepared(image)
+            ? image
+            : ImageProcessing.prepareStoryBackground(from: image)
+        drawable.draw(in: CGRect(origin: .zero, size: size))
 
-        // Branded monotone grade: preserve the photo's luminance, take the accent's hue/saturation.
+        // Keep the photo recognizable; the accent is a restrained editorial wash.
         cg.saveGState()
-        cg.setBlendMode(.color)
-        cg.setFillColor(accent.cgColor)
+        cg.setBlendMode(.softLight)
+        cg.setFillColor(accent.withAlphaComponent(0.12).cgColor)
         cg.fill(CGRect(origin: .zero, size: size))
         cg.restoreGState()
 
@@ -148,7 +175,6 @@ private enum DaySummaryCardDrawing {
             )
         }
 
-        StoryCardPrimitives.applyFilmGrain(in: size, cg: cg, alpha: 0.05)
     }
 
     private static func drawBackground(index: Int, size: CGSize, cg: CGContext) {
@@ -178,7 +204,6 @@ private enum DaySummaryCardDrawing {
             )
         }
 
-        StoryCardPrimitives.applyFilmGrain(in: size, cg: cg, alpha: 0.04)
     }
 
     private static func fillRadial(center: CGPoint, radius: CGFloat, color: UIColor, cg: CGContext) {

@@ -87,6 +87,69 @@ final class StoryCardSnapshotTest: XCTestCase {
         }
     }
 
+    func testTemplateThumbnailsRenderAtThumbnailSize() throws {
+        let workout = makeMockWorkout()
+        let zone = PowerZone.zone(for: Int(workout.avgPower.rounded()))
+
+        for template in InstagramStoryCardOptions.Template.allCases {
+            var options = InstagramStoryCardOptions.default
+            options.template = template
+            SocialViewModel.applyTemplateDefaults(template, to: &options)
+
+            let image = InstagramStoryCardRenderer.renderThumbnail(
+                workout: workout,
+                dominantZone: zone,
+                routeName: "Col du Galibier",
+                totalElevationGain: 824,
+                options: options,
+                sessionKind: .outdoor,
+                aiTitle: "Climb Day"
+            )
+
+            XCTAssertEqual(image.size, InstagramStoryCardRenderer.thumbnailSize)
+        }
+    }
+
+    func testCustomPhotoPreferenceRestoresToAvailablePreset() {
+        var options = InstagramStoryCardOptions.default
+        options.backgroundSource = .custom
+        InstagramStoryStudioPreferences.save(options)
+
+        XCTAssertEqual(InstagramStoryStudioPreferences.load().backgroundSource, .preset)
+
+        InstagramStoryStudioPreferences.save(.default)
+    }
+
+    func testPreparedStoryBackgroundHasCorrectDimensions() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let source = UIGraphicsImageRenderer(
+            size: CGSize(width: 1600, height: 900),
+            format: format
+        ).image { context in
+            UIColor.systemOrange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 800, height: 900))
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 800, y: 0, width: 800, height: 900))
+        }
+        let sourceData = try XCTUnwrap(source.jpegData(compressionQuality: 0.9))
+        let preparedData = try ImageProcessing.prepareStoryBackgroundData(from: sourceData)
+        let prepared = try XCTUnwrap(UIImage(data: preparedData))
+
+        XCTAssertEqual(prepared.size, ImageProcessing.storySize)
+    }
+
+    func testInstagramCaptionUtilitiesPreserveOrderAndRemoveDuplicates() {
+        XCTAssertEqual(
+            InstagramStoryShare.hashtags(in: "Ride done #cycling #mangox #cycling"),
+            ["cycling", "mangox"]
+        )
+        XCTAssertEqual(
+            InstagramStoryShare.instagramProfileURL(username: "@mangox.app")?.absoluteString,
+            "instagram://user?username=mangox.app"
+        )
+    }
+
     private func makeMockWorkout() -> Workout {
         let workout = Workout(startDate: Date())
         workout.duration = 7868

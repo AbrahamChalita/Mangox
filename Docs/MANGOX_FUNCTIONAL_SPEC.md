@@ -179,9 +179,9 @@ JSON-only output contract, fitness-tool Zod schemas mirroring iOS tools, server 
 
 ## 12. Social
 
-- **Instagram Story Studio**: 9 templates × 7 visual styles, 1080×1920 Core Graphics render (scale 1 to avoid 9× memory), pick-4 metric slots, accent from dominant power zone or mango, preset gradient/custom-photo/none backgrounds, optional WHOOP recovery stripe; session-kind auto-detection (outdoor if route/elevation >50m; indoor if ≥60min and ≤25m elevation); 220ms debounced preview re-render; on-device AI caption/title with stats-only fallback; share-sheet fallback if Instagram unavailable (Facebook App ID `986008587288900` for source attribution).
+- **Instagram Story Studio**: 9 templates × 7 visual styles, 1080×1920 Core Graphics export with direct low-resolution template thumbnails, pick-4 metric slots, accent from dominant power zone or mango, preset/custom-photo/clean atmospheric backgrounds, optional WHOOP recovery stripe; custom photos remain recognizable under a restrained editorial wash and are session-only (the source resets to a preset when reopened); session-kind auto-detection (outdoor if route/elevation >50m; indoor if ≥60min and ≤25m elevation); 220ms debounced preview re-render; editable on-device AI caption/title with stats-only fallback; direct Instagram sharing restores the caption to the clipboard after Instagram consumes the image payload, while system-share fallbacks include the caption as a share item; optional movable-card Instagram share, 3-image share set, and 3-second MP4 export (Facebook App ID `986008587288900` for source attribution).
 - **Strava**: OAuth via Supabase edge function (secrets server-side), token in Keychain, upload as Ride/VirtualRide with `StravaPostBuilder` captions + photos, 15-min rate-limit header tracking, stream fetching (both array and keyed formats).
-- **Day Summary Studio** (`.daySummaryStudio(date:)`): day recap card combining rides + logged activities (carousel export planned, post-v1).
+- **Day Summary Studio** (`.daySummaryStudio(date:)`): day recap card combining rides + logged activities, with the same session-only photo handling, orientation correction, save feedback, and Instagram/system-share fallback behavior as Workout Stories (multi-image export remains planned, post-v1).
 
 ---
 

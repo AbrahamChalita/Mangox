@@ -15,7 +15,13 @@ final class DaySummaryStudioViewModel {
     private(set) var previewImage: UIImage?
     private(set) var thumbnails: [DaySummaryCardOptions.Template: UIImage] = [:]
     private(set) var isRendering = false
-    private var thumbnailDate: Date?
+    private struct ThumbnailKey: Equatable {
+        var date: Date
+        var options: DaySummaryCardOptions
+        var backgroundObjectID: ObjectIdentifier?
+        var activityCount: Int
+    }
+    private var thumbnailKey: ThumbnailKey?
     private var thumbnailTask: Task<Void, Never>?
     private(set) var isSharing = false
     var showShareFallback = false
@@ -37,7 +43,10 @@ final class DaySummaryStudioViewModel {
         self.buildSummary = BuildDaySummaryUseCase(modelContext: modelContext, activityRepository: repository)
         self.enrichStravaStreams = enrichStravaStreams
         if let data = UserDefaults.standard.data(forKey: Self.prefsKey),
-           let opts = try? JSONDecoder().decode(DaySummaryCardOptions.self, from: data) {
+           var opts = try? JSONDecoder().decode(DaySummaryCardOptions.self, from: data) {
+            if opts.backgroundSource == .photo {
+                opts.backgroundSource = .gradient
+            }
             self.cardOptions = opts
         } else {
             self.cardOptions = .default
@@ -89,7 +98,11 @@ final class DaySummaryStudioViewModel {
 
     func saveOptions(_ opts: DaySummaryCardOptions) {
         cardOptions = opts
-        if let data = try? JSONEncoder().encode(opts) {
+        var persisted = opts
+        if persisted.backgroundSource == .photo {
+            persisted.backgroundSource = .gradient
+        }
+        if let data = try? JSONEncoder().encode(persisted) {
             UserDefaults.standard.set(data, forKey: Self.prefsKey)
         }
     }
@@ -113,32 +126,40 @@ final class DaySummaryStudioViewModel {
     func invalidateThumbnails() {
         thumbnailTask?.cancel()
         thumbnailTask = nil
-        thumbnailDate = nil
+        thumbnailKey = nil
         thumbnails = [:]
     }
 
     func renderThumbnails() {
         guard let summary else { return }
-        guard thumbnailDate != date || thumbnails.isEmpty else { return }
+        var keyOptions = cardOptions
+        keyOptions.template = .dayBriefing
+        let nextKey = ThumbnailKey(
+            date: date,
+            options: keyOptions,
+            backgroundObjectID: customBackgroundImage.map { ObjectIdentifier($0 as AnyObject) },
+            activityCount: summary.activityCount
+        )
+        guard thumbnailKey != nextKey
+            || thumbnails.count != DaySummaryCardOptions.Template.allCases.count
+        else { return }
         thumbnailTask?.cancel()
+        thumbnailKey = nextKey
         let s = summary
         let base = cardOptions
         let bg = customBackgroundImage
-        let targetDate = date
         thumbnailTask = Task { @MainActor [weak self] in
             for template in DaySummaryCardOptions.Template.allCases {
                 guard let self, !Task.isCancelled else { return }
                 var opts = base
                 opts.template = template
-                let full = InstagramStoryCardRenderer.renderDaySummary(
+                let thumb = InstagramStoryCardRenderer.renderDaySummaryThumbnail(
                     summary: s,
                     options: opts,
                     backgroundImage: bg
                 )
-                let thumb = await full.byPreparingThumbnail(ofSize: CGSize(width: 256, height: 456)) ?? full
                 guard !Task.isCancelled else { return }
                 thumbnails[template] = thumb
-                thumbnailDate = targetDate
             }
         }
     }
@@ -167,13 +188,13 @@ final class DaySummaryStudioViewModel {
         }
     }
 
-    func saveToPhotos() {
+    func saveToPhotos() async throws {
         guard let summary else { return }
         let image = InstagramStoryCardRenderer.renderDaySummary(
             summary: summary,
             options: cardOptions,
             backgroundImage: customBackgroundImage
         )
-        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+        try await StoryMediaService.saveToPhotos(image)
     }
 }

@@ -133,8 +133,12 @@ enum InstagramStoryShare {
     ///
     /// Returns `true` if the Instagram URL was opened; `false` if App ID is missing or the URL cannot be opened.
     @discardableResult
-    static func presentStories(withPNGData imageData: Data) -> Bool {
-        return presentStories(backgroundPNGData: imageData, stickerPNGData: nil)
+    static func presentStories(withPNGData imageData: Data, caption: String? = nil) -> Bool {
+        return presentStories(
+            backgroundPNGData: imageData,
+            stickerPNGData: nil,
+            caption: caption
+        )
     }
 
     /// Opens Instagram Stories with optional **background** and/or **sticker** assets (Meta pasteboard API).
@@ -146,7 +150,8 @@ enum InstagramStoryShare {
         backgroundPNGData: Data?,
         stickerPNGData: Data?,
         backgroundTopColorHex: String = "050510",
-        backgroundBottomColorHex: String = "100818"
+        backgroundBottomColorHex: String = "100818",
+        caption: String? = nil
     ) -> Bool {
         guard let storiesURL = instagramStoriesShareURL() else {
             instagramStoryLogger.error(
@@ -187,7 +192,10 @@ enum InstagramStoryShare {
         // Defer `open` one run-loop turn so the pasteboard commit is visible to Instagram when it foregrounds.
         Task { @MainActor in
             await Task.yield()
-            UIApplication.shared.open(storiesURL, options: [:], completionHandler: nil)
+            UIApplication.shared.open(storiesURL, options: [:]) { opened in
+                guard opened else { return }
+                restoreCaptionToPasteboardAfterInstagramReadsStory(caption)
+            }
         }
         return true
     }
@@ -198,6 +206,25 @@ enum InstagramStoryShare {
     static func presentStories(with image: UIImage) -> Bool {
         guard let imageData = encodeBackgroundImageData(image) else { return false }
         return presentStories(withPNGData: imageData)
+    }
+
+    /// Instagram's Stories API accepts visual pasteboard assets but has no caption field.
+    /// Restore the caption shortly after Instagram reads the image so the user can paste it
+    /// into the Story text tool without the image payload permanently replacing their clipboard.
+    @MainActor
+    private static func restoreCaptionToPasteboardAfterInstagramReadsStory(_ caption: String?) {
+        guard let caption else { return }
+        let trimmed = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "MangoxStoryCaption")
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.25))
+            UIPasteboard.general.string = trimmed
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+            }
+        }
     }
 
     // MARK: - Deep links (hashtags & profiles)

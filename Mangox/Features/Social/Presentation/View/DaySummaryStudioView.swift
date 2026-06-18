@@ -13,6 +13,7 @@ struct DaySummaryStudioView: View {
     @State private var showCustomizeSheet = false
     @State private var renderTask: Task<Void, Never>?
     @State private var shareError: String?
+    @State private var successMessage: String?
     @State private var selectedPhotoItem: PhotosPickerItem?
     /// Namespace for Liquid Glass morphing of side-rail controls (e.g. the remove-photo button appearing/disappearing).
     @Namespace private var sideRailGlassNamespace
@@ -37,6 +38,11 @@ struct DaySummaryStudioView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
                 .allowsHitTesting(true)
+
+            feedbackOverlay
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.top, 72)
+                .padding(.horizontal, 16)
         }
         .preferredColorScheme(.dark)
         .navigationBarHidden(true)
@@ -47,22 +53,11 @@ struct DaySummaryStudioView: View {
         .onChange(of: viewModel.cardOptions) { _, _ in
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             scheduleRender()
+            viewModel.renderThumbnails()
         }
         .onChange(of: selectedPhotoItem) { _, item in
             guard let item else { return }
-            Task { @MainActor in
-                if let data = try? await item.loadTransferable(type: Data.self),
-                   let raw = UIImage(data: data) {
-                    let prepared = ImageProcessing.prepareStoryBackground(from: raw)
-                    viewModel.customBackgroundImage = prepared
-                    var opts = viewModel.cardOptions
-                    opts.backgroundSource = .photo
-                    viewModel.saveOptions(opts)
-                    viewModel.invalidateThumbnails()
-                    scheduleRender(immediate: true)
-                    viewModel.renderThumbnails()
-                }
-            }
+            Task { await loadSelectedPhoto(item) }
         }
         .sheet(isPresented: Binding(
             get: { viewModel.showShareFallback },
@@ -75,14 +70,6 @@ struct DaySummaryStudioView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .preferredColorScheme(.dark)
-        }
-        .alert("Couldn't Share", isPresented: .init(
-            get: { shareError != nil },
-            set: { if !$0 { shareError = nil } }
-        )) {
-            Button("OK", role: .cancel) { shareError = nil }
-        } message: {
-            Text(shareError ?? "")
         }
     }
 
@@ -137,6 +124,25 @@ struct DaySummaryStudioView: View {
                     }
                 }
 
+                if viewModel.cardOptions.backgroundSource == .photo,
+                   viewModel.customBackgroundImage == nil
+                {
+                    VStack(spacing: 8) {
+                        Image(systemName: "photo.badge.plus")
+                            .font(.title2)
+                        Text("Choose a photo")
+                            .font(MangoxFont.bodyBold.scaled())
+                        Text("The photo is used only for this editing session.")
+                            .font(MangoxFont.caption.scaled())
+                            .foregroundStyle(AppColor.fg1)
+                    }
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(18)
+                    .background(Color.black.opacity(0.72), in: .rect(cornerRadius: 16))
+                    .accessibilityElement(children: .combine)
+                }
+
                 VStack {
                     Spacer()
                     sideRail
@@ -159,8 +165,7 @@ struct DaySummaryStudioView: View {
                 }
                 Spacer()
                 circularButton(systemName: "square.and.arrow.down", label: "Save to Photos") {
-                    viewModel.saveToPhotos()
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    Task { await saveStoryToPhotos() }
                 }
                 circularButton(systemName: "slider.horizontal.3", label: "Customize") {
                     showCustomizeSheet = true
@@ -188,6 +193,8 @@ struct DaySummaryStudioView: View {
 
     private var sideRail: some View {
         let hasPhoto = viewModel.customBackgroundImage != nil
+        let glassNamespace = sideRailGlassNamespace
+
         return GlassEffectContainer(spacing: 10) {
             VStack(spacing: 10) {
                 // Photo picker
@@ -201,7 +208,7 @@ struct DaySummaryStudioView: View {
                         .foregroundStyle(hasPhoto ? mango : .white)
                         .frame(width: 44, height: 44)
                         .glassEffect(.regular.interactive(), in: .circle)
-                        .glassEffectID("photos", in: sideRailGlassNamespace)
+                        .glassEffectID("photos", in: glassNamespace)
                 }
                 .accessibilityLabel(hasPhoto ? "Change background photo" : "Add background photo")
 
@@ -222,7 +229,7 @@ struct DaySummaryStudioView: View {
                             .foregroundStyle(AppColor.destructive)
                             .frame(width: 44, height: 44)
                             .glassEffect(.regular.tint(AppColor.destructive.opacity(0.22)).interactive(), in: .circle)
-                            .glassEffectID("remove-photo", in: sideRailGlassNamespace)
+                            .glassEffectID("remove-photo", in: glassNamespace)
                     }
                     .buttonStyle(MangoxPressStyle())
                     .transition(.scale.combined(with: .opacity))
@@ -243,7 +250,7 @@ struct DaySummaryStudioView: View {
                             .overlay(Circle().strokeBorder(Color.white.opacity(0.4), lineWidth: 1))
                             .padding(11)
                             .glassEffect(.regular.interactive(), in: .circle)
-                            .glassEffectID("gradient-cycle", in: sideRailGlassNamespace)
+                            .glassEffectID("gradient-cycle", in: glassNamespace)
                     }
                     .buttonStyle(MangoxPressStyle())
                     .accessibilityLabel(A11yL10n.cycleBackgroundColor)
@@ -261,7 +268,7 @@ struct DaySummaryStudioView: View {
                         .foregroundStyle(viewModel.cardOptions.showBrandBadge ? mango : .white)
                         .frame(width: 44, height: 44)
                         .glassEffect(.regular.interactive(), in: .circle)
-                        .glassEffectID("brand-badge", in: sideRailGlassNamespace)
+                        .glassEffectID("brand-badge", in: glassNamespace)
                 }
                 .buttonStyle(MangoxPressStyle())
                 .accessibilityLabel(A11yL10n.brandBadge)
@@ -628,5 +635,66 @@ struct DaySummaryStudioView: View {
                 viewModel.saveOptions(opts)
             }
         )
+    }
+
+    @ViewBuilder
+    private var feedbackOverlay: some View {
+        if let shareError {
+            MangoxErrorBanner(
+                message: shareError,
+                severity: .error,
+                onDismiss: { self.shareError = nil }
+            )
+        } else if let successMessage {
+            MangoxErrorBanner(
+                message: successMessage,
+                severity: .info,
+                onDismiss: { self.successMessage = nil }
+            )
+        }
+    }
+
+    @MainActor
+    private func loadSelectedPhoto(_ item: PhotosPickerItem) async {
+        defer { selectedPhotoItem = nil }
+        shareError = nil
+        do {
+            viewModel.customBackgroundImage = try await StoryMediaService.loadStoryBackground(from: item)
+            var options = viewModel.cardOptions
+            options.backgroundSource = .photo
+            viewModel.saveOptions(options)
+            scheduleRender(immediate: true)
+            viewModel.renderThumbnails()
+            presentSuccess("Photo background added.")
+        } catch is CancellationError {
+            return
+        } catch {
+            shareError = error.localizedDescription
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+    }
+
+    @MainActor
+    private func saveStoryToPhotos() async {
+        shareError = nil
+        do {
+            try await viewModel.saveToPhotos()
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            presentSuccess("Day Story saved to Photos.")
+        } catch {
+            shareError = error.localizedDescription
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+    }
+
+    @MainActor
+    private func presentSuccess(_ message: String) {
+        successMessage = message
+        Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            if successMessage == message {
+                successMessage = nil
+            }
+        }
     }
 }

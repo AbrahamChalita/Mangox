@@ -322,13 +322,21 @@ enum InstagramStoryStudioPreferences {
 
     static func load() -> InstagramStoryCardOptions {
         guard let data = UserDefaults.standard.data(forKey: key),
-              let decoded = try? JSONDecoder().decode(InstagramStoryCardOptions.self, from: data)
+              var decoded = try? JSONDecoder().decode(InstagramStoryCardOptions.self, from: data)
         else { return .default }
+        // Custom photos are intentionally session-only. Never restore a source that has no image.
+        if decoded.backgroundSource == .custom {
+            decoded.backgroundSource = .preset
+        }
         return decoded
     }
 
     static func save(_ options: InstagramStoryCardOptions) {
-        guard let data = try? JSONEncoder().encode(options) else { return }
+        var persisted = options
+        if persisted.backgroundSource == .custom {
+            persisted.backgroundSource = .preset
+        }
+        guard let data = try? JSONEncoder().encode(persisted) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }
 }

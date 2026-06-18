@@ -31,7 +31,13 @@ final class SocialViewModel {
     // MARK: - Template carousel thumbnails
     /// Mini bitmap previews for the template carousel — keyed by template, valued by a downscaled card render.
     var templateThumbnails: [InstagramStoryCardOptions.Template: UIImage] = [:]
-    private var thumbnailWorkoutID: UUID?
+    private struct ThumbnailKey: Equatable {
+        var workoutID: UUID
+        var options: InstagramStoryCardOptions
+        var title: String?
+        var backgroundObjectID: ObjectIdentifier?
+    }
+    private var thumbnailKey: ThumbnailKey?
     private var thumbnailJob: Task<Void, Never>?
 
     // MARK: - AI generation state
@@ -49,6 +55,7 @@ final class SocialViewModel {
     // MARK: - Share fallback state
     var showShareFallback: Bool = false
     var shareFallbackItems: [UIImage] = []
+    var shareFallbackCaption: String? = nil
     /// Set when sharing an exported Reels MP4 (takes precedence over ``shareFallbackItems`` in the share sheet).
     var shareVideoURL: URL? = nil
 
@@ -122,7 +129,7 @@ final class SocialViewModel {
         customBackgroundImage = nil
         previewReuseKey = nil
         templateThumbnails = [:]
-        thumbnailWorkoutID = nil
+        thumbnailKey = nil
         thumbnailJob?.cancel()
         thumbnailJob = nil
         saveStoryOptions(.default)
@@ -174,7 +181,7 @@ final class SocialViewModel {
     // MARK: - Template thumbnails
 
     /// Renders mini bitmap previews for every `Template`, one at a time, yielding to the runloop between renders so UI stays responsive.
-    /// Cached by `workout.id`; re-opening the studio for the same ride does not re-render. Invalidate via `invalidateTemplateThumbnails()`.
+    /// Cached by every visual input that affects the thumbnails.
     @MainActor
     func renderTemplateThumbnails(
         workout: Workout,
@@ -183,10 +190,18 @@ final class SocialViewModel {
         totalElevationGain: Double,
         personalRecordNames: [String]
     ) {
-        if thumbnailWorkoutID == workout.id, !templateThumbnails.isEmpty {
+        var keyOptions = storyOptions
+        keyOptions.template = .cleanStats
+        let nextKey = ThumbnailKey(
+            workoutID: workout.id,
+            options: keyOptions,
+            title: aiTitle,
+            backgroundObjectID: customBackgroundImage.map { ObjectIdentifier($0 as AnyObject) }
+        )
+        if thumbnailKey == nextKey, templateThumbnails.count == InstagramStoryCardOptions.Template.allCases.count {
             return
         }
-        thumbnailWorkoutID = workout.id
+        thumbnailKey = nextKey
         templateThumbnails = [:]
         thumbnailJob?.cancel()
 
@@ -207,7 +222,7 @@ final class SocialViewModel {
                 opts.template = template
                 SocialViewModel.applyTemplateDefaults(template, to: &opts)
 
-                let full = InstagramStoryShare.renderWorkoutStory(
+                let thumb = InstagramStoryCardRenderer.renderThumbnail(
                     workout: workout,
                     dominantZone: dominantZone,
                     routeName: routeName,
@@ -220,7 +235,6 @@ final class SocialViewModel {
                     aiTitle: title,
                     backgroundImage: bgImage
                 )
-                let thumb = await full.byPreparingThumbnail(ofSize: CGSize(width: 256, height: 456)) ?? full
                 if Task.isCancelled { return }
                 self?.templateThumbnails[template] = thumb
                 await Task.yield()
@@ -232,7 +246,7 @@ final class SocialViewModel {
     func invalidateTemplateThumbnails() {
         thumbnailJob?.cancel()
         thumbnailJob = nil
-        thumbnailWorkoutID = nil
+        thumbnailKey = nil
         templateThumbnails = [:]
     }
 
@@ -408,17 +422,10 @@ final class SocialViewModel {
                 backgroundImage: bgImg
             )
             shareFallbackItems = slides
+            shareFallbackCaption = aiCaption
             showShareFallback = true
             InstagramStoryStudioPreferences.save(opts)
             isSharing = false
-            return
-        }
-
-        guard InstagramStoryShare.facebookAppID != nil else {
-            isSharing = false
-            onError(
-                "Instagram Stories sharing requires a Facebook App ID (FACEBOOK_APP_ID). Configure it via xcconfig."
-            )
             return
         }
 
@@ -464,7 +471,11 @@ final class SocialViewModel {
                 onError("Could not encode story images.")
                 return
             }
-            if InstagramStoryShare.presentStories(backgroundPNGData: bgData, stickerPNGData: stickerData) {
+            if InstagramStoryShare.presentStories(
+                backgroundPNGData: bgData,
+                stickerPNGData: stickerData,
+                caption: aiCaption
+            ) {
                 InstagramStoryStudioPreferences.save(opts)
                 onDismiss()
                 return
@@ -474,7 +485,7 @@ final class SocialViewModel {
                 onError("Could not encode story image.")
                 return
             }
-            if InstagramStoryShare.presentStories(withPNGData: shareData) {
+            if InstagramStoryShare.presentStories(withPNGData: shareData, caption: aiCaption) {
                 InstagramStoryStudioPreferences.save(opts)
                 onDismiss()
                 return
@@ -483,6 +494,7 @@ final class SocialViewModel {
 
         // Fallback: system share sheet
         shareFallbackItems = [full]
+        shareFallbackCaption = aiCaption
         showShareFallback = true
     }
 
@@ -495,7 +507,7 @@ final class SocialViewModel {
         routeName: String?,
         totalElevationGain: Double,
         personalRecordNames: [String]
-    ) {
+    ) async throws {
         let session = InstagramStoryCardSessionKind.resolve(
             workout: workout,
             routeName: routeName,
@@ -515,7 +527,7 @@ final class SocialViewModel {
             aiTitle: aiTitle,
             backgroundImage: customBackgroundImage
         )
-        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+        try await StoryMediaService.saveToPhotos(image)
     }
 
     /// Renders the current card, then writes a short fade + Ken-Burns MP4 and presents it via the system
@@ -566,6 +578,7 @@ final class SocialViewModel {
                 }
             )
             shareFallbackItems = []
+            shareFallbackCaption = aiCaption
             shareVideoURL = url
             showShareFallback = true
         } catch {
