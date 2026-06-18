@@ -131,6 +131,9 @@
 "social.a11y.mangox_brand_badge" = "Mangox brand badge";
 "social.a11y.cycle_background_color" = "Cycle background color";
 "social.a11y.brand_badge" = "Brand badge";
+"social.a11y.save_to_photos" = "Save story card to Photos";
+"social.a11y.tag_mangox" = "Tag Mangox on Instagram";
+"social.a11y.open_hashtag" = "Open hashtag on Instagram";
 
 /* PM Chart */
 "pmchart.a11y.chart_options" = "Chart options";

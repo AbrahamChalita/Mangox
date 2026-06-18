@@ -47,6 +47,10 @@ enum AppColor {
     /// WHOOP brand accent (approximate; UI only).
     static let whoop = Color(red: 0/255, green: 158/255, blue: 127/255)
     static let discord = Color(red: 88/255, green: 101/255, blue: 242/255)
+    /// Instagram brand magenta used on the Stories share CTA.
+    static let instagram = Color(red: 0.88, green: 0.19, blue: 0.42)
+    /// Soft red for destructive controls (e.g. remove background photo).
+    static let destructive = Color(red: 1.0, green: 0.45, blue: 0.45)
     static let bg = bg0
 
     static let surfaceTint = bg3

@@ -49,6 +49,12 @@ final class SocialViewModel {
     // MARK: - Share fallback state
     var showShareFallback: Bool = false
     var shareFallbackItems: [UIImage] = []
+    /// Set when sharing an exported Reels MP4 (takes precedence over ``shareFallbackItems`` in the share sheet).
+    var shareVideoURL: URL? = nil
+
+    // MARK: - Reels video export state
+    var isExportingVideo: Bool = false
+    var exportProgress: Double = 0
 
     /// When this matches the current share request, ``previewImage`` is safe to reuse (skips a second full-card raster for single-layer shares).
     private struct PreviewReuseKey: Equatable {
@@ -102,6 +108,13 @@ final class SocialViewModel {
             o.visualStyle = .cafeRide
             o.quickStatSlots = [.movingTime, .heartRate, .cadence, .calories]
         }
+
+        if o.backgroundSource == .preset, kind != .indoorTrainer {
+            let hour = Calendar.current.component(.hour, from: workout.startDate)
+            let elevMeters = max(workout.elevationGain, totalElevationGain)
+            o.selectedPreset = .recommended(hour: hour, elevationMeters: elevMeters)
+        }
+
         saveStoryOptions(o)
     }
 
@@ -471,6 +484,93 @@ final class SocialViewModel {
         // Fallback: system share sheet
         shareFallbackItems = [full]
         showShareFallback = true
+    }
+
+    /// Renders the current card at full 1080×1920 and saves it to the Photos library so it can be posted
+    /// to Instagram Stories/Reels later or kept as an image. Parity with `DaySummaryStudioViewModel.saveToPhotos`.
+    @MainActor
+    func saveToPhotos(
+        workout: Workout,
+        dominantZone: PowerZone,
+        routeName: String?,
+        totalElevationGain: Double,
+        personalRecordNames: [String]
+    ) {
+        let session = InstagramStoryCardSessionKind.resolve(
+            workout: workout,
+            routeName: routeName,
+            totalElevationGain: totalElevationGain
+        )
+        let whoop = whoopMetricsForStory()
+        let image = InstagramStoryShare.renderWorkoutStory(
+            workout: workout,
+            dominantZone: dominantZone,
+            routeName: routeName,
+            totalElevationGain: totalElevationGain,
+            personalRecordNames: personalRecordNames,
+            options: storyOptions,
+            sessionKind: session,
+            whoopStrain: whoop.strain,
+            whoopRecovery: whoop.recovery,
+            aiTitle: aiTitle,
+            backgroundImage: customBackgroundImage
+        )
+        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+    }
+
+    /// Renders the current card, then writes a short fade + Ken-Burns MP4 and presents it via the system
+    /// share sheet so it can be posted to Reels or saved to Photos. The Instagram Stories pasteboard API only
+    /// accepts images, so video sharing routes through `UIActivityViewController`.
+    @MainActor
+    func exportReelsVideo(
+        workout: Workout,
+        dominantZone: PowerZone,
+        routeName: String?,
+        totalElevationGain: Double,
+        personalRecordNames: [String],
+        onError: @escaping (String) -> Void
+    ) async {
+        guard !isExportingVideo else { return }
+        isExportingVideo = true
+        exportProgress = 0
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        defer { isExportingVideo = false }
+
+        let session = InstagramStoryCardSessionKind.resolve(
+            workout: workout, routeName: routeName, totalElevationGain: totalElevationGain
+        )
+        let whoop = whoopMetricsForStory()
+        let card = InstagramStoryShare.renderWorkoutStory(
+            workout: workout,
+            dominantZone: dominantZone,
+            routeName: routeName,
+            totalElevationGain: totalElevationGain,
+            personalRecordNames: personalRecordNames,
+            options: storyOptions,
+            sessionKind: session,
+            whoopStrain: whoop.strain,
+            whoopRecovery: whoop.recovery,
+            aiTitle: aiTitle,
+            backgroundImage: customBackgroundImage
+        )
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mangox-story-\(UUID().uuidString).mp4")
+        do {
+            try await StoryVideoExporter.exportReveal(
+                card: card,
+                options: StoryVideoExporter.Options(size: InstagramStoryShare.storySize),
+                to: url,
+                progress: { [weak self] p in
+                    self?.exportProgress = p
+                }
+            )
+            shareFallbackItems = []
+            shareVideoURL = url
+            showShareFallback = true
+        } catch {
+            onError("Could not export story video: \(error.localizedDescription)")
+        }
     }
 
     @MainActor

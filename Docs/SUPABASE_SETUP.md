@@ -324,6 +324,42 @@ Register the same URLs in the WHOOP and Strava developer consoles. Optional extr
 - `isConfigured` is true when the app has a client ID, redirect URI, and Supabase URL/key in the build — not when xcconfig contains a client secret.
 - If secrets are missing on the server, connect fails with a clear proxy error in Settings.
 
+## Instagram Graph API (Business/Creator Story/Reel publishing)
+
+Programmatic Instagram publishing — posting a Story/Reel directly to a linked Business/Creator account via the [Instagram Graph API](https://developers.facebook.com/docs/instagram-api) — is scaffolded but **gated behind Meta App Review**. This is distinct from the no-login Stories pasteboard flow in `Features/Social/` (`InstagramStoryShare`), which ships today.
+
+**Components:**
+
+- `supabase/functions/instagram-graph/` — edge function that exchanges a Meta OAuth `code` for a long-lived token and resolves the linked Instagram Business/Creator account (`me/accounts` → `instagram_business_account`). Keeps `META_APP_SECRET` server-side.
+- `Mangox/Features/Social/Data/DataSources/InstagramGraphService.swift` — client skeleton: OAuth URL builder, code exchange via the edge function, and a two-step Story publish (`media` container → `media_publish`).
+
+**Before this can ship:**
+
+1. The Meta App (`FacebookAppID`) must pass App Review for: `instagram_basic`, `instagram_content_publishing`, `pages_show_list`.
+2. Deploy the edge function with secrets: `META_APP_ID`, `META_APP_SECRET`, `META_REDIRECT_URI`.
+3. Register the OAuth redirect URI (`mangox://localhost/instagram-auth`) in the Meta App dashboard. (`mangox` is already a registered URL scheme for Strava/WHOOP.)
+4. The Story/Reel media must be at a **publicly reachable URL** — the Graph API fetches `image_url`/`video_url` itself and cannot accept raw bytes. Upload the rendered card/MP4 to a public Supabase Storage bucket first, then pass that URL to `InstagramGraphService.publishStory(imageURL:)`.
+5. **Token custody:** the skeleton returns the long-lived token to the device. Before shipping, store it server-side (Supabase table keyed by user id) and expose publish as authenticated edge-function endpoints so the token never resides on the device.
+
+### Deploy
+
+```bash
+supabase secrets set \
+  META_APP_ID='your-meta-app-id' \
+  META_APP_SECRET='your-meta-app-secret' \
+  META_REDIRECT_URI='mangox://localhost/instagram-auth'
+
+supabase functions deploy instagram-graph
+```
+
+`verify_jwt` should be **true** for this function (unlike `oauth-token-exchange`) so only signed-in Mangox users can exchange — token custody should bind to a Mangox account.
+
+### Typecheck
+
+```bash
+deno task check   # includes instagram-graph/index.ts
+```
+
 ## Things still to do (manual)
 
 - [ ] Enable Apple / Email providers in Auth dashboard and configure redirect URL `mangox://auth-callback`.

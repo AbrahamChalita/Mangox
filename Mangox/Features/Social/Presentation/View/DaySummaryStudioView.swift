@@ -14,6 +14,8 @@ struct DaySummaryStudioView: View {
     @State private var renderTask: Task<Void, Never>?
     @State private var shareError: String?
     @State private var selectedPhotoItem: PhotosPickerItem?
+    /// Namespace for Liquid Glass morphing of side-rail controls (e.g. the remove-photo button appearing/disappearing).
+    @Namespace private var sideRailGlassNamespace
 
     init(date: Date, viewModel: DaySummaryStudioViewModel, navigationPath: Binding<NavigationPath>) {
         self.date = date
@@ -150,17 +152,19 @@ struct DaySummaryStudioView: View {
     // MARK: - Top toolbar
 
     private var topToolbar: some View {
-        HStack {
-            circularButton(systemName: "xmark", label: "Close") {
-                navigationPath.wrappedValue.removeLast()
-            }
-            Spacer()
-            circularButton(systemName: "square.and.arrow.down", label: "Save to Photos") {
-                viewModel.saveToPhotos()
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-            }
-            circularButton(systemName: "slider.horizontal.3", label: "Customize") {
-                showCustomizeSheet = true
+        GlassEffectContainer(spacing: 8) {
+            HStack {
+                circularButton(systemName: "xmark", label: "Close") {
+                    navigationPath.wrappedValue.removeLast()
+                }
+                Spacer()
+                circularButton(systemName: "square.and.arrow.down", label: "Save to Photos") {
+                    viewModel.saveToPhotos()
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                }
+                circularButton(systemName: "slider.horizontal.3", label: "Customize") {
+                    showCustomizeSheet = true
+                }
             }
         }
     }
@@ -174,8 +178,7 @@ struct DaySummaryStudioView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+                .glassEffect(.regular.interactive(), in: .circle)
         }
         .buttonStyle(MangoxPressStyle())
         .accessibilityLabel(label)
@@ -185,86 +188,88 @@ struct DaySummaryStudioView: View {
 
     private var sideRail: some View {
         let hasPhoto = viewModel.customBackgroundImage != nil
-        return VStack(spacing: 10) {
-            // Photo picker
-            PhotosPicker(
-                selection: $selectedPhotoItem,
-                matching: .images,
-                photoLibrary: .shared()
-            ) {
-                Image(systemName: hasPhoto ? "photo.fill" : "photo.badge.plus")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(hasPhoto ? mango : .white)
-                    .frame(width: 44, height: 44)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
-            }
-            .accessibilityLabel(hasPhoto ? "Change background photo" : "Add background photo")
-
-            if hasPhoto {
-                Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    viewModel.customBackgroundImage = nil
-                    selectedPhotoItem = nil
-                    var opts = viewModel.cardOptions
-                    opts.backgroundSource = .gradient
-                    viewModel.saveOptions(opts)
-                    viewModel.invalidateThumbnails()
-                    scheduleRender(immediate: true)
-                    viewModel.renderThumbnails()
-                } label: {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.45))
+        return GlassEffectContainer(spacing: 10) {
+            VStack(spacing: 10) {
+                // Photo picker
+                PhotosPicker(
+                    selection: $selectedPhotoItem,
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
+                    Image(systemName: hasPhoto ? "photo.fill" : "photo.badge.plus")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(hasPhoto ? mango : .white)
                         .frame(width: 44, height: 44)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .overlay(Circle().strokeBorder(Color.red.opacity(0.32), lineWidth: 0.6))
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .glassEffectID("photos", in: sideRailGlassNamespace)
                 }
-                .buttonStyle(MangoxPressStyle())
-                .transition(.scale.combined(with: .opacity))
-                .accessibilityLabel(A11yL10n.removeBackgroundPhoto)
-            }
+                .accessibilityLabel(hasPhoto ? "Change background photo" : "Add background photo")
 
-            // Gradient scheme cycle (only when on gradient mode)
-            if viewModel.cardOptions.backgroundSource == .gradient {
+                if hasPhoto {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        viewModel.customBackgroundImage = nil
+                        selectedPhotoItem = nil
+                        var opts = viewModel.cardOptions
+                        opts.backgroundSource = .gradient
+                        viewModel.saveOptions(opts)
+                        viewModel.invalidateThumbnails()
+                        scheduleRender(immediate: true)
+                        viewModel.renderThumbnails()
+                    } label: {
+                        Image(systemName: "trash.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(AppColor.destructive)
+                            .frame(width: 44, height: 44)
+                            .glassEffect(.regular.tint(AppColor.destructive.opacity(0.22)).interactive(), in: .circle)
+                            .glassEffectID("remove-photo", in: sideRailGlassNamespace)
+                    }
+                    .buttonStyle(MangoxPressStyle())
+                    .transition(.scale.combined(with: .opacity))
+                    .accessibilityLabel(A11yL10n.removeBackgroundPhoto)
+                }
+
+                // Gradient scheme cycle (only when on gradient mode)
+                if viewModel.cardOptions.backgroundSource == .gradient {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        var opts = viewModel.cardOptions
+                        opts.backgroundGradientIndex = (opts.backgroundGradientIndex + 1) % 5
+                        viewModel.saveOptions(opts)
+                    } label: {
+                        Circle()
+                            .fill(gradientSwatchColor)
+                            .frame(width: 18, height: 18)
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.4), lineWidth: 1))
+                            .padding(11)
+                            .glassEffect(.regular.interactive(), in: .circle)
+                            .glassEffectID("gradient-cycle", in: sideRailGlassNamespace)
+                    }
+                    .buttonStyle(MangoxPressStyle())
+                    .accessibilityLabel(A11yL10n.cycleBackgroundColor)
+                }
+
+                // Brand badge toggle
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     var opts = viewModel.cardOptions
-                    opts.backgroundGradientIndex = (opts.backgroundGradientIndex + 1) % 5
+                    opts.showBrandBadge.toggle()
                     viewModel.saveOptions(opts)
                 } label: {
-                    Circle()
-                        .fill(gradientSwatchColor)
-                        .frame(width: 18, height: 18)
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.4), lineWidth: 1))
-                        .padding(11)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+                    Image(systemName: viewModel.cardOptions.showBrandBadge ? "m.square.fill" : "m.square")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(viewModel.cardOptions.showBrandBadge ? mango : .white)
+                        .frame(width: 44, height: 44)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .glassEffectID("brand-badge", in: sideRailGlassNamespace)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .accessibilityLabel(A11yL10n.cycleBackgroundColor)
+                .accessibilityLabel(A11yL10n.brandBadge)
+                .accessibilityValue(viewModel.cardOptions.showBrandBadge ? "Visible" : "Hidden")
             }
-
-            // Brand badge toggle
-            Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                var opts = viewModel.cardOptions
-                opts.showBrandBadge.toggle()
-                viewModel.saveOptions(opts)
-            } label: {
-                Image(systemName: viewModel.cardOptions.showBrandBadge ? "m.square.fill" : "m.square")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(viewModel.cardOptions.showBrandBadge ? mango : .white)
-                    .frame(width: 44, height: 44)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
-            }
-            .buttonStyle(MangoxPressStyle())
-            .accessibilityLabel(A11yL10n.brandBadge)
-            .accessibilityValue(viewModel.cardOptions.showBrandBadge ? "Visible" : "Hidden")
+            .animation(MangoxMotion.exit, value: hasPhoto)
+            .animation(MangoxMotion.exit, value: viewModel.cardOptions.backgroundSource)
         }
-        .animation(MangoxMotion.exit, value: hasPhoto)
-        .animation(MangoxMotion.exit, value: viewModel.cardOptions.backgroundSource)
     }
 
     private var gradientSwatchColor: Color {
@@ -386,7 +391,7 @@ struct DaySummaryStudioView: View {
             .frame(maxWidth: .infinity)
             .frame(minHeight: 52)
             .padding(.vertical, 14)
-            .background(Capsule().fill(Color(red: 0.88, green: 0.19, blue: 0.42)))
+            .background(Capsule().fill(AppColor.instagram))
         }
         .buttonStyle(MangoxPressStyle())
         .disabled(viewModel.isSharing || viewModel.isRendering)

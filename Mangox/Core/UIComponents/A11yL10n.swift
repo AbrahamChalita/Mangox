@@ -64,6 +64,9 @@ enum A11yL10n {
     static var mangoxBrandBadge: String { String(localized: "social.a11y.mangox_brand_badge") }
     static var cycleBackgroundColor: String { String(localized: "social.a11y.cycle_background_color") }
     static var brandBadge: String { String(localized: "social.a11y.brand_badge") }
+    static var saveToPhotos: String { String(localized: "social.a11y.save_to_photos") }
+    static var tagMangox: String { String(localized: "social.a11y.tag_mangox") }
+    static var openHashtag: String { String(localized: "social.a11y.open_hashtag") }
 
     // MARK: - PM Chart
 

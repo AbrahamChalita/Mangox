@@ -86,7 +86,8 @@ private enum DaySummaryCardDrawing {
         defer { UIGraphicsPopContext() }
 
         if options.backgroundSource == .photo, let backgroundImage {
-            drawPhotoBackground(backgroundImage, size: size, cg: cg)
+            let accent = gradientAccents[min(options.backgroundGradientIndex, gradientAccents.count - 1)]
+            drawPhotoBackground(backgroundImage, size: size, cg: cg, accent: accent)
         } else {
             drawBackground(index: options.backgroundGradientIndex, size: size, cg: cg)
         }
@@ -106,9 +107,16 @@ private enum DaySummaryCardDrawing {
 
     // MARK: - Background
 
-    private static func drawPhotoBackground(_ image: UIImage, size: CGSize, cg: CGContext) {
+    private static func drawPhotoBackground(_ image: UIImage, size: CGSize, cg: CGContext, accent: UIColor) {
         let prepared = ImageProcessing.prepareStoryBackground(from: image)
         prepared.draw(in: CGRect(origin: .zero, size: size))
+
+        // Branded monotone grade: preserve the photo's luminance, take the accent's hue/saturation.
+        cg.saveGState()
+        cg.setBlendMode(.color)
+        cg.setFillColor(accent.cgColor)
+        cg.fill(CGRect(origin: .zero, size: size))
+        cg.restoreGState()
 
         // Top fade (for header readability)
         let topColors = [
@@ -140,12 +148,7 @@ private enum DaySummaryCardDrawing {
             )
         }
 
-        // Mango wash to maintain brand presence over photo
-        cg.saveGState()
-        cg.setBlendMode(.softLight)
-        cg.setFillColor(UIColor(AppColor.mango).withAlphaComponent(0.08).cgColor)
-        cg.fill(CGRect(origin: .zero, size: size))
-        cg.restoreGState()
+        StoryCardPrimitives.applyFilmGrain(in: size, cg: cg, alpha: 0.05)
     }
 
     private static func drawBackground(index: Int, size: CGSize, cg: CGContext) {
@@ -174,6 +177,8 @@ private enum DaySummaryCardDrawing {
                 options: [.drawsBeforeStartLocation, .drawsAfterEndLocation]
             )
         }
+
+        StoryCardPrimitives.applyFilmGrain(in: size, cg: cg, alpha: 0.04)
     }
 
     private static func fillRadial(center: CGPoint, radius: CGFloat, color: UIColor, cg: CGContext) {

@@ -199,4 +199,89 @@ enum InstagramStoryShare {
         guard let imageData = encodeBackgroundImageData(image) else { return false }
         return presentStories(withPNGData: imageData)
     }
+
+    // MARK: - Deep links (hashtags & profiles)
+
+    /// Mangox's Instagram handle used by the "Tag us" attribution button in the caption sheet.
+    static let mangoxInstagramHandle = "mangox.app"
+
+    /// Extracts hashtags (without the leading `#`) from a caption, preserving order and de-duplicating.
+    static func hashtags(in caption: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: #"#(\w+)"#) else { return [] }
+        let ns = caption as NSString
+        let matches = regex.matches(in: caption, range: NSRange(location: 0, length: ns.length))
+        var seen = Set<String>()
+        var out: [String] = []
+        for m in matches {
+            let r = m.range(at: 1)
+            guard r.location != NSNotFound, let range = Range(r, in: caption) else { continue }
+            let tag = String(caption[range])
+            if seen.insert(tag).inserted { out.append(tag) }
+        }
+        return out
+    }
+
+    /// `instagram://tag?name=<hashtag>` — opens the hashtag page in the Instagram app.
+    static func instagramHashtagURL(_ name: String) -> URL? {
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines).drop(while: { $0 == "#" })
+        guard !cleaned.isEmpty else { return nil }
+        var c = URLComponents()
+        c.scheme = "instagram"
+        c.host = "tag"
+        c.queryItems = [URLQueryItem(name: "name", value: String(cleaned))]
+        return c.url
+    }
+
+    /// `instagram://user?username=<handle>` — opens a profile in the Instagram app.
+    static func instagramProfileURL(username: String) -> URL? {
+        let cleaned = username.trimmingCharacters(in: .whitespacesAndNewlines).drop(while: { $0 == "@" })
+        guard !cleaned.isEmpty else { return nil }
+        var c = URLComponents()
+        c.scheme = "instagram"
+        c.host = "user"
+        c.queryItems = [URLQueryItem(name: "username", value: String(cleaned))]
+        return c.url
+    }
+
+    /// Web fallback for a hashtag when the Instagram app is not installed.
+    static func instagramHashtagWebURL(_ name: String) -> URL? {
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines).drop(while: { $0 == "#" })
+        guard !cleaned.isEmpty else { return nil }
+        return URL(string: "https://www.instagram.com/explore/tags/\(cleaned)/")
+    }
+
+    /// Web fallback for a profile when the Instagram app is not installed.
+    static func instagramProfileWebURL(username: String) -> URL? {
+        let cleaned = username.trimmingCharacters(in: .whitespacesAndNewlines).drop(while: { $0 == "@" })
+        guard !cleaned.isEmpty else { return nil }
+        return URL(string: "https://www.instagram.com/\(cleaned)/")
+    }
+
+    /// Opens a hashtag in Instagram, falling back to the web page in Safari if the app is not installed.
+    @discardableResult
+    static func openHashtag(_ name: String) -> Bool {
+        if let url = instagramHashtagURL(name), UIApplication.shared.canOpenURL(url) {
+            UIApplication.shared.open(url)
+            return true
+        }
+        if let web = instagramHashtagWebURL(name) {
+            UIApplication.shared.open(web)
+            return true
+        }
+        return false
+    }
+
+    /// Opens an Instagram profile, falling back to the web page in Safari if the app is not installed.
+    @discardableResult
+    static func openProfile(username: String) -> Bool {
+        if let url = instagramProfileURL(username: username), UIApplication.shared.canOpenURL(url) {
+            UIApplication.shared.open(url)
+            return true
+        }
+        if let web = instagramProfileWebURL(username: username) {
+            UIApplication.shared.open(web)
+            return true
+        }
+        return false
+    }
 }

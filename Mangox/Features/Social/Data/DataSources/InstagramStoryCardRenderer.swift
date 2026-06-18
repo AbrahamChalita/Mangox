@@ -338,16 +338,17 @@ enum StoryCardDrawing {
         options: InstagramStoryCardOptions,
         backgroundImage: UIImage?
     ) {
+        let accent = StoryCardDesign.accentColor(for: options.accent, dominantZone: dominantZone)
         switch options.backgroundSource {
         case .preset:
             if let image = UIImage(named: options.selectedPreset.assetName) {
-                drawPhotoBackground(image, in: size, cg: cg)
+                drawPhotoBackground(image, in: size, cg: cg, accent: accent, editorial: false)
             } else {
                 drawAtmosphericBackground(in: size, dominantZone: dominantZone, options: options, cg: cg)
             }
         case .custom:
             if let image = backgroundImage {
-                drawPhotoBackground(image, in: size, cg: cg)
+                drawPhotoBackground(image, in: size, cg: cg, accent: accent, editorial: true)
             } else {
                 drawAtmosphericBackground(in: size, dominantZone: dominantZone, options: options, cg: cg)
             }
@@ -358,14 +359,28 @@ enum StoryCardDrawing {
         drawForegroundScrim(in: size, cg: cg)
     }
 
-    private static func drawPhotoBackground(_ image: UIImage, in size: CGSize, cg: CGContext) {
+    /// Draws a photo full-bleed. When `editorial` is true (custom user photos), applies a branded monotone grade
+    /// (`.color` blend with the accent — preserves luminance, takes the accent's hue/saturation) plus film grain,
+    /// and a lighter scrim so the grade reads. Preset JPGs (`editorial == false`) keep their art-directed color,
+    /// with a subtle grain pass to unify texture across background modes.
+    private static func drawPhotoBackground(_ image: UIImage, in size: CGSize, cg: CGContext, accent: UIColor, editorial: Bool) {
         let prepared = ImageProcessing.prepareStoryBackground(from: image)
         prepared.draw(in: CGRect(origin: .zero, size: size))
 
+        if editorial {
+            cg.saveGState()
+            cg.setBlendMode(.color)
+            cg.setFillColor(accent.cgColor)
+            cg.fill(CGRect(origin: .zero, size: size))
+            cg.restoreGState()
+        }
+
         cg.saveGState()
-        cg.setFillColor(StoryCardDesign.canvasBackground.withAlphaComponent(0.70).cgColor)
+        cg.setFillColor(StoryCardDesign.canvasBackground.withAlphaComponent(editorial ? 0.52 : 0.70).cgColor)
         cg.fill(CGRect(origin: .zero, size: size))
         cg.restoreGState()
+
+        StoryCardPrimitives.applyFilmGrain(in: size, cg: cg, alpha: editorial ? 0.05 : 0.03)
     }
 
     private static func drawAtmosphericBackground(
@@ -396,6 +411,8 @@ enum StoryCardDrawing {
             color: StoryCardDesign.canvasSecondary.withAlphaComponent(0.16),
             cg: cg
         )
+
+        StoryCardPrimitives.applyFilmGrain(in: size, cg: cg, alpha: 0.04)
     }
 
     private static func drawForegroundScrim(in size: CGSize, cg: CGContext) {

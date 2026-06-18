@@ -21,6 +21,8 @@ struct InstagramStoryStudioView: View {
     @State private var captionCopied = false
     /// Coalesces rapid toggle changes so we do not re-rasterize 1080×1920 on every `storyOptions` mutation.
     @State private var previewRenderTask: Task<Void, Never>?
+    /// Namespace for Liquid Glass morphing of side-rail controls (e.g. the remove-photo button appearing/disappearing).
+    @Namespace private var sideRailGlassNamespace
 
     private var dominantZone: PowerZone {
         PowerZone.zone(for: Int(workout.avgPower.rounded()))
@@ -201,8 +203,10 @@ struct InstagramStoryStudioView: View {
                 powerZoneLine: dominantZone.name
             )
         }
-        .sheet(isPresented: binding(\.showShareFallback)) {
-            ShareSheet(activityItems: viewModel.shareFallbackItems as [Any])
+        .sheet(isPresented: binding(\.showShareFallback), onDismiss: {
+            viewModel.shareVideoURL = nil
+        }) {
+            ShareSheet(activityItems: viewModel.shareVideoURL.map { [$0] } ?? (viewModel.shareFallbackItems as [Any]))
         }
         .sheet(isPresented: $showCustomizeSheet) {
             customizeSheet
@@ -256,12 +260,28 @@ struct InstagramStoryStudioView: View {
                                 .scaleEffect(0.7)
                                 .tint(.white)
                                 .padding(8)
-                                .background(.ultraThinMaterial, in: Circle())
+                                .glassEffect(.regular, in: .circle)
                                 .padding(.top, 56)
                                 .padding(.trailing, 16)
                         }
                         Spacer()
                     }
+                }
+
+                if viewModel.isExportingVideo {
+                    VStack(spacing: 12) {
+                        ProgressView(value: viewModel.exportProgress)
+                            .tint(mango)
+                            .frame(width: 180)
+                        Text("Exporting Reels video…")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text("\(Int(viewModel.exportProgress * 100))%")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(AppColor.fg2)
+                    }
+                    .padding(20)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 16, style: .continuous))
                 }
 
                 VStack {
@@ -287,18 +307,31 @@ struct InstagramStoryStudioView: View {
     // MARK: - Top toolbar
 
     private var topToolbar: some View {
-        HStack {
-            circularToolButton(systemName: "xmark", accessibilityLabel: "Close story studio") {
-                InstagramStoryStudioPreferences.save(viewModel.storyOptions)
-                onDismiss()
-            }
+        GlassEffectContainer(spacing: 8) {
+            HStack {
+                circularToolButton(systemName: "xmark", accessibilityLabel: "Close story studio") {
+                    InstagramStoryStudioPreferences.save(viewModel.storyOptions)
+                    onDismiss()
+                }
 
-            Spacer()
+                Spacer()
 
-            accentSwatchButton
+                accentSwatchButton
 
-            circularToolButton(systemName: "ellipsis", accessibilityLabel: "Customize story") {
-                showCustomizeSheet = true
+                circularToolButton(systemName: "square.and.arrow.down", accessibilityLabel: A11yL10n.saveToPhotos) {
+                    viewModel.saveToPhotos(
+                        workout: workout,
+                        dominantZone: dominantZone,
+                        routeName: routeName,
+                        totalElevationGain: totalElevationGain,
+                        personalRecordNames: personalRecordNames
+                    )
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                }
+
+                circularToolButton(systemName: "ellipsis", accessibilityLabel: "Customize story") {
+                    showCustomizeSheet = true
+                }
             }
         }
     }
@@ -315,8 +348,7 @@ struct InstagramStoryStudioView: View {
                 .frame(width: 18, height: 18)
                 .overlay(Circle().strokeBorder(Color.white.opacity(0.4), lineWidth: 1))
                 .padding(11)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+                .glassEffect(.regular.interactive(), in: .circle)
         }
         .buttonStyle(MangoxPressStyle())
         .accessibilityLabel(A11yL10n.accentColor)
@@ -336,8 +368,7 @@ struct InstagramStoryStudioView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+                .glassEffect(.regular.interactive(), in: .circle)
         }
         .buttonStyle(MangoxPressStyle())
         .accessibilityLabel(accessibilityLabel)
@@ -348,86 +379,119 @@ struct InstagramStoryStudioView: View {
     private var sideRail: some View {
         let hasCustomBackgroundImage = viewModel.customBackgroundImage != nil
 
-        return VStack(spacing: 10) {
-            PhotosPicker(
-                selection: $selectedPhotoItem,
-                matching: .images,
-                photoLibrary: .shared()
-            ) {
-                Image(systemName: hasCustomBackgroundImage ? "photo.fill" : "photo.badge.plus")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(hasCustomBackgroundImage ? mango : .white)
-                    .frame(width: 44, height: 44)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
-            }
-            .accessibilityLabel(hasCustomBackgroundImage ? "Change background photo" : "Add background photo")
+        return GlassEffectContainer(spacing: 10) {
+            VStack(spacing: 10) {
+                PhotosPicker(
+                    selection: $selectedPhotoItem,
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
+                    Image(systemName: hasCustomBackgroundImage ? "photo.fill" : "photo.badge.plus")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(hasCustomBackgroundImage ? mango : .white)
+                        .frame(width: 44, height: 44)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .glassEffectID("photos", in: sideRailGlassNamespace)
+                }
+                .accessibilityLabel(hasCustomBackgroundImage ? "Change background photo" : "Add background photo")
 
-            if hasCustomBackgroundImage {
+                if hasCustomBackgroundImage {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        viewModel.customBackgroundImage = nil
+                        selectedPhotoItem = nil
+                        var opts = viewModel.storyOptions
+                        if opts.backgroundSource == .custom { opts.backgroundSource = .preset }
+                        viewModel.saveStoryOptions(opts)
+                        renderPreviewImmediately()
+                    } label: {
+                        Image(systemName: "trash.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(AppColor.destructive)
+                            .frame(width: 44, height: 44)
+                            .glassEffect(.regular.tint(AppColor.destructive.opacity(0.22)).interactive(), in: .circle)
+                            .glassEffectID("remove-photo", in: sideRailGlassNamespace)
+                    }
+                    .buttonStyle(MangoxPressStyle())
+                    .transition(.scale.combined(with: .opacity))
+                    .accessibilityLabel(A11yL10n.removeBackgroundPhoto)
+                }
+
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    viewModel.customBackgroundImage = nil
-                    selectedPhotoItem = nil
-                    var opts = viewModel.storyOptions
-                    if opts.backgroundSource == .custom { opts.backgroundSource = .preset }
-                    viewModel.saveStoryOptions(opts)
-                    renderPreviewImmediately()
+                    viewModel.aiTitle = nil
+                    viewModel.beginStoryCardTitleGenerationIfNeeded(
+                        workout: workout,
+                        dominantZoneName: dominantZone.name,
+                        routeName: routeName,
+                        totalElevationGain: totalElevationGain
+                    )
                 } label: {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.45))
-                        .frame(width: 44, height: 44)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .overlay(Circle().strokeBorder(Color.red.opacity(0.32), lineWidth: 0.6))
+                    Group {
+                        if viewModel.isTitleGenerating {
+                            ProgressView().scaleEffect(0.7).tint(.white)
+                        } else {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .glassEffectID("regenerate", in: sideRailGlassNamespace)
                 }
                 .buttonStyle(MangoxPressStyle())
-                .transition(.scale.combined(with: .opacity))
-                .accessibilityLabel(A11yL10n.removeBackgroundPhoto)
-            }
+                .disabled(viewModel.isTitleGenerating)
+                .accessibilityLabel(A11yL10n.regenerateStoryTitle)
 
-            Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                viewModel.aiTitle = nil
-                viewModel.beginStoryCardTitleGenerationIfNeeded(
-                    workout: workout,
-                    dominantZoneName: dominantZone.name,
-                    routeName: routeName,
-                    totalElevationGain: totalElevationGain
-                )
-            } label: {
-                Group {
-                    if viewModel.isTitleGenerating {
-                        ProgressView().scaleEffect(0.7).tint(.white)
-                    } else {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    var opts = viewModel.storyOptions
+                    opts.showBrandBadge.toggle()
+                    viewModel.saveStoryOptions(opts)
+                } label: {
+                    Image(systemName: viewModel.storyOptions.showBrandBadge ? "m.square.fill" : "m.square")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(viewModel.storyOptions.showBrandBadge ? mango : .white)
+                        .frame(width: 44, height: 44)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .glassEffectID("brand-badge", in: sideRailGlassNamespace)
                 }
-                .frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
-            }
-            .buttonStyle(MangoxPressStyle())
-            .disabled(viewModel.isTitleGenerating)
-            .accessibilityLabel(A11yL10n.regenerateStoryTitle)
+                .buttonStyle(MangoxPressStyle())
+                .accessibilityLabel(A11yL10n.mangoxBrandBadge)
+                .accessibilityValue(viewModel.storyOptions.showBrandBadge ? "Visible" : "Hidden")
 
-            Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                var opts = viewModel.storyOptions
-                opts.showBrandBadge.toggle()
-                viewModel.saveStoryOptions(opts)
-            } label: {
-                Image(systemName: viewModel.storyOptions.showBrandBadge ? "m.square.fill" : "m.square")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(viewModel.storyOptions.showBrandBadge ? mango : .white)
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    Task {
+                        await viewModel.exportReelsVideo(
+                            workout: workout,
+                            dominantZone: dominantZone,
+                            routeName: routeName,
+                            totalElevationGain: totalElevationGain,
+                            personalRecordNames: personalRecordNames,
+                            onError: onShareError
+                        )
+                    }
+                } label: {
+                    Group {
+                        if viewModel.isExportingVideo {
+                            ProgressView().scaleEffect(0.7).tint(mango)
+                        } else {
+                            Image(systemName: "film")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                    }
                     .frame(width: 44, height: 44)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .glassEffectID("reels", in: sideRailGlassNamespace)
+                }
+                .buttonStyle(MangoxPressStyle())
+                .disabled(viewModel.isExportingVideo)
+                .accessibilityLabel("Export Reels video")
             }
-            .buttonStyle(MangoxPressStyle())
-            .accessibilityLabel(A11yL10n.mangoxBrandBadge)
-            .accessibilityValue(viewModel.storyOptions.showBrandBadge ? "Visible" : "Hidden")
+            .animation(MangoxMotion.exit, value: hasCustomBackgroundImage)
         }
     }
 
@@ -444,8 +508,7 @@ struct InstagramStoryStudioView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+                .glassEffect(.regular, in: .capsule)
             } else if let caption = viewModel.aiCaption, !caption.isEmpty {
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -466,8 +529,7 @@ struct InstagramStoryStudioView: View {
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+                    .glassEffect(.regular.interactive(), in: .capsule)
                 }
                 .buttonStyle(MangoxPressStyle())
             }
@@ -608,7 +670,7 @@ struct InstagramStoryStudioView: View {
             .frame(minHeight: 52)
             .padding(.vertical, 14)
             .background(
-                Capsule().fill(Color(red: 0.88, green: 0.19, blue: 0.42))
+                Capsule().fill(AppColor.instagram)
             )
         }
         .buttonStyle(MangoxPressStyle())
@@ -1020,6 +1082,8 @@ struct InstagramStoryStudioView: View {
                                 .disabled(viewModel.isCaptionGenerating)
                             }
                         }
+
+                        captionDeepLinkSection(for: caption)
                     } else if !viewModel.isCaptionGenerating {
                         Text(
                             OnDeviceCoachEngine.isOnDeviceWritingModelAvailable
@@ -1042,5 +1106,74 @@ struct InstagramStoryStudioView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Caption deep links (hashtags & @mangox attribution)
+
+    @ViewBuilder
+    private func captionDeepLinkSection(for caption: String) -> some View {
+        let tags = InstagramStoryShare.hashtags(in: caption)
+        VStack(spacing: 16) {
+            Divider().overlay(AppColor.hair2)
+
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                InstagramStoryShare.openProfile(username: InstagramStoryShare.mangoxInstagramHandle)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "at")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Tag @\(InstagramStoryShare.mangoxInstagramHandle)")
+                        .font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AppColor.fg2)
+                }
+                .foregroundStyle(mango)
+                .padding(.vertical, 12)
+                .padding(.horizontal, 14)
+                .background(Capsule().fill(mango.opacity(0.12)))
+                .overlay(Capsule().strokeBorder(mango.opacity(0.28), lineWidth: 0.6))
+            }
+            .buttonStyle(MangoxPressStyle())
+            .accessibilityLabel(A11yL10n.tagMangox)
+
+            if !tags.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Hashtags")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AppColor.fg2)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(tags, id: \.self) { tag in
+                                hashtagChip(tag)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func hashtagChip(_ tag: String) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            InstagramStoryShare.openHashtag(tag)
+        } label: {
+            HStack(spacing: 4) {
+                Text("#\(tag)")
+                    .font(.system(size: 13, weight: .semibold))
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .background(Capsule().fill(Color.white.opacity(0.08)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5))
+        }
+        .buttonStyle(MangoxPressStyle())
+        .accessibilityLabel("\(A11yL10n.openHashtag) — #\(tag)")
     }
 }

@@ -170,6 +170,19 @@ struct InstagramStoryCardOptions: Equatable, Codable, Sendable {
             case .darkAtmospheric: return "Atmospheric"
             }
         }
+
+        /// Time-of-day + elevation aware suggestion for outdoor rides.
+        /// `hour` is a 0–23 calendar hour from the ride start; `elevationMeters` is the ride's positive gain.
+        static func recommended(hour: Int, elevationMeters: Double) -> StoryPreset {
+            switch hour {
+            case ..<6, 20...: return .nightRide
+            case 6..<8:       return .dawnGradient
+            case 18..<20:     return .sunsetMango
+            default: break
+            }
+            if elevationMeters > 500 { return .mountainSilhouette }
+            return .darkAtmospheric
+        }
     }
 
     var accent: Accent

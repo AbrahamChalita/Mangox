@@ -16,6 +16,8 @@
 	<string>Mangox uses motion sensors during outdoor rides to smooth auto-pause and auto-resume when GPS signal is weak.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Mangox uses your photo library to let you choose a profile picture and select custom backgrounds for Instagram story cards.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Mangox can save your story card and day summary images to Photos so you can post them to Instagram Stories or Reels later.</string>
 	<key>MangoxCoachStaffTier</key>
 	<string>$(MANGOX_COACH_STAFF_TIER)</string>
 	<key>UserDataKey</key>

@@ -1,5 +1,5 @@
 {
   "tasks": {
-    "check": "deno check supabase/functions/oauth-token-exchange/index.ts supabase/functions/external-webhooks/index.ts"
+    "check": "deno check supabase/functions/oauth-token-exchange/index.ts supabase/functions/external-webhooks/index.ts supabase/functions/instagram-graph/index.ts"
   }
 }
