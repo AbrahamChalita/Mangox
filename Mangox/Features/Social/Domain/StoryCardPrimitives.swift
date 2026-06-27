@@ -124,3 +124,49 @@ enum StoryCardPrimitives {
         cg.restoreGState()
     }
 }
+
+// MARK: - Measured vertical-stack layout
+
+/// Sequential, measured section placement for story cards.
+///
+/// The legacy renderer hardcoded every section's Y origin, which let long titles or wide
+/// values overflow into the section below ("info on top of info"). `StoryCardLayout` measures
+/// each section's actual height and places the next one below it plus a gap, so overlaps
+/// are structurally impossible.
+enum StoryCardLayout {
+    /// Paragraph style matching `StoryCardDrawing.drawWrappedTitle` so measurement and draw
+    /// stay in sync.
+    private static func wrappedParagraph() -> NSMutableParagraphStyle {
+        let p = NSMutableParagraphStyle()
+        p.lineHeightMultiple = 0.86
+        p.lineBreakMode = .byWordWrapping
+        return p
+    }
+
+    /// Measures the wrapped height of `text` drawn with `font` constrained to `maxWidth`,
+    /// using the same paragraph style as the wrapped-title draw path.
+    static func wrappedTextHeight(_ text: String, font: UIFont, maxWidth: CGFloat) -> CGFloat {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .paragraphStyle: wrappedParagraph(),
+        ]
+        let bounds = (text as NSString).boundingRect(
+            with: CGSize(width: maxWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attrs,
+            context: nil
+        )
+        return ceil(bounds.height)
+    }
+
+    /// Places a section of `height` at the current `cursor` and advances the cursor by
+    /// `height + gap`. Returns the section's Y origin. Pass a `cursor` initialized to the
+    /// top of the content area; chain calls for each section in order.
+    @discardableResult
+    static func place(cursor: inout CGFloat, height: CGFloat, gap: CGFloat) -> CGFloat {
+        let origin = cursor
+        cursor = origin + height + gap
+        return origin
+    }
+
+}

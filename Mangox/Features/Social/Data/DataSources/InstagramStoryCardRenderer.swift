@@ -197,10 +197,11 @@ enum StoryCardFontToken {
 enum StoryCardDesign {
     static let canvasBackground = UIColor(AppColor.bg0)
     static let canvasSecondary = UIColor(AppColor.bg2)
-    static let panelTop = UIColor(AppColor.bg2).withAlphaComponent(0.96)
-    static let panelBottom = UIColor(AppColor.bg3).withAlphaComponent(0.94)
-    static let panelBorder = UIColor(AppColor.hair2)
-    static let divider = UIColor(AppColor.hair2)
+    static let panelTop = UIColor(AppColor.bg2).withAlphaComponent(0.72)
+    static let panelBottom = UIColor(AppColor.bg3).withAlphaComponent(0.70)
+    static let panelBorder = UIColor(AppColor.hair)
+    static let divider = UIColor(AppColor.hair)
+    static let rule = UIColor(AppColor.hair2)
     static let textPrimary = UIColor(AppColor.fg0)
     static let textSecondary = UIColor(AppColor.fg1)
     static let textMuted = UIColor(AppColor.fg2)
@@ -209,9 +210,16 @@ enum StoryCardDesign {
     static let accentBlue = UIColor(AppColor.blue)
     static let accentYellow = UIColor(AppColor.yellow)
     static let whoopTeal = UIColor(AppColor.whoop)
-    static let panelShadow = UIColor.black.withAlphaComponent(0.28)
-    static let panelRadius = MangoxRadius.overlay.rawValue
+    static let panelShadow = UIColor.black.withAlphaComponent(0.18)
+    static let panelRadius: CGFloat = 14
     static let badgeRadius = MangoxRadius.button.rawValue
+    /// Editorial horizontal margin — generous breathing room on the 1080-wide canvas.
+    static let sidePad: CGFloat = 88
+    /// Vertical safe area at the top/bottom of the card.
+    static let topInset: CGFloat = 120
+    static let bottomInset: CGFloat = 120
+    /// Default gap between stacked sections.
+    static let sectionGap: CGFloat = 48
 
     static func accentColor(for accent: InstagramStoryCardOptions.Accent, dominantZone: PowerZone) -> UIColor {
         switch accent {
@@ -224,7 +232,7 @@ enum StoryCardDesign {
 }
 
 enum StoryCardDrawing {
-    private static let sidePad: CGFloat = 64
+    private static let sidePad: CGFloat = StoryCardDesign.sidePad
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE  •  d MMM"
@@ -284,21 +292,24 @@ enum StoryCardDrawing {
             personalRecordNames: personalRecordNames
         )
         let heroLines = titleLines(for: heroTitle)
-        let topY: CGFloat = 100
+        let gap = StoryCardDesign.sectionGap
+
+        // Measured vertical stack — each section is placed below the previous one's actual
+        // bottom, so long titles or wide values can never overflow into the next section.
+        var cursor: CGFloat = StoryCardDesign.topInset
 
         if options.showHeader {
-            drawHeader(
-                brandTitle: options.showBrandBadge ? "MANGOX SHARE" : "RIDE SHARE",
+            let headerH = drawTopRule(
+                brandWordmark: options.showBrandBadge ? "MANGOX" : "RIDE",
                 dateTitle: dateFormatter.string(from: workout.startDate).uppercased(),
-                accent: accent,
-                y: topY,
+                y: cursor,
                 width: size.width,
                 cg: cg
             )
+            cursor += headerH + gap
         }
 
-        let heroY: CGFloat = options.showHeader ? 220 : 150
-        drawHeroBlock(
+        let heroHeight = drawHeroBlock(
             titleLines: heroLines,
             workout: workout,
             routeName: routeName,
@@ -306,53 +317,42 @@ enum StoryCardDrawing {
             sessionKind: sessionKind,
             dominantZone: dominantZone,
             accent: accent,
-            y: heroY,
+            y: cursor,
             width: size.width,
             showHeroTitle: options.showHeroTitle,
             cg: cg
         )
+        cursor += heroHeight + gap
 
-        let summaryCardH: CGFloat = 220
+        drawRule(y: cursor, width: size.width, cg: cg)
+        cursor += gap
+
         let trainingCardH = trainingLoadCardHeight(
             options: options,
             whoopStrain: whoopStrain,
             whoopRecovery: whoopRecovery
         )
         let quickStatsH: CGFloat = 120
-        let bottomSafe: CGFloat = 40
-        let minSectionGap: CGFloat = 30
-
-        var sectionCount = 0
-        var contentH: CGFloat = 0
-        if options.showBottomStrip { sectionCount += 1; contentH += quickStatsH }
-        if options.showTrainingLoad { sectionCount += 1; contentH += trainingCardH }
-        if options.showSummaryCards { sectionCount += 1; contentH += summaryCardH }
-
-        let heroBottom: CGFloat = heroY + 48 + 300 + 190
-        let availableH = size.height - heroBottom - bottomSafe
-        let gaps = max(1, sectionCount)
-        let sectionGap = min(max(minSectionGap, (availableH - contentH) / CGFloat(gaps)), 80)
-
-        var cursor = heroBottom + sectionGap
+        let summaryH: CGFloat = 220
 
         if options.showBottomStrip {
+            let y = StoryCardLayout.place(cursor: &cursor, height: quickStatsH, gap: gap)
             drawQuickStatsRow(
                 workout: workout,
                 totalElevationGain: totalElevationGain,
                 options: options,
-                y: cursor,
+                y: y,
                 width: size.width,
                 cg: cg
             )
-            cursor += quickStatsH + sectionGap
         }
-
         if options.showTrainingLoad {
+            let y = StoryCardLayout.place(cursor: &cursor, height: trainingCardH, gap: gap)
             drawTrainingLoadCard(
                 workout: workout,
                 dominantZone: dominantZone,
                 accent: accent,
-                y: cursor,
+                y: y,
                 width: size.width,
                 height: trainingCardH,
                 options: options,
@@ -360,15 +360,14 @@ enum StoryCardDrawing {
                 whoopRecovery: whoopRecovery,
                 cg: cg
             )
-            cursor += trainingCardH + sectionGap
         }
-
         if options.showSummaryCards {
+            let y = StoryCardLayout.place(cursor: &cursor, height: summaryH, gap: gap)
             drawBottomSummaryCards(
                 workout: workout,
                 accent: accent,
                 options: options,
-                y: cursor,
+                y: y,
                 width: size.width,
                 cg: cg
             )
@@ -480,47 +479,63 @@ enum StoryCardDrawing {
         )
     }
 
-    private static func drawHeader(
-        brandTitle: String,
+    /// Quiet editorial top rule: thin hairline + small brand wordmark (left) + date (right).
+    /// Replaces the legacy accent-dot + chip header that could collide with motif panels.
+    /// Returns the section's measured height so the layout cursor can advance.
+    private static func drawTopRule(
+        brandWordmark: String,
         dateTitle: String,
-        accent: UIColor,
         y: CGFloat,
         width: CGFloat,
         cg: CGContext
-    ) {
-        let dividerY = y + 10
-        cg.setStrokeColor(StoryCardDesign.divider.cgColor)
+    ) -> CGFloat {
+        cg.setStrokeColor(StoryCardDesign.rule.cgColor)
         cg.setLineWidth(1)
-        cg.move(to: CGPoint(x: sidePad, y: dividerY))
-        cg.addLine(to: CGPoint(x: width - sidePad, y: dividerY))
+        cg.move(to: CGPoint(x: sidePad, y: y))
+        cg.addLine(to: CGPoint(x: width - sidePad, y: y))
         cg.strokePath()
 
-        let dotRect = CGRect(x: sidePad + 2, y: dividerY + 22, width: 18, height: 18)
-        let dotPath = UIBezierPath(ovalIn: dotRect)
-        accent.setFill()
-        dotPath.fill()
-
-        brandTitle.draw(
-            at: CGPoint(x: sidePad + 34, y: dividerY + 14),
-            withAttributes: [
-                .font: StoryCardFontToken.ui(size: 34, weight: .medium),
-                .foregroundColor: StoryCardDesign.textPrimary,
-                .kern: 2.2,
-            ]
-        )
+        let brandAttrs: [NSAttributedString.Key: Any] = [
+            .font: StoryCardFontToken.mono(size: 24, weight: .medium),
+            .foregroundColor: StoryCardDesign.textSecondary,
+            .kern: 2.4,
+        ]
+        brandWordmark.draw(at: CGPoint(x: sidePad, y: y + 20), withAttributes: brandAttrs)
 
         let dateAttrs: [NSAttributedString.Key: Any] = [
-            .font: StoryCardFontToken.mono(size: 28, weight: .medium),
+            .font: StoryCardFontToken.mono(size: 24, weight: .medium),
             .foregroundColor: StoryCardDesign.textQuiet,
-            .kern: 1.6,
+            .kern: 1.8,
         ]
         let dateSize = dateTitle.size(withAttributes: dateAttrs)
-        dateTitle.draw(
-            at: CGPoint(x: width - sidePad - dateSize.width, y: dividerY + 16),
-            withAttributes: dateAttrs
-        )
+        dateTitle.draw(at: CGPoint(x: width - sidePad - dateSize.width, y: y + 20), withAttributes: dateAttrs)
+
+        return 52
     }
 
+    /// Thin full-width hairline used as a section separator.
+    private static func drawRule(y: CGFloat, width: CGFloat, cg: CGContext) {
+        cg.setStrokeColor(StoryCardDesign.rule.cgColor)
+        cg.setLineWidth(1)
+        cg.move(to: CGPoint(x: sidePad, y: y))
+        cg.addLine(to: CGPoint(x: width - sidePad, y: y))
+        cg.strokePath()
+    }
+
+    /// Legacy header entry point retained while the alt templates migrate to ``drawTopRule``.
+    @discardableResult
+    private static func drawHeader(
+        brandTitle: String,
+        dateTitle: String,
+        y: CGFloat,
+        width: CGFloat,
+        cg: CGContext
+    ) -> CGFloat {
+        drawTopRule(brandWordmark: brandTitle, dateTitle: dateTitle, y: y, width: width, cg: cg)
+    }
+
+    /// Draws the hero (eyebrow + title + single distance hero + quiet moving time) and
+    /// returns the block's measured height so the layout cursor can advance without overlap.
     private static func drawHeroBlock(
         titleLines: [String],
         workout: Workout,
@@ -533,7 +548,10 @@ enum StoryCardDrawing {
         width: CGFloat,
         showHeroTitle: Bool,
         cg: CGContext
-    ) {
+    ) -> CGFloat {
+        let contentWidth = width - sidePad * 2
+        var cursor = y
+
         let eyebrow = heroEyebrowText(
             routeName: routeName,
             showRouteName: showRouteName,
@@ -543,99 +561,98 @@ enum StoryCardDrawing {
         let eyebrowAttrs = fittedAttributes(
             for: eyebrow,
             fontProvider: { StoryCardFontToken.mono(size: $0, weight: .medium) },
-            startingAt: 24,
+            startingAt: 22,
             minimum: 18,
-            maxWidth: width - sidePad * 2,
+            maxWidth: contentWidth,
             kern: 2.0
         )
-        truncatedText(eyebrow, attributes: eyebrowAttrs, maxWidth: width - sidePad * 2).draw(
-            at: CGPoint(x: sidePad, y: y),
+        truncatedText(eyebrow, attributes: eyebrowAttrs, maxWidth: contentWidth).draw(
+            at: CGPoint(x: sidePad, y: cursor),
             withAttributes: eyebrowAttrs
         )
+        cursor += 34
 
-        let titleRectY = y + 48
         if showHeroTitle {
             let firstLine = titleLines.first ?? ""
             let secondLine = titleLines.count > 1 ? titleLines[1] : ""
 
-            let titleWidth = width - sidePad * 2
             let firstAttrs = fittedAttributes(
                 for: firstLine,
                 fontProvider: { StoryCardFontToken.ui(size: $0, weight: .heavy) },
-                startingAt: 112,
-                minimum: 72,
-                maxWidth: titleWidth,
-                kern: -4.6,
+                startingAt: 104,
+                minimum: 68,
+                maxWidth: contentWidth,
+                kern: -4.0,
                 foregroundColor: StoryCardDesign.textPrimary
             )
-            truncatedText(firstLine, attributes: firstAttrs, maxWidth: titleWidth).draw(
-                at: CGPoint(x: sidePad, y: titleRectY),
+            truncatedText(firstLine, attributes: firstAttrs, maxWidth: contentWidth).draw(
+                at: CGPoint(x: sidePad, y: cursor),
                 withAttributes: firstAttrs
             )
+            let firstLineHeight = (firstAttrs[.font] as? UIFont)?.lineHeight ?? 104
+            cursor += firstLineHeight + 6
 
             if !secondLine.isEmpty {
                 let secondAttrs = fittedAttributes(
                     for: secondLine,
                     fontProvider: { StoryCardFontToken.ui(size: $0, weight: .heavy) },
-                    startingAt: 108,
-                    minimum: 68,
-                    maxWidth: titleWidth,
-                    kern: -4.6,
+                    startingAt: 100,
+                    minimum: 64,
+                    maxWidth: contentWidth,
+                    kern: -4.0,
                     foregroundColor: StoryCardDesign.textQuiet
                 )
-                truncatedText(secondLine, attributes: secondAttrs, maxWidth: titleWidth).draw(
-                    at: CGPoint(x: sidePad, y: titleRectY + 118),
+                truncatedText(secondLine, attributes: secondAttrs, maxWidth: contentWidth).draw(
+                    at: CGPoint(x: sidePad, y: cursor),
                     withAttributes: secondAttrs
                 )
+                let secondLineHeight = (secondAttrs[.font] as? UIFont)?.lineHeight ?? 100
+                cursor += secondLineHeight
             }
         }
 
-        let distanceValue = String(format: "%.1f", workout.distance / 1000)
-        let metricY = titleRectY + 300
+        // Single hero metric — distance is the focal point; moving time is a quiet secondary
+        // line below, not a competing 64pt number on the right.
+        cursor += showHeroTitle ? 36 : 12
 
+        let distanceValue = String(format: "%.1f", workout.distance / 1000)
         let distanceAttrs: [NSAttributedString.Key: Any] = [
-            .font: StoryCardFontToken.mono(size: 126, weight: .heavy),
+            .font: StoryCardFontToken.mono(size: 96, weight: .heavy),
             .foregroundColor: StoryCardDesign.textPrimary,
-            .kern: -4.6,
+            .kern: -3.6,
         ]
         let unitAttrs: [NSAttributedString.Key: Any] = [
-            .font: StoryCardFontToken.ui(size: 46, weight: .medium),
+            .font: StoryCardFontToken.ui(size: 34, weight: .medium),
             .foregroundColor: StoryCardDesign.textMuted,
         ]
-        let size = distanceValue.size(withAttributes: distanceAttrs)
-        distanceValue.draw(at: CGPoint(x: sidePad, y: metricY), withAttributes: distanceAttrs)
+        let distanceSize = distanceValue.size(withAttributes: distanceAttrs)
+        distanceValue.draw(at: CGPoint(x: sidePad, y: cursor), withAttributes: distanceAttrs)
         "km".draw(
-            at: CGPoint(x: sidePad + size.width + 8, y: metricY + 58),
+            at: CGPoint(x: sidePad + distanceSize.width + 10, y: cursor + 44),
             withAttributes: unitAttrs
         )
+        cursor += 104
 
         let movingTime = AppFormat.duration(workout.duration)
-        let movingAttrs: [NSAttributedString.Key: Any] = [
-            .font: StoryCardFontToken.mono(size: 64, weight: .bold),
-            .foregroundColor: StoryCardDesign.textPrimary,
-            .kern: -2.0,
+        let secondaryAttrs: [NSAttributedString.Key: Any] = [
+            .font: StoryCardFontToken.mono(size: 30, weight: .medium),
+            .foregroundColor: StoryCardDesign.textMuted,
+            .kern: 1.0,
         ]
-        let movingLabelAttrs: [NSAttributedString.Key: Any] = [
+        let labelAttrs: [NSAttributedString.Key: Any] = [
             .font: StoryCardFontToken.mono(size: 18, weight: .medium),
             .foregroundColor: StoryCardDesign.textQuiet,
-            .kern: 1.7,
+            .kern: 1.6,
         ]
-        let movingX = width - sidePad - 255
-        movingTime.draw(
-            at: CGPoint(x: movingX, y: metricY + 28),
-            withAttributes: movingAttrs
+        let secondarySize = movingTime.size(withAttributes: secondaryAttrs)
+        movingTime.draw(at: CGPoint(x: sidePad, y: cursor), withAttributes: secondaryAttrs)
+        "MOVING".draw(
+            at: CGPoint(x: sidePad + secondarySize.width + 14, y: cursor + 10),
+            withAttributes: labelAttrs
         )
-        "MOVING TIME".draw(
-            at: CGPoint(x: movingX + 18, y: metricY + 108),
-            withAttributes: movingLabelAttrs
-        )
+        cursor += 40
 
-        let dividerY = metricY + 190
-        cg.setStrokeColor(StoryCardDesign.divider.cgColor)
-        cg.setLineWidth(1)
-        cg.move(to: CGPoint(x: sidePad, y: dividerY))
-        cg.addLine(to: CGPoint(x: width - sidePad, y: dividerY))
-        cg.strokePath()
+        return cursor - y
     }
 
     private static func drawQuickStatsRow(
@@ -1017,12 +1034,12 @@ enum StoryCardDrawing {
         let path = UIBezierPath(roundedRect: rect, cornerRadius: cornerRadius)
         cg.saveGState()
         cg.setShadow(
-            offset: CGSize(width: 0, height: 20),
-            blur: 50,
+            offset: CGSize(width: 0, height: 12),
+            blur: 36,
             color: StoryCardDesign.panelShadow.cgColor
         )
         cg.addPath(path.cgPath)
-        cg.setFillColor(StoryCardDesign.canvasBackground.withAlphaComponent(0.12).cgColor)
+        cg.setFillColor(StoryCardDesign.canvasBackground.withAlphaComponent(0.10).cgColor)
         cg.fillPath()
         cg.restoreGState()
 
@@ -1185,28 +1202,56 @@ enum StoryCardDrawing {
         cg: CGContext
     ) {
         drawStyleMotif(options.visualStyle, accent: accent, size: size, date: workout.startDate, cg: cg)
+        let gap = StoryCardDesign.sectionGap
+        var cursor: CGFloat = options.visualStyle == .raceBib ? 278 : StoryCardDesign.topInset
+
         if options.showHeader {
-            drawHeader(
+            let headerHeight = drawHeader(
                 brandTitle: options.showBrandBadge ? "MANGOX" : "RIDE SHARE",
                 dateTitle: dateFormatter.string(from: workout.startDate).uppercased(),
-                accent: accent,
-                y: 100,
+                y: cursor,
+                width: size.width,
+                cg: cg
+            )
+            cursor += headerHeight + gap
+        }
+
+        eyebrow.draw(at: CGPoint(x: sidePad, y: cursor), withAttributes: templateEyebrowAttrs(accent: accent))
+        cursor += 42
+
+        let titleHeight = drawWrappedTitle(
+            title.uppercased(),
+            at: cursor,
+            width: size.width,
+            font: StoryCardFontToken.ui(size: 118, weight: .heavy),
+            maxHeight: 420
+        )
+        cursor += titleHeight + gap
+
+        let heroMetric = primaryTemplateMetric(workout: workout, template: options.template, personalRecordNames: personalRecordNames)
+        cursor += drawHugeMetric(
+            label: heroMetric.label,
+            value: heroMetric.value,
+            unit: heroMetric.unit,
+            y: cursor,
+            accent: accent,
+            width: size.width
+        ) + gap
+
+        if options.showBottomStrip {
+            let y = StoryCardLayout.place(cursor: &cursor, height: 120, gap: gap)
+            drawQuickStatsRow(
+                workout: workout,
+                totalElevationGain: totalElevationGain,
+                options: options,
+                y: y,
                 width: size.width,
                 cg: cg
             )
         }
-
-        eyebrow.draw(at: CGPoint(x: sidePad, y: 260), withAttributes: templateEyebrowAttrs(accent: accent))
-        drawWrappedTitle(title.uppercased(), in: CGRect(x: sidePad, y: 320, width: size.width - sidePad * 2, height: 440), fontSize: 118)
-
-        let heroMetric = primaryTemplateMetric(workout: workout, template: options.template, personalRecordNames: personalRecordNames)
-        drawHugeMetric(label: heroMetric.label, value: heroMetric.value, unit: heroMetric.unit, y: 820, accent: accent, width: size.width)
-
-        if options.showBottomStrip {
-            drawQuickStatsRow(workout: workout, totalElevationGain: totalElevationGain, options: options, y: 1220, width: size.width, cg: cg)
-        }
         if options.showSummaryCards {
-            drawBottomSummaryCards(workout: workout, accent: accent, options: options, y: 1410, width: size.width, cg: cg)
+            let y = StoryCardLayout.place(cursor: &cursor, height: 220, gap: gap)
+            drawBottomSummaryCards(workout: workout, accent: accent, options: options, y: y, width: size.width, cg: cg)
         }
     }
 
@@ -1221,21 +1266,51 @@ enum StoryCardDrawing {
         cg: CGContext
     ) {
         drawStyleMotif(options.visualStyle, accent: accent, size: size, date: workout.startDate, cg: cg)
-        let titleY: CGFloat = options.template == .photoFirst ? 1010 : 265
-        let panelY: CGFloat = options.template == .photoFirst ? 1320 : 1110
+        let gap = StoryCardDesign.sectionGap
+        var cursor: CGFloat = options.template == .photoFirst ? 940 : StoryCardDesign.topInset
 
-        eyebrow.draw(at: CGPoint(x: sidePad, y: titleY - 66), withAttributes: templateEyebrowAttrs(accent: accent))
-        drawWrappedTitle(
+        if options.showHeader {
+            let headerY = StoryCardDesign.topInset
+            let headerHeight = drawHeader(
+                brandTitle: options.showBrandBadge ? "MANGOX" : "RIDE SHARE",
+                dateTitle: dateFormatter.string(from: workout.startDate).uppercased(),
+                y: headerY,
+                width: size.width,
+                cg: cg
+            )
+            if options.template != .photoFirst {
+                cursor = headerY + headerHeight + gap
+            }
+        }
+
+        eyebrow.draw(at: CGPoint(x: sidePad, y: cursor), withAttributes: templateEyebrowAttrs(accent: accent))
+        cursor += 42
+        let titleHeight = drawWrappedTitle(
             title.uppercased(),
-            in: CGRect(x: sidePad, y: titleY, width: size.width - sidePad * 2, height: 330),
-            fontSize: options.template == .minimalDark ? 86 : 104
+            at: cursor,
+            width: size.width,
+            font: StoryCardFontToken.ui(
+                size: options.template == .minimalDark ? 86 : 104,
+                weight: .heavy
+            ),
+            maxHeight: 330
         )
+        cursor += titleHeight + gap
 
         if options.showBottomStrip {
-            drawQuickStatsRow(workout: workout, totalElevationGain: totalElevationGain, options: options, y: panelY, width: size.width, cg: cg)
+            let y = StoryCardLayout.place(cursor: &cursor, height: 120, gap: gap)
+            drawQuickStatsRow(
+                workout: workout,
+                totalElevationGain: totalElevationGain,
+                options: options,
+                y: y,
+                width: size.width,
+                cg: cg
+            )
         }
         if options.showSummaryCards {
-            drawBottomSummaryCards(workout: workout, accent: accent, options: options, y: panelY + 170, width: size.width, cg: cg)
+            let y = StoryCardLayout.place(cursor: &cursor, height: 220, gap: gap)
+            drawBottomSummaryCards(workout: workout, accent: accent, options: options, y: y, width: size.width, cg: cg)
         }
     }
 
@@ -1253,24 +1328,49 @@ enum StoryCardDrawing {
         cg: CGContext
     ) {
         drawStyleMotif(options.visualStyle, accent: accent, size: size, date: workout.startDate, cg: cg)
-        eyebrow.draw(at: CGPoint(x: sidePad, y: 190), withAttributes: templateEyebrowAttrs(accent: accent))
-        drawWrappedTitle(title.uppercased(), in: CGRect(x: sidePad, y: 250, width: size.width - sidePad * 2, height: 300), fontSize: 96)
-        drawHugeMetric(
+        let gap = StoryCardDesign.sectionGap
+        var cursor = StoryCardDesign.topInset
+
+        if options.showHeader {
+            let headerHeight = drawHeader(
+                brandTitle: options.showBrandBadge ? "MANGOX" : "RIDE SHARE",
+                dateTitle: dateFormatter.string(from: workout.startDate).uppercased(),
+                y: cursor,
+                width: size.width,
+                cg: cg
+            )
+            cursor += headerHeight + gap
+        }
+
+        eyebrow.draw(at: CGPoint(x: sidePad, y: cursor), withAttributes: templateEyebrowAttrs(accent: accent))
+        cursor += 42
+        let titleHeight = drawWrappedTitle(
+            title.uppercased(),
+            at: cursor,
+            width: size.width,
+            font: StoryCardFontToken.ui(size: 96, weight: .heavy),
+            maxHeight: 300
+        )
+        cursor += titleHeight + gap
+        cursor += drawHugeMetric(
             label: options.privacyHidePower ? "MOVING TIME" : "NORMALIZED POWER",
             value: options.privacyHidePower ? AppFormat.duration(workout.duration) : metricText(Int(workout.normalizedPower.rounded()), fallback: "—"),
             unit: options.privacyHidePower ? "" : "w",
-            y: 640,
+            y: cursor,
             accent: accent,
             width: size.width
-        )
+        ) + gap
+
         if options.showTrainingLoad {
+            let height = trainingLoadCardHeight(options: options, whoopStrain: whoopStrain, whoopRecovery: whoopRecovery)
+            let y = StoryCardLayout.place(cursor: &cursor, height: height, gap: gap)
             drawTrainingLoadCard(
                 workout: workout,
                 dominantZone: dominantZone,
                 accent: accent,
-                y: 965,
+                y: y,
                 width: size.width,
-                height: trainingLoadCardHeight(options: options, whoopStrain: whoopStrain, whoopRecovery: whoopRecovery),
+                height: height,
                 options: options,
                 whoopStrain: whoopStrain,
                 whoopRecovery: whoopRecovery,
@@ -1278,10 +1378,19 @@ enum StoryCardDrawing {
             )
         }
         if options.showBottomStrip {
-            drawQuickStatsRow(workout: workout, totalElevationGain: totalElevationGain, options: options, y: 1335, width: size.width, cg: cg)
+            let y = StoryCardLayout.place(cursor: &cursor, height: 120, gap: gap)
+            drawQuickStatsRow(
+                workout: workout,
+                totalElevationGain: totalElevationGain,
+                options: options,
+                y: y,
+                width: size.width,
+                cg: cg
+            )
         }
         if options.showSummaryCards {
-            drawBottomSummaryCards(workout: workout, accent: accent, options: options, y: 1515, width: size.width, cg: cg)
+            let y = StoryCardLayout.place(cursor: &cursor, height: 220, gap: gap)
+            drawBottomSummaryCards(workout: workout, accent: accent, options: options, y: y, width: size.width, cg: cg)
         }
     }
 
@@ -1355,19 +1464,40 @@ enum StoryCardDrawing {
         cg.restoreGState()
     }
 
-    private static func drawWrappedTitle(_ title: String, in rect: CGRect, fontSize: CGFloat) {
+    @discardableResult
+    private static func drawWrappedTitle(
+        _ title: String,
+        at y: CGFloat,
+        width: CGFloat,
+        font: UIFont,
+        maxHeight: CGFloat
+    ) -> CGFloat {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineHeightMultiple = 0.86
         paragraph.lineBreakMode = .byWordWrapping
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: StoryCardFontToken.ui(size: fontSize, weight: .heavy),
+            .font: font,
             .foregroundColor: StoryCardDesign.textPrimary,
             .paragraphStyle: paragraph,
         ]
+        let measuredHeight = min(
+            StoryCardLayout.wrappedTextHeight(title, font: font, maxWidth: width - sidePad * 2),
+            maxHeight
+        )
+        let rect = CGRect(x: sidePad, y: y, width: width - sidePad * 2, height: measuredHeight)
         title.draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attrs, context: nil)
+        return measuredHeight
     }
 
-    private static func drawHugeMetric(label: String, value: String, unit: String, y: CGFloat, accent: UIColor, width: CGFloat) {
+    @discardableResult
+    private static func drawHugeMetric(
+        label: String,
+        value: String,
+        unit: String,
+        y: CGFloat,
+        accent: UIColor,
+        width: CGFloat
+    ) -> CGFloat {
         label.draw(at: CGPoint(x: sidePad, y: y), withAttributes: templateEyebrowAttrs(accent: accent))
         let maxValueWidth = width - sidePad * 2 - (unit.isEmpty ? 0 : 150)
         let fontSize = StoryCardPrimitives.fittingFontSize(
@@ -1392,6 +1522,7 @@ enum StoryCardDrawing {
                 ]
             )
         }
+        return 48 + max(valueSize.height, fontSize * 0.62 + 58)
     }
 
     private static func fittedAttributes(
